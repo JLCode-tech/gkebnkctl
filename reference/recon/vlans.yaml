@@ -1,0 +1,109 @@
+apiVersion: v1
+items:
+- apiVersion: k8s.f5net.com/v1
+  kind: F5SPKVlan
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"k8s.f5net.com/v1","kind":"F5SPKVlan","metadata":{"annotations":{},"name":"external","namespace":"f5-bnk"},"spec":{"active_interface":"","allowed_services":[],"auto_lasthop":"AUTO_LASTHOP_DEFAULT","bonded":false,"category":"external","cmp_hash":"DEFAULT","interfaces":["1.1"],"internal":false,"mtu":1460,"name":"external","pod_hash":"DISABLED","prefixlen_v4":16,"prefixlen_v6":120,"selfip_v4s":["10.31.0.18"],"selfip_v6s":[],"tag":0,"trunk_hash":"src-dst-ipport","vrf":""}}
+    creationTimestamp: "2026-07-13T21:33:35Z"
+    finalizers:
+    - handletmmconfig_inconsistency
+    generation: 5
+    name: external
+    namespace: f5-bnk
+    resourceVersion: "1784311449794207000"
+    uid: 85313c01-a547-4dfc-b4b3-65e4eb9ba8e8
+  spec:
+    active_interface: ""
+    allowed_services:
+    - port: ""
+      protocol: "1"
+    - port: "5789"
+      protocol: udp
+    auto_lasthop: AUTO_LASTHOP_DEFAULT
+    bonded: false
+    category: external
+    cmp_hash: DEFAULT
+    interfaces:
+    - "1.1"
+    internal: true
+    mtu: 1460
+    name: external
+    pod_hash: DISABLED
+    prefixlen_v4: 16
+    prefixlen_v6: 120
+    selfip_v4s:
+    - 10.31.0.18
+    selfip_v6s: []
+    tag: 0
+    trunk_hash: src-dst-ipport
+    vrf: ""
+  status:
+    conditions:
+    - lastTransitionTime: "2026-07-13T21:33:35Z"
+      message: ""
+      observedGeneration: 0
+      reason: Accepted
+      status: "True"
+      type: Accepted
+    - lastTransitionTime: "2026-07-17T18:04:09Z"
+      message: CR config sent to all grpc endpoints
+      observedGeneration: 38
+      reason: Programmed
+      status: "True"
+      type: Programmed
+    generationId: 0
+- apiVersion: k8s.f5net.com/v1
+  kind: F5SPKVlan
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"k8s.f5net.com/v1","kind":"F5SPKVlan","metadata":{"annotations":{},"name":"internal","namespace":"f5-bnk"},"spec":{"active_interface":"","allowed_services":[],"auto_lasthop":"AUTO_LASTHOP_DEFAULT","bonded":false,"category":"external","cmp_hash":"DEFAULT","interfaces":["1.2"],"internal":true,"mtu":1460,"name":"internal","pod_hash":"DISABLED","prefixlen_v4":16,"prefixlen_v6":120,"selfip_v4s":["10.51.0.18"],"selfip_v6s":[],"tag":0,"trunk_hash":"src-dst-ipport","vrf":""}}
+    creationTimestamp: "2026-07-13T21:33:36Z"
+    finalizers:
+    - handletmmconfig_inconsistency
+    generation: 2
+    name: internal
+    namespace: f5-bnk
+    resourceVersion: "1784311448136479002"
+    uid: 477e379b-01c5-4aac-abe8-e8f5bd26d6a4
+  spec:
+    active_interface: ""
+    allowed_services: []
+    auto_lasthop: AUTO_LASTHOP_DEFAULT
+    bonded: false
+    category: external
+    cmp_hash: DEFAULT
+    interfaces:
+    - "1.2"
+    internal: false
+    mtu: 1460
+    name: internal
+    pod_hash: DISABLED
+    prefixlen_v4: 16
+    prefixlen_v6: 120
+    selfip_v4s:
+    - 10.51.0.18
+    selfip_v6s: []
+    tag: 0
+    trunk_hash: src-dst-ipport
+    vrf: ""
+  status:
+    conditions:
+    - lastTransitionTime: "2026-07-13T21:33:36Z"
+      message: ""
+      observedGeneration: 0
+      reason: Accepted
+      status: "True"
+      type: Accepted
+    - lastTransitionTime: "2026-07-17T18:04:08Z"
+      message: CR config sent to all grpc endpoints
+      observedGeneration: 32
+      reason: Programmed
+      status: "True"
+      type: Programmed
+    generationId: 0
+kind: List
+metadata:
+  resourceVersion: ""
