@@ -1,6 +1,7 @@
 package gcp
 
 import (
+	"context"
 	"testing"
 
 	"k8s.io/client-go/rest"
@@ -32,10 +33,18 @@ func TestNewClients_EmptyProject(t *testing.T) {
 	}
 }
 
-func TestClients_AttachK8s_NotImplementedStub(t *testing.T) {
+func TestClients_AttachK8s_NilGKEClientErrors(t *testing.T) {
 	c := &Clients{}
-	err := c.AttachK8s(nil, "bnk-hostdev", "us-central1-a") //nolint:staticcheck // stub never uses ctx
+	err := c.AttachK8s(context.Background(), "bnk-hostdev", "us-central1-a")
 	if err == nil {
-		t.Fatal("expected AttachK8s stub to return an error (not implemented until Task B), got nil")
+		t.Fatal("expected AttachK8s to error when Clients.GKE is nil, got nil")
 	}
 }
+
+// Note: AttachK8s's success path additionally calls BuildRESTConfig, which
+// requires Application Default Credentials (google.DefaultTokenSource) —
+// that path is exercised live, not unit-tested here, matching the ADC
+// boundary documented in docs/SPEC-go-tracer.md §5/§9.
+// attachK8sFromConfig (the ADC-free half) is covered by
+// TestAttachK8sFromConfig above; the nil-GKE guard is covered by
+// TestClients_AttachK8s_NilGKEClientErrors.

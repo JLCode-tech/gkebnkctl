@@ -81,10 +81,16 @@ func withCWD(t *testing.T, dir string) {
 	})
 }
 
+// GKEBNKCTL_SKIP_AUTH=1 is the CI/test hook (see buildGCPClients) that lets
+// --dry-run run end-to-end without live GCP credentials: Phase00 receives a
+// nil *gcp.Clients and skips its ADC/API checks, and every other real phase
+// never touches clients in its dry-run branch.
+
 func TestRunPhasedUp_DryRun_NoStateFileWritten(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTestCluster(t, dir)
 	withCWD(t, dir)
+	t.Setenv("GKEBNKCTL_SKIP_AUTH", "1")
 
 	if err := runPhasedUp(context.Background(), path, true); err != nil {
 		t.Fatalf("runPhasedUp(dryRun=true): unexpected error: %v", err)
@@ -94,10 +100,11 @@ func TestRunPhasedUp_DryRun_NoStateFileWritten(t *testing.T) {
 	}
 }
 
-func TestRunPhasedUp_PrintsAllPhaseStubs(t *testing.T) {
+func TestRunPhasedUp_PrintsAllPhaseStubsAndRealPhaseBanners(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTestCluster(t, dir)
 	withCWD(t, dir)
+	t.Setenv("GKEBNKCTL_SKIP_AUTH", "1")
 
 	stderr := captureStderr(t, func() {
 		if err := runPhasedUp(context.Background(), path, true); err != nil {
@@ -105,26 +112,38 @@ func TestRunPhasedUp_PrintsAllPhaseStubs(t *testing.T) {
 		}
 	})
 	for _, p := range upPhases {
+		if _, isReal := realUpPhases[p.num]; isReal {
+			want := "[phase " + p.num + "]"
+			if !strings.Contains(stderr, want) {
+				t.Errorf("stderr missing real-phase banner %q\nfull output:\n%s", want, stderr)
+			}
+			continue
+		}
 		want := "[phase " + p.num + "] " + p.name + " (stub)"
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr missing phase banner %q\nfull output:\n%s", want, stderr)
 		}
 	}
 	if !strings.Contains(stderr, "needs live cluster") {
-		t.Error("stderr missing \"needs live cluster\" annotation for discovery-dependent phases")
+		t.Error("stderr missing \"needs live cluster\" annotation for discovery-dependent stub phases")
 	}
 }
 
-func TestRunPhasedUp_NonDryRun_WritesState(t *testing.T) {
+func TestRunPhasedUp_NonDryRun_SkipAuthWithoutDryRunErrors(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTestCluster(t, dir)
 	withCWD(t, dir)
+	t.Setenv("GKEBNKCTL_SKIP_AUTH", "1")
 
-	if err := runPhasedUp(context.Background(), path, false); err != nil {
-		t.Fatalf("runPhasedUp(dryRun=false): unexpected error: %v", err)
+	err := runPhasedUp(context.Background(), path, false)
+	if err == nil {
+		t.Fatal("expected an error combining GKEBNKCTL_SKIP_AUTH=1 with a non-dry-run up, got nil")
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".gkebnkctl", "bnk-hostdev", "state.env")); err != nil {
-		t.Errorf("expected state.env to exist after non-dry-run up, stat err = %v", err)
+	if !strings.Contains(err.Error(), "only valid together with --dry-run") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, ".gkebnkctl")); !os.IsNotExist(statErr) {
+		t.Errorf("rejected non-dry-run run created .gkebnkctl state dir (stat err = %v); expected none", statErr)
 	}
 }
 

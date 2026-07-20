@@ -11,6 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
+	"github.com/JLCode-tech/gkebnkctl/internal/gcp/phases"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 )
@@ -44,10 +46,11 @@ StaticRoutes, TMM settle, egress).
 When --dry-run is set, every phase prints its planned actions and makes zero
 GCP mutations.
 
-This scaffold build (Task A) has every phase stubbed — real provisioning
-lands in Task B (networks/cluster/discover) and Task C/D (BNK install +
-egress). GKEBNKCTL_SKIP_AUTH=1 is honored as a preflight hook so CI can run
---dry-run without live GCP credentials once Phase00 does real ADC checks.`,
+Phases 00 (preflight), 10 (networks), 20 (cluster), 25 (discover) are real —
+see internal/gcp/phases. Phases 30-50 (the BNK install + egress) remain
+stubs pending Task C/D. GKEBNKCTL_SKIP_AUTH=1 skips Phase00's ADC + API-
+enabled checks entirely (passing a nil *gcp.Clients through every real
+phase) so CI can run --dry-run without live GCP credentials.`,
 	RunE: runUp,
 }
 
@@ -92,34 +95,25 @@ func runDown(cmd *cobra.Command, _ []string) error {
 	return runPhasedDown(cmd.Context(), flagConfig, flagYes, flagDownDryRun)
 }
 
-// upPhase describes one entry in the up phase graph. Every phase in Task A
-// is a stub — real implementations land in Task B (00/10/20/25 + down),
-// Task C (30-42), and Task D (50). The struct/table shape here is the seam
-// those tasks wire real functions into (replacing runStubPhase's generic
-// print with a call to phases.PhaseNN(...)).
+// upPhase describes one entry in the up phase graph. 00/10/20/25 dispatch to
+// real internal/gcp/phases functions (Task B); 30-50 remain stubs pending
+// Task C (BNK install) and Task D (egress).
 type upPhase struct {
 	num  string
 	name string
 	// needsLiveCluster phases (per docs/SPEC-go-tracer.md §6) render against
-	// discovered state that only exists once the cluster is up; dry-run
-	// prints "needs live cluster" instead of attempting real work.
+	// discovered state that only exists once the cluster is up; the stub
+	// path prints "needs live cluster" instead of attempting real work.
+	// Only meaningful for the still-stubbed phases (35, 38, 41, 50) — the
+	// real Phase25Discover phase prints its own dry-run note directly.
 	needsLiveCluster bool
-	// stateKeys are the discovered-state placeholders this phase sets during
-	// dry-run so downstream render calls in later phases don't nil-panic
-	// once those phases are real (Task C). Only Phase25 sets these today —
-	// see docs/SPEC-go-tracer.md §3 Phase25 state keys.
-	stateKeys []string
 }
 
 var upPhases = []upPhase{
 	{num: "00", name: "preflight"},
 	{num: "10", name: "networks"},
 	{num: "20", name: "cluster"},
-	{num: "25", name: "discover", needsLiveCluster: true, stateKeys: []string{
-		"TMM_EXT_IFACE", "TMM_EXT_PCI", "TMM_INT_IFACE", "TMM_INT_PCI",
-		"TMM_EXT_ALIAS_CIDR", "TMM_INT_ALIAS_CIDR", "TMM_EXT_SELFIP", "TMM_INT_SELFIP",
-		"TMM_POD_CIDR", "TMM_POD_GW", "AGENT_EXT_IFACE", "TMM_NODE_NAME", "AGENT_NODE_NAME",
-	}},
+	{num: "25", name: "discover"},
 	{num: "30", name: "namespaces"},
 	{num: "31", name: "cert-manager"},
 	{num: "32", name: "issuers"},
@@ -136,12 +130,29 @@ var upPhases = []upPhase{
 	{num: "50", name: "egress", needsLiveCluster: true},
 }
 
+// realUpPhases dispatches the phase numbers Task B implemented for real to
+// their internal/gcp/phases function. Every other phase in upPhases falls
+// through to runStubPhase.
+var realUpPhases = map[string]func(ctx context.Context, cl *intent.Cluster, st *state.State, clients *gcp.Clients, dryRun bool) error{
+	"00": phases.Phase00Preflight,
+	"10": phases.Phase10Networks,
+	"20": phases.Phase20Cluster,
+	"25": phases.Phase25Discover,
+}
+
 // runPhasedUp is the Go-SDK phased provisioning path activated by
-// `gkebnkctl up -f <file>`. Task A: every phase is a stub — see upPhases.
+// `gkebnkctl up -f <file>`. Phases 00/10/20/25 (see realUpPhases) call real
+// internal/gcp/phases functions; 30-50 remain stubs pending Task C/D.
 //
 // When dryRun is true, state.MarkReadOnly() is called immediately after
 // Load so any placeholder state phases Set during the run never persists to
 // the real state.env on disk (docs/SPEC-go-tracer.md §6).
+//
+// GCP clients are constructed once, up front, and threaded through every
+// real phase — UNLESS GKEBNKCTL_SKIP_AUTH=1, in which case a nil
+// *gcp.Clients is passed instead (only valid together with --dry-run; every
+// real phase either ignores clients in its dry-run branch or, for Phase00,
+// checks for nil and skips its own checks — see phases.Phase00Preflight).
 func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 	cl, err := intent.Load(configPath)
 	if err != nil {
@@ -157,9 +168,19 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 		fmt.Fprintln(os.Stderr, "→ dry-run: printing plan, no GCP mutations will be made")
 	}
 
-	skipAuth := os.Getenv("GKEBNKCTL_SKIP_AUTH") == "1"
+	gcl, err := buildGCPClients(ctx, cl, dryRun)
+	if err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+
 	for _, p := range upPhases {
-		runStubPhase(ctx, p, st, skipAuth)
+		if fn, ok := realUpPhases[p.num]; ok {
+			if err := fn(ctx, cl, st, gcl, dryRun); err != nil {
+				return fmt.Errorf("up: %w", err)
+			}
+			continue
+		}
+		runStubPhase(p)
 	}
 
 	if !dryRun {
@@ -172,31 +193,33 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 		fmt.Fprintln(os.Stderr, "→ dry-run complete")
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "✓ stub plan complete: cluster=%s state=%s (every phase is a stub — see docs/SPEC-go-tracer.md §8 Task B/C/D)\n",
+	fmt.Fprintf(os.Stderr, "✓ up complete: cluster=%s state=%s (phases 30-50 are stubs — see docs/SPEC-go-tracer.md §8 Task C/D)\n",
 		cl.Metadata.Name, cl.StateDir())
 	return nil
 }
 
-// runStubPhase prints the `[phase NN] <name> (stub)` banner every Task A
-// phase produces, plus annotations for the preflight-auth hook (Phase00) and
-// discovery-dependent phases (needsLiveCluster / stateKeys). ctx is accepted
-// (and currently unused) so the signature already matches the real
-// `phases.PhaseNN(ctx, cl, st, clients, dryRun)` shape Task B/C/D wire in.
-func runStubPhase(_ context.Context, p upPhase, st *state.State, skipAuth bool) {
-	var notes []string
-	if p.num == "00" {
-		if skipAuth {
-			notes = append(notes, "GKEBNKCTL_SKIP_AUTH=1: ADC check will be skipped once Task B wires the real preflight")
-		} else {
-			notes = append(notes, "real preflight (ADC + compute/container API-enabled checks) lands in Task B")
-		}
+// buildGCPClients constructs the real *gcp.Clients bundle used by
+// realUpPhases/PhaseDown*, UNLESS GKEBNKCTL_SKIP_AUTH=1 — the CI/test hook
+// that lets --dry-run run without live GCP credentials (Phase00 and every
+// other real phase's dry-run branch tolerate a nil *gcp.Clients). The hook
+// is rejected outside --dry-run: a live (mutating) run must have real
+// clients, or every real phase would nil-pointer-deref.
+func buildGCPClients(ctx context.Context, cl *intent.Cluster, dryRun bool) (*gcp.Clients, error) {
+	if os.Getenv("GKEBNKCTL_SKIP_AUTH") != "1" {
+		return gcp.NewClients(ctx, cl.Metadata.Project)
 	}
-	if len(p.stateKeys) > 0 {
-		for _, k := range p.stateKeys {
-			st.Set(k, "dry-run-"+strings.ToLower(k))
-		}
-		notes = append(notes, "needs live cluster; set placeholder discovered state")
-	} else if p.needsLiveCluster {
+	if !dryRun {
+		return nil, errors.New("GKEBNKCTL_SKIP_AUTH=1 is only valid together with --dry-run")
+	}
+	return nil, nil
+}
+
+// runStubPhase prints the `[phase NN] <name> (stub)` banner for the phases
+// Task C/D still owns (30-50), plus a "needs live cluster" annotation for
+// the ones that render against Phase25's discovered state.
+func runStubPhase(p upPhase) {
+	var notes []string
+	if p.needsLiveCluster {
 		notes = append(notes, "needs live cluster")
 	}
 
@@ -227,11 +250,12 @@ func confirmDestroy(in io.Reader, out io.Writer, name, project, zone string) boo
 // `gkebnkctl down -f <file>`. Teardown is deliberately asymmetric (mirrors
 // bash bin/90-teardown.sh, see docs/SPEC-go-tracer.md §3 "Down phases"):
 // only the cluster and the cluster-OWNED main VPC are deleted. The shared
-// dataplane VPCs (network.external/network.internal) are never referenced.
+// dataplane VPCs (network.external/network.internal) are never referenced —
+// PhaseDownNetworks does not even accept their names as arguments.
 //
 // When dryRun is true, printDownPlan runs and the function returns WITHOUT
 // invoking any teardown step or prompting — guaranteeing zero GCP mutations.
-func runPhasedDown(_ context.Context, configPath string, yes, dryRun bool) error {
+func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) error {
 	cl, err := intent.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("down: %w", err)
@@ -251,20 +275,38 @@ func runPhasedDown(_ context.Context, configPath string, yes, dryRun bool) error
 		return nil
 	}
 
-	fmt.Fprintln(os.Stderr, "[down] cluster (stub) — DeleteCluster lands in Task B (PhaseDownCluster)")
-	fmt.Fprintln(os.Stderr, "[down] main-vpc (stub) — firewall -> subnet -> vpc teardown lands in Task B (PhaseDownNetworks)")
+	gcl, err := buildGCPClients(ctx, cl, dryRun)
+	if err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+
+	if err := phases.PhaseDownCluster(ctx, cl, st, gcl); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.PhaseDownNetworks(ctx, cl, st, gcl); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
 	fmt.Fprintf(os.Stderr, "→ shared dataplane VPCs %s/%s are NEVER deleted by teardown.\n",
 		cl.Network.External.VPC, cl.Network.Internal.VPC)
 
-	// Task A has no discovered state to clear yet (every phase is a stub);
-	// Save is still exercised so the state-dir lifecycle is proven end to
-	// end ahead of Task B wiring real Set/Clear calls here.
+	for _, k := range discoveredStateKeysToClear {
+		st.Set(k, "")
+	}
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("down: saving state: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "✓ stub teardown complete: cluster=%s (every phase is a stub — see docs/SPEC-go-tracer.md §8 Task B)\n",
-		cl.Metadata.Name)
+	fmt.Fprintf(os.Stderr, "✓ down complete: cluster=%s\n", cl.Metadata.Name)
 	return nil
+}
+
+// discoveredStateKeysToClear are the Phase25-discovered state.env keys
+// cleared after a successful down, per docs/SPEC-go-tracer.md §3 "Down
+// phases" ("Clear discovered.* state keys").
+var discoveredStateKeysToClear = []string{
+	"TMM_NODE_NAME", "AGENT_NODE_NAME",
+	"TMM_EXT_IFACE", "TMM_EXT_PCI", "TMM_INT_IFACE", "TMM_INT_PCI",
+	"TMM_EXT_ALIAS_CIDR", "TMM_INT_ALIAS_CIDR", "TMM_EXT_SELFIP", "TMM_INT_SELFIP",
+	"TMM_POD_CIDR", "TMM_POD_GW", "AGENT_EXT_IFACE",
 }
 
 // printDownPlan renders the destroy plan for `gkebnkctl down --dry-run`. It

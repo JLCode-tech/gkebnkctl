@@ -14,6 +14,7 @@ import (
 	container "cloud.google.com/go/container/apiv1"
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
 	gax "github.com/googleapis/gax-go/v2"
+	serviceusage "google.golang.org/api/serviceusage/v1"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/discovery"
@@ -46,9 +47,13 @@ type FirewallsAPI interface {
 
 // RoutersAPI is the subset of compute.RoutersClient used by Phase10 (Cloud
 // Router + NAT). Insert tolerates a 403 compute.routers.create per spec §9.5.
+// Patch is used to add a NAT to a router that already exists but has no NAT
+// yet (the router-exists/NAT-missing case bash's net::create_nat also
+// handles) — added in Task B since Insert alone cannot cover that case.
 type RoutersAPI interface {
 	Insert(ctx context.Context, req *computepb.InsertRouterRequest, opts ...gax.CallOption) (*compute.Operation, error)
 	Get(ctx context.Context, req *computepb.GetRouterRequest, opts ...gax.CallOption) (*computepb.Router, error)
+	Patch(ctx context.Context, req *computepb.PatchRouterRequest, opts ...gax.CallOption) (*compute.Operation, error)
 	Delete(ctx context.Context, req *computepb.DeleteRouterRequest, opts ...gax.CallOption) (*compute.Operation, error)
 }
 
@@ -56,6 +61,21 @@ type RoutersAPI interface {
 // (iface/MAC/PCI discovery via NetworkInterfaces + AliasIpRanges).
 type InstancesAPI interface {
 	Get(ctx context.Context, req *computepb.GetInstanceRequest, opts ...gax.CallOption) (*computepb.Instance, error)
+}
+
+// RegionsAPI is the subset of compute.RegionsClient used by Phase00's
+// best-effort quota check (CPUS / IN_USE_ADDRESSES headroom, warn-only).
+type RegionsAPI interface {
+	Get(ctx context.Context, req *computepb.GetRegionRequest, opts ...gax.CallOption) (*computepb.Region, error)
+}
+
+// ServiceUsageAPI is the subset of the serviceusage v1 REST client used by
+// Phase00 to check compute.googleapis.com / container.googleapis.com are
+// enabled on the target project. Narrow interface over
+// *serviceusage.Service so Phase00 can be unit-tested without a live API
+// call (see docs/SPEC-go-tracer.md §7).
+type ServiceUsageAPI interface {
+	GetService(ctx context.Context, name string) (*serviceusage.GoogleApiServiceusageV1Service, error)
 }
 
 // GKEAPI is the subset of container.ClusterManagerClient used by Phase20 +
@@ -74,13 +94,15 @@ type GKEAPI interface {
 // clients needed by phases. Later tasks add fields here without changing
 // existing phase signatures.
 type Clients struct {
-	Networks    NetworksAPI
-	Subnetworks SubnetworksAPI
-	Firewalls   FirewallsAPI
-	Routers     RoutersAPI
-	Instances   InstancesAPI
-	GKE         GKEAPI
-	Project     string
+	Networks     NetworksAPI
+	Subnetworks  SubnetworksAPI
+	Firewalls    FirewallsAPI
+	Routers      RoutersAPI
+	Instances    InstancesAPI
+	GKE          GKEAPI
+	Regions      RegionsAPI
+	ServiceUsage ServiceUsageAPI
+	Project      string
 
 	// K8s is the typed Kubernetes client used by the BNK-install phases
 	// (Task C). Nil until AttachK8s is called (after Phase20 — the GKE
@@ -124,33 +146,62 @@ func NewClients(ctx context.Context, project string) (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gcp: instances client: %w", err)
 	}
+	regions, err := compute.NewRegionsRESTClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gcp: regions client: %w", err)
+	}
 	gke, err := container.NewClusterManagerClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("gcp: cluster manager client: %w", err)
 	}
+	su, err := serviceusage.NewService(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gcp: serviceusage client: %w", err)
+	}
 
 	return &Clients{
-		Networks:    networks,
-		Subnetworks: subnetworks,
-		Firewalls:   firewalls,
-		Routers:     routers,
-		Instances:   instances,
-		GKE:         gke,
-		Project:     project,
+		Networks:     networks,
+		Subnetworks:  subnetworks,
+		Firewalls:    firewalls,
+		Routers:      routers,
+		Instances:    instances,
+		Regions:      regions,
+		GKE:          gke,
+		ServiceUsage: &realServiceUsage{svc: su},
+		Project:      project,
 	}, nil
+}
+
+// realServiceUsage adapts *serviceusage.Service to ServiceUsageAPI.
+type realServiceUsage struct {
+	svc *serviceusage.Service
+}
+
+func (r *realServiceUsage) GetService(ctx context.Context, name string) (*serviceusage.GoogleApiServiceusageV1Service, error) {
+	return r.svc.Services.Get(name).Context(ctx).Do()
 }
 
 // AttachK8s builds a typed kubernetes.Interface, a dynamic.Interface, and a
 // live RESTMapper from a rest.Config built by BuildRESTConfig (auth.go) for
 // clusterName/zone. Called by the up orchestrator AFTER the GKE cluster is
 // RUNNING (i.e. after Phase20).
-//
-// Task A stub: real cluster-descriptor plumbing (GKE GetCluster ->
-// BuildRESTConfig -> this) lands in Task B alongside Phase20. Wired here now,
-// with the real client-construction helper (attachK8sFromConfig) already in
-// place, so the seam is append-only for Task B.
-func (c *Clients) AttachK8s(_ context.Context, clusterName, zone string) error {
-	return fmt.Errorf("gcp: AttachK8s(%s, %s): not implemented (lands in Task B alongside Phase20)", clusterName, zone)
+func (c *Clients) AttachK8s(ctx context.Context, clusterName, zone string) error {
+	if c.GKE == nil {
+		return fmt.Errorf("gcp: AttachK8s(%s, %s): Clients.GKE is nil", clusterName, zone)
+	}
+	cluster, err := c.GKE.GetCluster(ctx, &containerpb.GetClusterRequest{
+		ProjectId: c.Project,
+		Zone:      zone,
+		ClusterId: clusterName,
+	})
+	if err != nil {
+		return fmt.Errorf("gcp: AttachK8s(%s, %s): GetCluster: %w", clusterName, zone, err)
+	}
+	cfg, err := BuildRESTConfig(ctx, cluster)
+	if err != nil {
+		return fmt.Errorf("gcp: AttachK8s(%s, %s): %w", clusterName, zone, err)
+	}
+	return attachK8sFromConfig(c, cfg)
 }
 
 // attachK8sFromConfig builds the typed/dynamic/RESTMapper trio from an
