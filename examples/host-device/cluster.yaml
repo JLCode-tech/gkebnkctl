@@ -1,0 +1,112 @@
+# gkebnkctl cluster.yaml — bnk-hostdev trial values, proven live 2026-07-20.
+# See reference/bash-seed/cluster.yaml.example (the bash-seed template this
+# was ported from) and reference/TRIAL-NOTES.md for the full contract this
+# encodes. This file is committed as a working example for `validate` and
+# `up --dry-run`; jwtPath points at the committed placeholder
+# examples/host-device/license.jwt (see .gitignore for the one carve-out).
+apiVersion: gkebnkctl/v1
+kind: Cluster
+
+metadata:
+  name: bnk-hostdev
+  project: my-gcp-project
+  zone: us-central1-a
+  labels:
+    purpose: bnk-hostdev-demo
+
+# Only pattern this seed supports. Kept for forward-compat with awsbnkctl's
+# pattern: field — do not change.
+pattern: host-device
+
+network:
+  # Cluster's own VPC — owned 1:1 by this cluster, created and torn down
+  # with it (`gkebnkctl down` deletes this VPC/subnet/firewall).
+  main:
+    vpc: bnkhd-vpc
+    subnet: bnkhd-subnet
+    cidr: 10.60.0.0/24
+    podsRangeName: bnkhd-pods
+    podsCidr: 10.66.0.0/16
+    svcsRangeName: bnkhd-svcs
+    svcsCidr: 10.67.0.0/20
+
+  # Dataplane VPCs. Treated as potentially SHARED infrastructure: Phase10
+  # creates them only if missing, and teardown NEVER deletes them (per the
+  # proven recipe's hard rule — see reference/TRIAL-NOTES.md "Open items").
+  # If you want per-cluster dataplane VPCs, give them a cluster-unique name
+  # and delete them by hand after teardown.
+  external:
+    vpc: bnkhd-ext
+    subnet: bnkhd-ext
+    cidr: 10.30.0.0/24
+    mtu: 8896
+    podsRangeName: tmm-ext-pods
+    podsCidr: 10.31.0.0/24
+    # Broader summary route for the shared ext underlay (Cloud Router/NAT and
+    # the route-ext-underlay F5SPKStaticRoute both use this).
+    underlayCidr: 10.30.0.0/16
+  internal:
+    vpc: bnkhd-int
+    subnet: bnkhd-int
+    cidr: 10.50.0.0/24
+    mtu: 8896
+    podsRangeName: tmm-int-pods
+    podsCidr: 10.51.0.0/24
+
+  allowInternalCidr: 10.0.0.0/8
+
+  # Cloud NAT on the external + internal routers. If the caller's IAM
+  # principal lacks compute.routers.create, Phase10 logs a clear "ask
+  # project owner" message and continues non-fatally.
+  natGateways: true
+
+cluster:
+  # GKE 1.34 nodes name secondary NICs ensN; 1.35 names them ethN. Phase25
+  # never assumes either — it MAC-matches at runtime.
+  kubernetesVersion: "1.31"
+  defaultPool:
+    machineType: e2-standard-4
+    nodeCount: 3
+  tmmPool:
+    name: tmm-pool
+    machineType: e2-standard-8
+    nodeCount: 1
+    maxPodsPerNode: 8
+  agentPool:
+    name: agent-pool
+    machineType: e2-standard-4
+    nodeCount: 1
+    maxPodsPerNode: 8
+
+bnk:
+  manifestVersion: "2.4.0-3.2882.0"
+  # TMM's internal interface MTU (F5SPKVlan.mtu / CNEInstance TMM_DEFAULT_MTU).
+  # Distinct from network.external/internal.mtu (the VPC wire/jumbo-frame MTU,
+  # 8896) — 1460 is what was proven live, do not conflate the two.
+  tmmMtu: "1460"
+  # Path to your F5 subscription JWT, resolved relative to this file's
+  # directory. The committed placeholder here is an OBVIOUS dummy — replace
+  # with a real (gitignored) license.jwt path before a real `up`.
+  jwtPath: ./license.jwt
+  farSecret:
+    # "kubecontext": copy an existing far-secret from another cluster you
+    #   have kubectl access to (sourceContext + sourceNamespace).
+    # "dockerconfig": build far-secret from a local docker-config JSON
+    #   (dockerConfigFile) — never commit this file either.
+    source: kubecontext
+    # Placeholder kube-context name — replace with a real context that has
+    # far-secret in sourceNamespace before running a real `up`.
+    sourceContext: some-other-cluster
+    sourceNamespace: f5-bnk
+    dockerConfigFile: ""
+    namespaces: [f5-bnk, f5-utils]
+
+egress:
+  testNamespace: egress-test
+  vxlanPort: 5789
+  vxlanKey: 100
+  vxlanMtu: 1410
+
+tags:
+  env: lab
+  purpose: bnk-hostdev-demo
