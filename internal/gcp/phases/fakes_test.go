@@ -114,6 +114,7 @@ type fakeRouters struct {
 	insertCalls []string
 	insertErr   map[string]error
 	patchCalls  []string
+	patchErr    map[string]error
 	deleteCalls []string
 }
 
@@ -136,7 +137,13 @@ func (f *fakeRouters) Insert(_ context.Context, req *computepb.InsertRouterReque
 }
 
 func (f *fakeRouters) Patch(_ context.Context, req *computepb.PatchRouterRequest, _ ...gax.CallOption) (*compute.Operation, error) {
-	f.patchCalls = append(f.patchCalls, req.GetRouter())
+	name := req.GetRouter()
+	f.patchCalls = append(f.patchCalls, name)
+	if f.patchErr != nil {
+		if err, ok := f.patchErr[name]; ok {
+			return nil, err
+		}
+	}
 	return nil, nil
 }
 

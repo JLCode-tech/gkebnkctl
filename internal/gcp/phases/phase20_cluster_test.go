@@ -3,15 +3,23 @@ package phases
 import (
 	"context"
 	"testing"
+	"time"
 
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	fakek8s "k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 )
+
+// testTMMPollInterval is used everywhere labelTMMNodes needs a poll interval
+// in tests — short enough that the retry-exhaustion path (6 attempts) stays
+// well under Go's default test timeout.
+const testTMMPollInterval = time.Millisecond
 
 func TestPhase20Cluster_DryRun_MakesZeroMutations(t *testing.T) {
 	cl := testCluster()
@@ -157,8 +165,8 @@ func TestBuildClusterConfig_EnablesMultiNetworkingAndDPv2(t *testing.T) {
 
 func TestLabelTMMNodes_NoNodesErrors(t *testing.T) {
 	k8sClient := fakek8s.NewClientset()
-	if err := labelTMMNodes(context.Background(), k8sClient, "tmm-pool"); err == nil {
-		t.Fatal("expected an error when no nodes match the tmm-pool label selector")
+	if err := labelTMMNodes(context.Background(), k8sClient, "tmm-pool", testTMMPollInterval); err == nil {
+		t.Fatal("expected an error when no nodes match the tmm-pool label selector after exhausting retries")
 	}
 }
 
@@ -167,7 +175,7 @@ func TestLabelTMMNodes_LabelsMatchingNodesOnly(t *testing.T) {
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "tmm-1", Labels: map[string]string{gkeNodepoolLabel: "tmm-pool"}}},
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "agent-1", Labels: map[string]string{gkeNodepoolLabel: "agent-pool"}}},
 	)
-	if err := labelTMMNodes(context.Background(), k8sClient, "tmm-pool"); err != nil {
+	if err := labelTMMNodes(context.Background(), k8sClient, "tmm-pool", testTMMPollInterval); err != nil {
 		t.Fatalf("labelTMMNodes: %v", err)
 	}
 	tmm, _ := k8sClient.CoreV1().Nodes().Get(context.Background(), "tmm-1", metav1.GetOptions{})
@@ -177,5 +185,38 @@ func TestLabelTMMNodes_LabelsMatchingNodesOnly(t *testing.T) {
 	agent, _ := k8sClient.CoreV1().Nodes().Get(context.Background(), "agent-1", metav1.GetOptions{})
 	if agent.Labels[tmmNodeLabelKey] == tmmNodeLabelValue {
 		t.Error("agent-1 must NOT be labeled app=f5-tmm — it is not in the tmm-pool")
+	}
+}
+
+// TestLabelTMMNodes_PollsUntilNodesAppear proves an initially-empty node list
+// is retried (not an immediate hard error) — a freshly-RUNNING GKE node pool
+// can lag node-object registration by a few seconds on real clusters.
+func TestLabelTMMNodes_PollsUntilNodesAppear(t *testing.T) {
+	k8sClient := fakek8s.NewClientset()
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "tmm-1", Labels: map[string]string{gkeNodepoolLabel: "tmm-pool"}}}
+
+	calls := 0
+	k8sClient.PrependReactor("list", "nodes", func(_ clienttesting.Action) (bool, runtime.Object, error) {
+		calls++
+		if calls == 2 {
+			if err := k8sClient.Tracker().Add(node); err != nil {
+				t.Fatalf("seeding node on attempt 2: %v", err)
+			}
+		}
+		return false, nil, nil // let the default reactor serve from the (now-updated) tracker
+	})
+
+	if err := labelTMMNodes(context.Background(), k8sClient, "tmm-pool", testTMMPollInterval); err != nil {
+		t.Fatalf("labelTMMNodes: %v", err)
+	}
+	if calls < 2 {
+		t.Errorf("expected at least 2 List attempts before the node appeared, got %d", calls)
+	}
+	got, err := k8sClient.CoreV1().Nodes().Get(context.Background(), "tmm-1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("getting labeled node: %v", err)
+	}
+	if got.Labels[tmmNodeLabelKey] != tmmNodeLabelValue {
+		t.Error("expected tmm-1 to be labeled app=f5-tmm once the poll found it")
 	}
 }

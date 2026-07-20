@@ -2,6 +2,7 @@ package phases
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -139,7 +140,8 @@ func TestPhase10Networks_DryRun_MakesZeroMutations(t *testing.T) {
 
 // TestEnsureRouterNAT_403Tolerated proves a 403 on router Insert (compute.
 // routers.create denied) is swallowed with a warning, not returned as an
-// error — matching bash net::create_nat (docs/SPEC-go-tracer.md §9.5).
+// error — matching bash net::create_nat (docs/SPEC-go-tracer.md §9.5). No
+// NAT-attach Patch is attempted since the router was never created.
 func TestEnsureRouterNAT_403Tolerated(t *testing.T) {
 	routers := &fakeRouters{
 		existing:  map[string]*computepb.Router{},
@@ -152,10 +154,14 @@ func TestEnsureRouterNAT_403Tolerated(t *testing.T) {
 	if len(routers.insertCalls) != 1 {
 		t.Errorf("expected exactly 1 Insert attempt, got %d", len(routers.insertCalls))
 	}
+	if len(routers.patchCalls) != 0 {
+		t.Errorf("expected 0 NAT-attach Patch calls when router create was denied, got %d", len(routers.patchCalls))
+	}
 }
 
-// TestEnsureRouterNAT_OtherErrorsPropagate proves a non-403 error from
-// Insert is NOT swallowed.
+// TestEnsureRouterNAT_OtherErrorsPropagate proves a non-403 error from the
+// router Insert call is NOT swallowed (router creation itself is fail-fast,
+// unlike the NAT-attach step — see TestEnsureRouterNAT_NATAttachErrorNonFatal).
 func TestEnsureRouterNAT_OtherErrorsPropagate(t *testing.T) {
 	routers := &fakeRouters{
 		existing:  map[string]*computepb.Router{},
@@ -163,6 +169,23 @@ func TestEnsureRouterNAT_OtherErrorsPropagate(t *testing.T) {
 	}
 	if err := ensureRouterNAT(context.Background(), routers, "my-gcp-project", "us-central1", "bnkhd-ext"); err == nil {
 		t.Fatal("expected a non-403 Insert error to propagate")
+	}
+}
+
+// TestEnsureRouterNAT_FreshCreateSplitsRouterAndNAT proves the fresh-create
+// path issues a bare router Insert (no embedded Nats) followed by a separate
+// NAT-attach Patch — matching bash's two-step net::create_nat rather than the
+// old single combined Insert.
+func TestEnsureRouterNAT_FreshCreateSplitsRouterAndNAT(t *testing.T) {
+	routers := &fakeRouters{existing: map[string]*computepb.Router{}}
+	if err := ensureRouterNAT(context.Background(), routers, "p", "us-central1", "bnkhd-ext"); err != nil {
+		t.Fatalf("ensureRouterNAT: %v", err)
+	}
+	if len(routers.insertCalls) != 1 || routers.insertCalls[0] != "bnkhd-ext-router" {
+		t.Errorf("expected exactly 1 router Insert call, got %v", routers.insertCalls)
+	}
+	if len(routers.patchCalls) != 1 || routers.patchCalls[0] != "bnkhd-ext-router" {
+		t.Errorf("expected exactly 1 NAT-attach Patch call following router create, got %v", routers.patchCalls)
 	}
 }
 
@@ -178,6 +201,24 @@ func TestEnsureRouterNAT_AddsNATToExistingRouter(t *testing.T) {
 	}
 	if len(routers.insertCalls) != 0 {
 		t.Errorf("expected 0 Insert calls when router already exists, got %d", len(routers.insertCalls))
+	}
+}
+
+// TestEnsureRouterNAT_NATAttachErrorNonFatal proves ANY error from the
+// NAT-attach Patch call (not just a 403) is swallowed with a warning —
+// matching bash's `|| { log::warn ...; }` on the NAT create call
+// (reference/bash-seed/bin/10-networks.sh:140-142), which is unconditional
+// unlike the 403-only tolerance on router create.
+func TestEnsureRouterNAT_NATAttachErrorNonFatal(t *testing.T) {
+	routers := &fakeRouters{
+		existing: map[string]*computepb.Router{"bnkhd-ext-router": {Nats: nil}},
+		patchErr: map[string]error{"bnkhd-ext-router": errors.New("transient NAT attach failure")},
+	}
+	if err := ensureRouterNAT(context.Background(), routers, "p", "us-central1", "bnkhd-ext"); err != nil {
+		t.Fatalf("ensureRouterNAT: expected NAT-attach failure to be non-fatal, got: %v", err)
+	}
+	if len(routers.patchCalls) != 1 {
+		t.Errorf("expected exactly 1 Patch attempt, got %d", len(routers.patchCalls))
 	}
 }
 

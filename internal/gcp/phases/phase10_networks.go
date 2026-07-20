@@ -223,53 +223,36 @@ func ensureAllowInternalFW(ctx context.Context, firewalls gcp.FirewallsAPI, proj
 	return insertAndWait(ctx, op)
 }
 
-// ensureRouterNAT creates a Cloud Router named "<vpc>-router" + Cloud NAT
-// named "<vpc>-nat" on vpc, or adds the NAT if the router already exists
-// without one. Tolerates a 403 on Insert (compute.routers.create denied) by
-// warning with a copy-paste owner command and continuing non-fatally,
-// matching bash net::create_nat (docs/SPEC-go-tracer.md §9.5).
+// ensureRouterNAT creates a Cloud Router named "<vpc>-router" on vpc (if
+// absent), then attaches a Cloud NAT named "<vpc>-nat" to it (if absent).
+// These are two independent, separately-tolerant steps — matching bash
+// net::create_nat (reference/bash-seed/bin/10-networks.sh:102-142) exactly:
+//
+//   - Router create: a 403 (compute.routers.create denied) is tolerated —
+//     warn with a copy-paste owner command and return, WITHOUT attempting
+//     the NAT attach (the router doesn't exist, so there's nothing to attach
+//     it to). Any other router-create error is fatal.
+//   - NAT attach (Patch): ANY error is non-fatal — warn and continue. This
+//     applies whether the router was just freshly created or already
+//     existed, matching bash's `|| { log::warn ...; }` on the NAT create
+//     call.
 func ensureRouterNAT(ctx context.Context, routers gcp.RoutersAPI, project, region, vpc string) error {
 	routerName := vpc + "-router"
 	natName := vpc + "-nat"
-	nat := &computepb.RouterNat{
-		Name:                          proto.String(natName),
-		NatIpAllocateOption:           proto.String("AUTO_ONLY"),
-		SourceSubnetworkIpRangesToNat: proto.String("ALL_SUBNETWORKS_ALL_IP_RANGES"),
-	}
 
 	existing, err := routers.Get(ctx, &computepb.GetRouterRequest{Project: project, Region: region, Router: routerName})
 	switch {
 	case err == nil:
-		for _, n := range existing.GetNats() {
-			if n.GetName() == natName {
-				fmt.Fprintf(os.Stderr, "[phase 10] NAT %s already exists, skipping\n", natName)
-				return nil
-			}
-		}
-		fmt.Fprintf(os.Stderr, "[phase 10] router %s exists without NAT — adding %s\n", routerName, natName)
-		op, patchErr := routers.Patch(ctx, &computepb.PatchRouterRequest{
-			Project: project,
-			Region:  region,
-			Router:  routerName,
-			RouterResource: &computepb.Router{
-				Nats: append(existing.GetNats(), nat),
-			},
-		})
-		if patchErr != nil {
-			fmt.Fprintf(os.Stderr, "[phase 10] warn: adding NAT to router %s failed (%v) — treating as non-fatal\n", routerName, patchErr)
-			return nil
-		}
-		return insertAndWait(ctx, op)
+		fmt.Fprintf(os.Stderr, "[phase 10] router %s already exists, skipping create\n", routerName)
 
 	case isNotFound(err):
-		fmt.Fprintf(os.Stderr, "[phase 10] creating Cloud Router %s + NAT %s on %s\n", routerName, natName, vpc)
+		fmt.Fprintf(os.Stderr, "[phase 10] creating Cloud Router %s on %s\n", routerName, vpc)
 		op, insErr := routers.Insert(ctx, &computepb.InsertRouterRequest{
 			Project: project,
 			Region:  region,
 			RouterResource: &computepb.Router{
 				Name:    proto.String(routerName),
 				Network: proto.String(networkSelfLink(project, vpc)),
-				Nats:    []*computepb.RouterNat{nat},
 			},
 		})
 		if insErr != nil {
@@ -283,13 +266,41 @@ func ensureRouterNAT(ctx context.Context, routers gcp.RoutersAPI, project, regio
 				fmt.Fprintln(os.Stderr, "[phase 10] warn: egress will only reach in-VPC targets until this exists.")
 				return nil
 			}
-			return fmt.Errorf("creating router+nat on %s: %w", vpc, insErr)
+			return fmt.Errorf("creating router %s on %s: %w", routerName, vpc, insErr)
 		}
-		return insertAndWait(ctx, op)
+		if waitErr := insertAndWait(ctx, op); waitErr != nil {
+			return fmt.Errorf("creating router %s on %s: %w", routerName, vpc, waitErr)
+		}
+		existing = nil // freshly created router has no NATs yet
 
 	default:
 		return fmt.Errorf("checking router %s: %w", routerName, err)
 	}
+
+	for _, n := range existing.GetNats() {
+		if n.GetName() == natName {
+			fmt.Fprintf(os.Stderr, "[phase 10] NAT %s already exists, skipping\n", natName)
+			return nil
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "[phase 10] creating Cloud NAT %s on router %s\n", natName, routerName)
+	nats := append(existing.GetNats(), &computepb.RouterNat{
+		Name:                          proto.String(natName),
+		NatIpAllocateOption:           proto.String("AUTO_ONLY"),
+		SourceSubnetworkIpRangesToNat: proto.String("ALL_SUBNETWORKS_ALL_IP_RANGES"),
+	})
+	op, patchErr := routers.Patch(ctx, &computepb.PatchRouterRequest{
+		Project:        project,
+		Region:         region,
+		Router:         routerName,
+		RouterResource: &computepb.Router{Nats: nats},
+	})
+	if patchErr != nil {
+		fmt.Fprintf(os.Stderr, "[phase 10] warn: NAT create failed on %s (%v) — treating as non-fatal, matching router-create 403 handling.\n", routerName, patchErr)
+		return nil
+	}
+	return insertAndWait(ctx, op)
 }
 
 // isNotFound reports whether err is a GCP 404 (resource does not exist).

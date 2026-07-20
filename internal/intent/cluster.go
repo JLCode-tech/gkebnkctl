@@ -473,11 +473,11 @@ func validateNetwork(c *Cluster) error {
 			return fmt.Errorf("%s is required", f.path)
 		}
 	}
-	if c.Network.External.MTU == 0 {
-		return errors.New("network.external.mtu is required")
+	if c.Network.External.MTU <= 0 {
+		return errors.New("network.external.mtu is required and must be positive")
 	}
-	if c.Network.Internal.MTU == 0 {
-		return errors.New("network.internal.mtu is required")
+	if c.Network.Internal.MTU <= 0 {
+		return errors.New("network.internal.mtu is required and must be positive")
 	}
 
 	cidrs := []cidrField{

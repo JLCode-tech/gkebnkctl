@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -162,5 +163,41 @@ func TestMarkReadOnly_NoFileCreatedOnFreshDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "state.env")); !os.IsNotExist(err) {
 		t.Errorf("read-only Save created state.env on disk (stat err = %v); expected none", err)
+	}
+}
+
+// TestSave_KeysAreSorted proves state.env is written in deterministic
+// (sorted) key order rather than Go's randomized map-iteration order — a
+// stable diff/re-run guard for operators inspecting the file by hand.
+func TestSave_KeysAreSorted(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Load(dir)
+	s.Set("TMM_POD_GW", "x")
+	s.Set("AGENT_NODE_NAME", "x")
+	s.Set("TMM_EXT_IFACE", "x")
+	s.Set("AGENT_EXT_IFACE", "x")
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "state.env"))
+	if err != nil {
+		t.Fatalf("reading state.env: %v", err)
+	}
+	var gotKeys []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		gotKeys = append(gotKeys, line[:strings.IndexByte(line, '=')])
+	}
+	want := []string{"AGENT_EXT_IFACE", "AGENT_NODE_NAME", "TMM_EXT_IFACE", "TMM_POD_GW"}
+	if len(gotKeys) != len(want) {
+		t.Fatalf("got %d keys %v, want %d keys %v", len(gotKeys), gotKeys, len(want), want)
+	}
+	for i, k := range want {
+		if gotKeys[i] != k {
+			t.Errorf("key[%d] = %q, want %q (full order: %v)", i, gotKeys[i], k, gotKeys)
+		}
 	}
 }

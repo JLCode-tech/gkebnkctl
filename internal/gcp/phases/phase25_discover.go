@@ -28,10 +28,12 @@ const (
 	discoverPodPollFreq = 3 * time.Second
 )
 
-// discoverStateKeys are every state.env key Phase25Discover writes (or, in
-// dry-run, sets to a placeholder) — kept as a single source of truth so
-// lifecycle.go's upPhases table and this phase can never drift.
-var discoverStateKeys = []string{
+// DiscoverStateKeys are every state.env key Phase25Discover writes (or, in
+// dry-run, sets to a placeholder) — the single source of truth so this phase
+// and any other package that needs the full key set (lifecycle.go's down
+// teardown, clearing discovered.* state per docs/SPEC-go-tracer.md §3) can
+// never drift into two independently-maintained copies of the same literal.
+var DiscoverStateKeys = []string{
 	"TMM_NODE_NAME", "AGENT_NODE_NAME",
 	"TMM_EXT_IFACE", "TMM_EXT_PCI", "TMM_INT_IFACE", "TMM_INT_PCI",
 	"TMM_EXT_ALIAS_CIDR", "TMM_INT_ALIAS_CIDR", "TMM_EXT_SELFIP", "TMM_INT_SELFIP",
@@ -68,7 +70,7 @@ func Phase25Discover(ctx context.Context, cl *intent.Cluster, st *state.State, c
 
 	if dryRun {
 		fmt.Fprintln(os.Stderr, "[phase 25] would discover tmm/agent NIC iface/MAC/PCI + alias /28 slices (needs live cluster)")
-		for _, k := range discoverStateKeys {
+		for _, k := range DiscoverStateKeys {
 			st.Set(k, "dry-run-"+strings.ToLower(k))
 		}
 		return nil

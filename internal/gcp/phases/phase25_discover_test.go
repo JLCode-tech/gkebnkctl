@@ -23,7 +23,7 @@ func TestPhase25Discover_DryRun_SetsPlaceholderStateAndNoMutations(t *testing.T)
 	if err := Phase25Discover(context.Background(), cl, st, clients, true); err != nil {
 		t.Fatalf("Phase25Discover(dryRun=true): %v", err)
 	}
-	for _, k := range discoverStateKeys {
+	for _, k := range DiscoverStateKeys {
 		want := "dry-run-" + strings.ToLower(k)
 		if got := st.Get(k); got != want {
 			t.Errorf("state[%s] = %q, want %q", k, got, want)

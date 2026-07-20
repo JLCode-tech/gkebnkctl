@@ -249,6 +249,13 @@ func TestValidate_EachRule(t *testing.T) {
 			},
 			wantErr: "bnk.farSecret.sourceContext",
 		},
+		{
+			name: "negative external mtu",
+			mutate: func(y string) string {
+				return strings.Replace(y, "mtu: 8896", "mtu: -1", 1)
+			},
+			wantErr: "network.external.mtu",
+		},
 	}
 
 	for _, tt := range tests {

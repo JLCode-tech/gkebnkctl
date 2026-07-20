@@ -289,7 +289,12 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) err
 	fmt.Fprintf(os.Stderr, "→ shared dataplane VPCs %s/%s are NEVER deleted by teardown.\n",
 		cl.Network.External.VPC, cl.Network.Internal.VPC)
 
-	for _, k := range discoveredStateKeysToClear {
+	// Clear discovered.* state keys, per docs/SPEC-go-tracer.md §3 "Down
+	// phases". phases.DiscoverStateKeys (internal/gcp/phases/phase25_discover.go)
+	// is the single source of truth for this key set — Phase25Discover writes
+	// them, so down clears the same list rather than maintaining a second,
+	// independently-drifting copy of the same 13 literals.
+	for _, k := range phases.DiscoverStateKeys {
 		st.Set(k, "")
 	}
 	if err := st.Save(); err != nil {
@@ -297,16 +302,6 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) err
 	}
 	fmt.Fprintf(os.Stderr, "✓ down complete: cluster=%s\n", cl.Metadata.Name)
 	return nil
-}
-
-// discoveredStateKeysToClear are the Phase25-discovered state.env keys
-// cleared after a successful down, per docs/SPEC-go-tracer.md §3 "Down
-// phases" ("Clear discovered.* state keys").
-var discoveredStateKeysToClear = []string{
-	"TMM_NODE_NAME", "AGENT_NODE_NAME",
-	"TMM_EXT_IFACE", "TMM_EXT_PCI", "TMM_INT_IFACE", "TMM_INT_PCI",
-	"TMM_EXT_ALIAS_CIDR", "TMM_INT_ALIAS_CIDR", "TMM_EXT_SELFIP", "TMM_INT_SELFIP",
-	"TMM_POD_CIDR", "TMM_POD_GW", "AGENT_EXT_IFACE",
 }
 
 // printDownPlan renders the destroy plan for `gkebnkctl down --dry-run`. It

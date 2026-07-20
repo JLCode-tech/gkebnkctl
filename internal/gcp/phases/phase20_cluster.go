@@ -8,6 +8,7 @@ import (
 
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -26,6 +27,15 @@ const (
 	gkeOpTimeout        = 30 * time.Minute
 	clusterPollInterval = 15 * time.Second
 	clusterTimeout      = 30 * time.Minute
+
+	// tmmNodeListPollInterval/tmmNodeListMaxAttempts back off the node-label
+	// step after the tmm-pool node pool reports RUNNING: on real GKE, node
+	// objects can lag a few seconds to tens of seconds behind the node pool's
+	// own RUNNING status, so an immediate empty List is not necessarily an
+	// error yet. 6 attempts * 10s = up to ~50s of polling before giving up,
+	// matching the "few retries over ~30-60s" window.
+	tmmNodeListPollInterval = 10 * time.Second
+	tmmNodeListMaxAttempts  = 6
 )
 
 // Phase20Cluster creates the GKE cluster (DPv2 + multi-networking + ip-alias,
@@ -70,7 +80,7 @@ func Phase20Cluster(ctx context.Context, cl *intent.Cluster, _ *state.State, cli
 	}
 
 	fmt.Fprintf(os.Stderr, "[phase 20] labeling %s nodes app=f5-tmm\n", tmm.Name)
-	if err := labelTMMNodes(ctx, clients.K8s, tmm.Name); err != nil {
+	if err := labelTMMNodes(ctx, clients.K8s, tmm.Name, tmmNodeListPollInterval); err != nil {
 		return fmt.Errorf("phase20: labeling tmm nodes: %w", err)
 	}
 
@@ -331,15 +341,34 @@ func waitForNodePoolRunning(ctx context.Context, gke gcp.GKEAPI, project, zone, 
 // labelTMMNodes labels every node in poolName's GKE node pool app=f5-tmm —
 // the bnk-node-sysctls DS (Phase37) and CNEInstance scheduling (Phase38)
 // depend on this label, per reference/bash-seed/bin/20-cluster.sh.
-func labelTMMNodes(ctx context.Context, k8sClient kubernetes.Interface, poolName string) error {
-	nodes, err := k8sClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{
-		LabelSelector: gkeNodepoolLabel + "=" + poolName,
-	})
-	if err != nil {
-		return fmt.Errorf("listing nodes for pool %s: %w", poolName, err)
-	}
-	if len(nodes.Items) == 0 {
-		return fmt.Errorf("no nodes found for pool %s — node pool may still be provisioning", poolName)
+//
+// The node pool reporting RUNNING does not guarantee its node objects have
+// registered with the API server yet on real GKE, so an empty first List is
+// polled a few times (pollInterval, up to tmmNodeListMaxAttempts) rather than
+// erroring immediately. pollInterval is injectable so tests stay fast.
+func labelTMMNodes(ctx context.Context, k8sClient kubernetes.Interface, poolName string, pollInterval time.Duration) error {
+	var nodes *corev1.NodeList
+	for attempt := 1; attempt <= tmmNodeListMaxAttempts; attempt++ {
+		var err error
+		nodes, err = k8sClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{
+			LabelSelector: gkeNodepoolLabel + "=" + poolName,
+		})
+		if err != nil {
+			return fmt.Errorf("listing nodes for pool %s: %w", poolName, err)
+		}
+		if len(nodes.Items) > 0 {
+			break
+		}
+		if attempt == tmmNodeListMaxAttempts {
+			return fmt.Errorf("no nodes found for pool %s after %d attempts — node pool may still be provisioning", poolName, tmmNodeListMaxAttempts)
+		}
+		fmt.Fprintf(os.Stderr, "[phase 20] no nodes registered yet for pool %s (attempt %d/%d) — node objects can lag pool RUNNING status, retrying in %s\n",
+			poolName, attempt, tmmNodeListMaxAttempts, pollInterval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
 	}
 
 	patch := []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:%q}}}`, tmmNodeLabelKey, tmmNodeLabelValue))
