@@ -1,0 +1,185 @@
+name: CI
+
+# Manual dispatch only: this repo is private and the GitHub Actions budget
+# hard-blocks all hosted-runner jobs (every job fails in 2s, "Actions budget
+# is preventing further use"). GitHub CI is unusable until the repo goes
+# public or a budget is allocated.
+#
+# Local pre-push gate: run `hack/ci-local.sh` in your clone instead.
+# This script mirrors the job sequence below and passes/fails locally.
+# Restore `pull_request`/`push` triggers when the Actions budget situation changes.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs: a new push to the same ref aborts the in-flight
+# run instead of leaving overlapping matrices churning.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: vet + fmt + staticcheck + test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve modules
+        run: |
+          go mod download
+          go mod verify
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt
+        # Fail if any file is not gofmt-clean. `tee` keeps the diff in the
+        # log so reviewers can see exactly what's wrong.
+        run: gofmt -d -l . | tee /tmp/gofmt.diff && test ! -s /tmp/gofmt.diff
+
+      - name: staticcheck
+        # Pinned via the go.mod `tool` directive (added in Task E) — the
+        # version travels with the source tree, so a local `go tool
+        # staticcheck ./...` run and this CI step use the exact same
+        # binary. See staticcheck.conf for the one repo-wide exception
+        # (SA1019 — the GKE SDK's deprecated ID-based request fields).
+        run: go tool staticcheck ./...
+
+      - name: go test
+        # -race catches data races; cheap to run on this unit-only suite.
+        run: go test -race ./...
+
+      - name: go build
+        # Build everything (cmd/ + internal/) to catch any unused-import
+        # or undefined-symbol issue vet/test missed.
+        run: go build ./...
+
+  validate-dryrun:
+    name: validate-dryrun (gkebnkctl validate + up/down --dry-run)
+    needs: test
+    # The offline test-surface gate: proves `gkebnkctl validate` and
+    # `up`/`down --dry-run` resolve cluster.yaml and print a full phased
+    # plan without touching GCP, using the GKEBNKCTL_SKIP_AUTH=1 test hook
+    # (docs/SPEC-go-tracer.md §6/§7). No live GCP credentials, no network
+    # egress to Google APIs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build gkebnkctl
+        run: |
+          mkdir -p bin
+          go build -o bin/gkebnkctl ./cmd/gkebnkctl
+
+      - name: gkebnkctl validate examples/host-device/cluster.yaml
+        # Pure schema/semantic validation — no cloud calls even without the
+        # skip-auth hook.
+        run: ./bin/gkebnkctl validate examples/host-device/cluster.yaml
+
+      - name: gkebnkctl up --dry-run (GKEBNKCTL_SKIP_AUTH=1)
+        # Asserts (a) exit-0, (b) the phased plan reaches phase 50 (proves
+        # no phase silently regressed to a stub — see runStubPhase's
+        # defensive fallback in internal/cli/lifecycle.go).
+        env:
+          GKEBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          mkdir -p artifacts
+          ./bin/gkebnkctl up -f examples/host-device/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/up-dryrun.log
+          grep -q '\[phase 50\]' artifacts/up-dryrun.log
+          grep -q 'dry-run complete' artifacts/up-dryrun.log
+
+      - name: gkebnkctl down --dry-run (GKEBNKCTL_SKIP_AUTH=1)
+        env:
+          GKEBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          ./bin/gkebnkctl down -f examples/host-device/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/down-dryrun.log
+          grep -q 'dry-run complete' artifacts/down-dryrun.log
+          grep -q 'NEVER deleted by teardown' artifacts/down-dryrun.log
+
+      - name: Upload dry-run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validate-dryrun-logs
+          path: artifacts/
+          if-no-files-found: warn
+
+  windows-build:
+    name: windows build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go build ./...
+
+  security-audit:
+    name: security audit (gosec + govulncheck + gitleaks)
+    # gosec — static analysis for common Go security anti-patterns.
+    # govulncheck — Go's official module-graph vulnerability scanner,
+    # reachability-aware (only fails on vulns the binary actually
+    # exercises). gitleaks — secret-scan over the full repo tree +
+    # history, doubly important given this repo's history of scrubbed
+    # live secrets (see reference/TRIAL-NOTES.md).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs full history; gosec/govulncheck only need the
+          # worktree, but the extra fetch cost is bounded.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gosec (Go static security analyzer)
+        uses: securego/gosec@v2.27.1
+        with:
+          args: ./...
+
+      - name: govulncheck (Go vulnerability scanner)
+        # Run directly (not via the wrapper action) so the scan uses the
+        # go.mod-pinned toolchain the setup-go step above already
+        # installed, rather than re-installing the newest manifest Go.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go version
+          govulncheck ./...
+
+      - name: gitleaks (secret scan)
+        run: |
+          # The gitleaks/gitleaks-action requires a paid license for private repos.
+          # Instead, use the MIT-licensed CLI directly (pinned v8.18.2).
+          wget -q -O /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
+          echo "6298c9235dfc9278c14b28afd9b7fa4e6f4a289cb1974bd27949fc1e9122bdee  /tmp/gitleaks.tar.gz" | sha256sum -c - || exit 1
+          tar -xz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-banner -v

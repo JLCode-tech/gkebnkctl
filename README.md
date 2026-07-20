@@ -1,30 +1,36 @@
 # gkebnkctl
 
-A bash-first seed for provisioning a GKE cluster and installing **F5 BIG-IP
+A single Go binary that provisions a GKE cluster and installs **F5 BIG-IP
 Next for Kubernetes (BNK)** with the **host-device** dataplane and working
-transparent egress. Sibling of [`awsbnkctl`](https://github.com/) (same
-phase-script / `cluster.yaml` shape), scoped to GCP.
+transparent egress — pure GCP Go SDK + an in-process Kubernetes client, no
+`gcloud`/`kubectl`/`helm` shellouts, Application Default Credentials only.
+Sibling of [`awsbnkctl`](https://github.com/) (same phase-script /
+`cluster.yaml` shape), scoped to GCP.
 
-No Go yet — this is the proven recipe turned into clean, idempotent,
-re-runnable shell + a handful of small Python helpers (config parsing, IPv4
-math). A future `gkebnkctl` binary can absorb these phases the way
-`awsbnkctl` did for its AWS phases.
-
-**Proven live 2026-07-20** on cluster `bnk-hostdev` (project
-`f5-gcs-7056-ptg-spk-dev` initially, moved to a qwiklabs BNY project after a
-`compute.routers.create` 403) — first-ever BNK host-device dataplane on GKE.
+This binary is a Go port of a bash-first recipe **proven live 2026-07-20**
+on cluster `bnk-hostdev` — the first-ever BNK host-device dataplane on GKE.
 Full path: pod → CSRC vxlan (port 5789) → TMM egress virtual → SNAT automap
 → Cloud NAT → internet, verified via `tmctl clientside.pkts_in` climbing and
-`curl https://1.1.1.1/cdn-cgi/trace` returning an external NAT IP.
+`curl https://1.1.1.1/cdn-cgi/trace` returning an external NAT IP. The
+original bash recipe is preserved, untouched, under
+[`reference/bash-seed/`](reference/bash-seed/) as the provenance record; see
+[`reference/TRIAL-NOTES.md`](reference/TRIAL-NOTES.md) for the full
+live-trial write-up.
+
+For the phase-by-phase architecture (what each phase creates, the down
+asymmetry, state/idempotency strategy, testing strategy), see
+**[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)**. For the authoritative
+build contract (schema, phase inventory, SDK call detail), see
+**[`docs/SPEC-go-tracer.md`](docs/SPEC-go-tracer.md)**.
 
 ## The GKE host-device contract
 
-Everything below exists because of a specific, live-discovered requirement.
-See [`reference/TRIAL-NOTES.md`](reference/TRIAL-NOTES.md) for the full
-write-up; short version, the 7 items:
+Everything this binary does exists because of a specific, live-discovered
+requirement. See [`reference/TRIAL-NOTES.md`](reference/TRIAL-NOTES.md) for
+the full write-up; short version, the 7 items:
 
 1. Node pools use `--additional-node-network` + `--additional-pod-network`
-   with `--enable-multi-networking` at cluster-create time — GKE then
+   with multi-networking enabled at cluster-create time — GKE then
    auto-assigns per-node alias `/28` slices from the secondary range. This
    *is* the cloud self-IP assignment on GKE; no manual `gcloud` aliasing.
 2. NADs are `host-device` with **static IPAM carrying the self-IP**.
@@ -44,126 +50,145 @@ write-up; short version, the 7 items:
    (`int-gw`) in addition to the external one — missing on the pre-existing
    reference cluster, which is why egress never worked there.
 
-## Layout
+## Install
 
+```sh
+go install github.com/JLCode-tech/gkebnkctl/cmd/gkebnkctl@latest
 ```
-cluster.yaml.example      copy to cluster.yaml and edit
-lib/                       config parsing (yaml2env.py), IPv4 math (netcalc.py),
-                            gcloud JSON parsing (gcejson.py), kubectl/gcloud
-                            helpers (common.sh, k8s.sh)
-bin/
-  10-networks.sh           VPCs, subnets + secondary ranges, firewall, Cloud NAT
-  20-cluster.sh             GKE cluster (DPv2 + multi-net + ip-alias) + node pools
-  25-discover.sh             post-provision discovery -> discovered.env
-  30-bnk-install.sh          namespaces -> cert-manager -> far-secret -> multus
-                              -> FLO -> NADs -> CNEInstance -> license -> VLANs/routes
-  40-egress.sh                F5SPKEgress + agent route + verification
-  90-teardown.sh              cluster + OWN vpc/subnet/firewall only
-manifests/                 templates (envsubst ${VAR}) + a few static copies
-reference/                 the proven recipe's raw inputs (do not edit)
-  TRIAL-NOTES.md              full contract + narrative
-  install/RUNBOOK.md          exact install order used live
-  install/*.yaml|json         exact manifests applied (source for templates)
-  recon/                     raw exports from a separate, pre-existing GKE
-                              reference cluster (flo-manifest.yaml is applied
-                              directly by 30-bnk-install.sh — not copied)
+
+Or build from a clone:
+
+```sh
+git clone https://github.com/JLCode-tech/gkebnkctl.git
+cd gkebnkctl
+go build -o bin/gkebnkctl ./cmd/gkebnkctl
 ```
+
+Requires Go 1.25+ (matches `go.mod`) and Application Default Credentials
+for GCP (`gcloud auth application-default login`, or a service-account key
+via `GOOGLE_APPLICATION_CREDENTIALS`) for any command other than `validate`
+or `--dry-run`.
 
 ## Usage
 
 ```sh
-cp cluster.yaml.example cluster.yaml   # edit project/zone/name/CIDRs
-gcloud auth login                      # this seed authors gcloud/kubectl
-                                        # commands, it doesn't manage auth
+cp examples/host-device/cluster.yaml my-cluster.yaml   # edit project/zone/name/CIDRs
 
-bin/10-networks.sh
-bin/20-cluster.sh
-bin/25-discover.sh
-bin/30-bnk-install.sh
-bin/40-egress.sh
+gkebnkctl validate my-cluster.yaml       # parse + validate — no GCP calls
+gkebnkctl up   -f my-cluster.yaml        # provision + install (phases 00-50)
+gkebnkctl up   -f my-cluster.yaml --dry-run   # print the full plan, zero mutations
 
-# later
-bin/90-teardown.sh
+gkebnkctl down -f my-cluster.yaml        # tear down (cluster + main VPC only)
+gkebnkctl down -f my-cluster.yaml --dry-run   # print the destroy plan, zero mutations
 ```
 
-Every phase script is idempotent — re-run any of them after a partial
-failure. `bin/25-discover.sh` writes `discovered.env`
-(git-ignored — regenerate it, don't hand-edit it, if node pools are recreated).
+Every phase is idempotent and safely re-runnable after a partial failure —
+`up` re-`Get`s each named resource and skips it if it already exists (see
+[`docs/ARCHITECTURE.md` "State & idempotency"](docs/ARCHITECTURE.md#state--idempotency)).
+`gkebnkctl up` caches Phase25's discovered iface/MAC/PCI/self-IP values into
+`.gkebnkctl/<cluster-name>/state.env` — delete that directory and re-run
+`up` if you ever need to force a fresh discovery pass; it is a cache, not
+the record of truth.
 
-`cluster.yaml`, `discovered.env`, `.rendered/`, and any `*.jwt`/kubeconfig
-files are git-ignored. Never commit the JWT or dockerconfig content — only
-their local paths live in `cluster.yaml`.
+### `--dry-run` and `GKEBNKCTL_SKIP_AUTH`
+
+`--dry-run` makes **zero** GCP/Kubernetes mutations on either `up` or
+`down` — every phase prints what it would do instead. The one exception is
+Phase00's ADC + API-enabled read on `up --dry-run`, which is itself
+skippable:
+
+```sh
+GKEBNKCTL_SKIP_AUTH=1 gkebnkctl up -f my-cluster.yaml --dry-run
+```
+
+`GKEBNKCTL_SKIP_AUTH=1` skips every GCP/Kubernetes credential check
+entirely, so the full phased plan (through phase 50) prints without
+Application Default Credentials, a GCP project, or network access — this is
+the offline/CI dry-run path (see `.github/workflows/ci.yml`'s
+`validate-dryrun` job). It is rejected outside `--dry-run`: a live run needs
+real clients, or every phase would nil-pointer-deref on its first GCP call.
+
+### Egress verification (opt-in)
+
+Phase50 can run a best-effort verification pass — a `tmctl
+clientside.pkts_in` delta plus a `curl https://1.1.1.1/cdn-cgi/trace`
+through the `egress-client` test pod — mirroring the original bash
+recipe's `bin/40-egress.sh`. It's off by default (build-first tracer
+milestone); enable it with:
+
+```sh
+GKEBNKCTL_VERIFY_EGRESS=1 gkebnkctl up -f my-cluster.yaml
+```
+
+A verification failure is logged but never fails `up`.
 
 ## Config reference
 
-`cluster.yaml` (see [`cluster.yaml.example`](cluster.yaml.example) for the
-full annotated example):
+`cluster.yaml` (`apiVersion: gkebnkctl/v1`, `kind: Cluster`) — see
+[`examples/host-device/cluster.yaml`](examples/host-device/cluster.yaml)
+for the full annotated, proven-live example, and
+[`docs/SPEC-go-tracer.md` §2](docs/SPEC-go-tracer.md#2-clusteryaml-intent-schema)
+for the complete field/default/validation reference:
 
 | Section | Covers |
 |---|---|
-| `metadata` | project, zone, cluster name |
-| `network.main` | this cluster's OWN VPC/subnet + pods/svcs secondary ranges |
-| `network.external` / `network.internal` | dataplane VPCs (treated as shared — see below), MTU 8896, pods secondary range |
+| `metadata` | GCP project, zone, cluster name (becomes both the GKE cluster name and the `.gkebnkctl/<name>` state-dir name) |
+| `network.main` | this cluster's OWN VPC/subnet + pods/svcs secondary ranges — created **and destroyed** with the cluster |
+| `network.external` / `network.internal` | dataplane VPCs, created-if-missing, **never destroyed** by `down` (see below) |
 | `cluster` | Kubernetes version, default/tmm/agent node pool machine types + counts |
 | `bnk` | manifestVersion, TMM MTU (1460 — distinct from the 8896 wire MTU), JWT path, far-secret source |
 | `egress` | test namespace, vxlan port/key/mtu |
 
-**Dataplane VPCs are shared infrastructure.** `10-networks.sh` creates
+Unknown top-level or nested fields are a hard validation error (strict
+decode) — `gkebnkctl validate` catches typos before any GCP call.
+
+**Dataplane VPCs are shared infrastructure.** Phase10 creates
 `network.external`/`network.internal` only if they don't already exist;
-`90-teardown.sh` never deletes them, even though it created them. This
-mirrors how the live trial actually ran (`tmm-ext`/`tmm-int` were pre-existing
-VPCs shared across several trial clusters in the qwiklabs project) — see
-`reference/install/RUNBOOK.md`'s teardown note ("NEVER the shared
-tmm-ext/tmm-int VPCs"). If you want per-cluster-owned dataplane VPCs instead,
-give them a cluster-unique name and delete them by hand after teardown.
+`down` never deletes them, even though `up` may have created them. This
+mirrors how the live trial actually ran (the external/internal VPCs were
+pre-existing, shared across several trial clusters) — see
+[`reference/install/RUNBOOK.md`](reference/install/RUNBOOK.md)'s teardown
+note. If you want per-cluster-owned dataplane VPCs instead, give them a
+cluster-unique name and delete them by hand after `down`.
+
+**Secrets are never embedded.** `bnk.jwtPath` (your F5 subscription JWT)
+and `bnk.farSecret.dockerConfigFile` are runtime inputs referenced by
+*path* — read at phase entry, rendered in-memory, applied directly, never
+written to disk and never committed. `cluster.yaml`, `.gkebnkctl/`, and any
+`*.jwt`/kubeconfig/dockerconfig files are git-ignored (the one exception is
+`examples/host-device/license.jwt`, an obvious placeholder so `validate`
+and `up --dry-run` have something to point at).
+
+## Testing
+
+```sh
+go build ./...
+go vet ./...
+gofmt -l .              # must print nothing
+go tool staticcheck ./...
+go test -race ./...
+```
+
+### CI
+
+This repository is private and GitHub's Actions budget hard-blocks all
+hosted-runner jobs, making GitHub CI unusable. Before pushing, run the local
+gate set instead:
+
+```sh
+bash hack/ci-local.sh
+```
+
+`hack/ci-local.sh` mirrors `.github/workflows/ci.yml` jobs locally — unit tests,
+lint, format checks, staticcheck, and the offline `validate-dryrun` gates
+(`validate` + `up`/`down --dry-run` with `GKEBNKCTL_SKIP_AUTH=1`). The GitHub
+Actions workflow will be restored (with `pull_request`/`push` triggers) when
+the Actions budget situation changes or the repo goes public.
 
 ## Known open items
 
-Carried over from the trial, unresolved by this seed:
-
-- **Cluster-service DNS under capture times out** — pod → `10.67.0.0/20`
-  (svc CIDR) gets captured into TMM; a hairpin route was added but UDP/53
-  still fails. Candidates: CSRC svc-CIDR exclusion, `egress.dnsEnabled: true`,
-  or pod `dnsConfig` pointing at `8.8.8.8` (this workaround is proven —
-  external DNS works today). Not addressed by any phase script here.
-- **`dssm-sentinel-1` 1/2** — cosmetic; crashagent `core_pattern` noise,
-  `DSSMAvailable=False`. Harmless for the egress demo.
-- **TMM DS `OnDelete` update strategy** — `30-bnk-install.sh`'s
-  `bnk::cycle_tmm_pod_if_stuck` detects and recovers from the NIC-handoff
-  deadlock reactively (deletes the old pod once it sees old-Terminating +
-  new-Pending on the same node). Setting the DS to `updateStrategy: OnDelete`
-  declaratively would avoid the deadlock proactively but wasn't applied here
-  since CNEInstance owns/reconciles that DS and fighting its declarative
-  ownership needs more certainty than this seed has.
-
-## Ambiguities flagged during authoring (see task report / commit messages)
-
-A few pieces of the proven recipe were not fully captured in
-`reference/install/` or `reference/TRIAL-NOTES.md` and were reconstructed
-from general knowledge rather than a live capture. Each is marked inline
-with an `AUTHORED, NOT CAPTURED LIVE` or `AMBIGUITY` comment:
-
-- `manifests/02-multus-rbac.yaml`, `02-multus-crd.yaml`, `02-multus-configmap.yaml`
-  — the Multus SA/ClusterRole/CRB/ConfigMap/NAD-CRD bundle; only the
-  DaemonSet was captured live.
-
-Resolved during verification (no longer ambiguous):
-
-- `manifests/09-license.yaml.tmpl` — **live-proven** 2026-07-20 on
-  bnk-hostdev (reached License status Active/eval in ~60s). The `License`
-  CRD's `spec` carries the raw JWT string directly under `jwt` (not
-  base64, not a nested `licenseToken` field), plus the three `teem*Url`
-  fields:
-  ```yaml
-  spec:
-    operationMode: connected
-    jwt: ${LICENSE_JWT}
-    teemCertUrl: https://product.apis.f5.com/ee/v1
-    teemEntitlementUrl: https://product-s.apis.f5.com/ee/v1
-    teemInitialConfigUrl: https://product-s.apis.f5.com/ee/v1
-  ```
-- `network.main.podsCidr`/`svcsCidr` defaults (`10.66.0.0/16` /
-  `10.67.0.0/20`) — **confirmed correct**: this is what was actually
-  applied and proven live. The earlier `10.64/16` / `10.65/20` mentioned in
-  `TRIAL-NOTES.md`'s "Built so far" narrative section was an earlier plan,
-  superseded mid-session.
+Carried over from the trial, unresolved by this binary — see
+[`docs/ARCHITECTURE.md` "Known open items"](docs/ARCHITECTURE.md#known-open-items)
+for the full list and rationale (DNS-under-capture, the TMM DS update
+strategy, the `discover-pod.yaml.tmpl` deviation, the SA1019 staticcheck
+exception, the FLO manifest size).

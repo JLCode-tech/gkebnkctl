@@ -1,0 +1,33 @@
+# AUTHORED, NOT CAPTURED LIVE — the multus-daemon-config ConfigMap the DS
+# mounts at /etc/cni/net.d/multus.d/daemon-config.json (see
+# manifests/02-multus-ds.yaml volume "multus-daemon-config"). Minimal/safe
+# defaults: deliberately omits "readinessindicatorfile" (which must name
+# GKE's primary CNI conflist — e.g. Cilium's, for a DPv2 cluster — and is
+# version/cluster-specific) so Multus does not block startup waiting on a
+# file path we haven't verified. If Multus pods sit NotReady, check
+# `ls /etc/cni/net.d/` on a node and consider setting readinessindicatorfile
+# explicitly.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multus-daemon-config
+  namespace: kube-system
+  labels:
+    app: multus
+    tier: node
+data:
+  daemon-config.json: |
+    {
+      "chrootDir": "/hostroot",
+      "logToStderr": true,
+      "logLevel": "verbose",
+      "logFile": "/var/log/multus.log",
+      "binDir": "/opt/cni/bin",
+      "socketDir": "/host/run/multus/",
+      "cniVersion": "0.3.1",
+      "cniConfigDir": "/host/etc/cni/net.d",
+      "multusConfigFile": "auto",
+      "multusAutoconfigDir": "/host/etc/cni/net.d",
+      "forceCNIVersion": false,
+      "overrideNetworkName": false
+    }
