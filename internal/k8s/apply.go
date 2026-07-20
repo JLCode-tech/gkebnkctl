@@ -46,6 +46,15 @@ func NewApplier(cfg *rest.Config) (*Applier, error) {
 	return &Applier{dyn: dyn, mapper: mapper}, nil
 }
 
+// NewApplierFromInterfaces builds an Applier directly from an
+// already-constructed dynamic client + RESTMapper — used by the BNK-install
+// phases (Task C), whose *gcp.Clients bundle already holds Dynamic +
+// RESTMapper (built once by gcp.Clients.AttachK8s after Phase20), and by
+// phase tests that inject a dynamicfake client + a fake RESTMapper.
+func NewApplierFromInterfaces(dyn dynamic.Interface, mapper meta.RESTMapper) *Applier {
+	return &Applier{dyn: dyn, mapper: mapper}
+}
+
 // Apply server-side-applies a single unstructured object. force toggles
 // SSA's force-conflicts flag (required for FLO's server-side apply per
 // docs/SPEC-go-tracer.md §3 Phase36 — the embedded manifest is large enough

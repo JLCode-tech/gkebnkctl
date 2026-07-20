@@ -36,7 +36,33 @@ func testCluster() *intent.Cluster {
 			TmmPool:           intent.NodePoolSpec{Name: "tmm-pool", MachineType: "e2-standard-8", NodeCount: 1, MaxPodsPerNode: 8},
 			AgentPool:         intent.NodePoolSpec{Name: "agent-pool", MachineType: "e2-standard-4", NodeCount: 1, MaxPodsPerNode: 8},
 		},
-		Region: "us-central1",
+		Bnk: intent.BnkSpec{
+			ManifestVersion: "2.4.0-3.2882.0",
+			TmmMtu:          "1460",
+			// JwtPath is intentionally left empty — Phase40License tests that
+			// need a real file set cl.Bnk.JwtPath themselves (t.TempDir()).
+			FarSecret: intent.FarSecretSpec{
+				Source:          "kubecontext",
+				SourceContext:   "some-other-cluster",
+				SourceNamespace: "f5-bnk",
+				Namespaces:      []string{"f5-bnk", "f5-utils"},
+			},
+		},
+		Egress: intent.EgressSpec{
+			TestNamespace: "egress-test",
+			VxlanPort:     5789,
+			VxlanKey:      100,
+			VxlanMtu:      1410,
+		},
+		Region:               "us-central1",
+		ExtGwIP:              "10.30.0.1",
+		IntGwIP:              "10.50.0.1",
+		ExtUnderlayDest:      "10.30.0.0",
+		ExtUnderlayPrefixLen: 16,
+		MainPodsDest:         "10.66.0.0",
+		MainPodsPrefixLen:    16,
+		MainSvcsDest:         "10.67.0.0",
+		MainSvcsPrefixLen:    20,
 	}
 	return cl
 }

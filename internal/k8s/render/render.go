@@ -32,3 +32,73 @@ func Render(tmpl []byte, data interface{}) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
+
+// NADsVars is the Vars struct for templates/nads-hostdevice.yaml.tmpl.
+// Field mapping: docs/SPEC-go-tracer.md §5.
+type NADsVars struct {
+	ExtIface  string
+	ExtSelfIP string
+	IntIface  string
+	IntSelfIP string
+}
+
+// RenderNADs renders templates/nads-hostdevice.yaml.tmpl (Phase35).
+func RenderNADs(tmpl []byte, v NADsVars) ([]byte, error) {
+	return Render(tmpl, v)
+}
+
+// CNEInstanceVars is the Vars struct for templates/cneinstance.yaml.tmpl.
+// Field mapping: docs/SPEC-go-tracer.md §5.
+type CNEInstanceVars struct {
+	TmmMtu          string
+	ManifestVersion string
+	ExtPCI          string
+	IntPCI          string
+}
+
+// RenderCNEInstance renders templates/cneinstance.yaml.tmpl (Phase38). The
+// two PCIDEVICE_INTEL_COM_* env entries + TMM_MAPRES_ADDL_VETHS_ON_DP=TRUE
+// are the mandatory host-device contract items (reference/TRIAL-NOTES.md
+// item 3) — do not drop them.
+func RenderCNEInstance(tmpl []byte, v CNEInstanceVars) ([]byte, error) {
+	return Render(tmpl, v)
+}
+
+// VlansRoutesVars is the Vars struct for templates/vlans-routes.yaml.tmpl.
+// Field mapping: docs/SPEC-go-tracer.md §5.
+type VlansRoutesVars struct {
+	TmmMtu    string
+	ExtSelfIP string
+	IntSelfIP string
+	ExtGwIP   string
+	IntGwIP   string
+	VxlanPort int
+
+	ExtUnderlayDest      string
+	ExtUnderlayPrefixLen int
+	MainPodsDest         string
+	MainPodsPrefixLen    int
+	MainSvcsDest         string
+	MainSvcsPrefixLen    int
+	TmmPodGW             string
+}
+
+// RenderVlansRoutes renders templates/vlans-routes.yaml.tmpl (Phase41).
+// route-int-gw is the item that made egress work where the reference
+// cluster failed (reference/TRIAL-NOTES.md item 7) — its presence is
+// golden-tested, per docs/SPEC-go-tracer.md "Notes for Builder".
+func RenderVlansRoutes(tmpl []byte, v VlansRoutesVars) ([]byte, error) {
+	return Render(tmpl, v)
+}
+
+// LicenseCRVars is the Vars struct for templates/license-cr.yaml.tmpl.
+type LicenseCRVars struct {
+	// JWT is the raw, whitespace-trimmed license token — never base64, never
+	// written to disk (docs/SPEC-go-tracer.md §2 "Secrets constraint").
+	JWT string
+}
+
+// RenderLicenseCR renders templates/license-cr.yaml.tmpl (Phase40).
+func RenderLicenseCR(tmpl []byte, v LicenseCRVars) ([]byte, error) {
+	return Render(tmpl, v)
+}
