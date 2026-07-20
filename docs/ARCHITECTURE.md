@@ -152,14 +152,21 @@ API-enabled read — and that too is skippable via `GKEBNKCTL_SKIP_AUTH=1`
   entirely and passes a `nil *gcp.Clients` through every phase. Valid
   **only** together with `--dry-run` (rejected otherwise — a live run with
   nil clients would nil-pointer-deref on the first real GCP call). This is
-  the offline/CI dry-run path: `.github/workflows/ci.yml`'s
-  `validate-dryrun` job uses it to smoke-test `up --dry-run` and
-  `down --dry-run` without any GCP credentials.
+  the offline/CI dry-run path: `hack/ci-local.sh` uses it to smoke-test
+  `up --dry-run` and `down --dry-run` without any GCP credentials.
 - **`GKEBNKCTL_VERIFY_EGRESS=1`** — enables Phase50's best-effort
   `tmctl clientside.pkts_in` delta + `curl` trace verification pass
   (ported from `reference/bash-seed/bin/40-egress.sh`). Default: skipped
   (build-first tracer milestone). A verification failure is logged but
   never fails `up`.
+
+**Pre-push gate:** This repository is private and GitHub Actions budget is
+unavailable, so `.github/workflows/ci.yml` is manual-dispatch only (no PR/push
+triggers). Before pushing, run `bash hack/ci-local.sh` locally — it runs the
+same gate set (unit tests, lint, format, staticcheck, offline validate-dryrun)
+and exits non-zero on failure. `.github/workflows/ci.yml` will be restored
+with full triggers when the Actions budget situation changes or the repo goes
+public.
 
 ## Testing strategy
 

@@ -169,10 +169,21 @@ go tool staticcheck ./...
 go test -race ./...
 ```
 
-`.github/workflows/ci.yml` runs all of the above (ubuntu + macos), plus a
-Windows build, the offline `validate-dryrun` gate (`validate` +
-`up`/`down --dry-run` with `GKEBNKCTL_SKIP_AUTH=1`), and a security-audit
-job (gosec + govulncheck + gitleaks) on every PR.
+### CI
+
+This repository is private and GitHub's Actions budget hard-blocks all
+hosted-runner jobs, making GitHub CI unusable. Before pushing, run the local
+gate set instead:
+
+```sh
+bash hack/ci-local.sh
+```
+
+`hack/ci-local.sh` mirrors `.github/workflows/ci.yml` jobs locally — unit tests,
+lint, format checks, staticcheck, and the offline `validate-dryrun` gates
+(`validate` + `up`/`down --dry-run` with `GKEBNKCTL_SKIP_AUTH=1`). The GitHub
+Actions workflow will be restored (with `pull_request`/`push` triggers) when
+the Actions budget situation changes or the repo goes public.
 
 ## Known open items
 

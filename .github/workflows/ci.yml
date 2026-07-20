@@ -1,14 +1,16 @@
 name: CI
 
-# Runs on every PR and on push to main. Modelled on awsbnkctl's ci.yml
-# (docs/SPEC-go-tracer.md §7), minus the docker/kind/testcontainers
-# integration tiers — gkebnkctl has no live-cluster integration suite yet
-# (offline-only per docs/SPEC-go-tracer.md's tracer-bullet scope).
+# Manual dispatch only: this repo is private and the GitHub Actions budget
+# hard-blocks all hosted-runner jobs (every job fails in 2s, "Actions budget
+# is preventing further use"). GitHub CI is unusable until the repo goes
+# public or a budget is allocated.
+#
+# Local pre-push gate: run `hack/ci-local.sh` in your clone instead.
+# This script mirrors the job sequence below and passes/fails locally.
+# Restore `pull_request`/`push` triggers when the Actions budget situation changes.
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
