@@ -1,0 +1,121 @@
+# Rendered by bin/30-bnk-install.sh (envsubst) from cluster.yaml + discovered.env
+# after the tmm node's alias /28 slices are known.
+#
+# Static routes are the full proven contract (reference/TRIAL-NOTES.md item 7)
+# — in particular route-int-gw, which the earlier reference/install captures
+# were MISSING ("REQUIRED for default-egress gw resolution — missing on
+# reference, egress never worked there so nobody noticed"). Do not drop it.
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKVlan
+metadata:
+  name: external
+  namespace: f5-bnk
+spec:
+  name: external
+  category: external
+  interfaces:
+  - "1.1"
+  internal: true
+  mtu: ${CFG_BNK_TMMMTU}
+  prefixlen_v4: 16
+  selfip_v4s:
+  - ${TMM_EXT_SELFIP}
+  tag: 0
+  auto_lasthop: AUTO_LASTHOP_DEFAULT
+  cmp_hash: DEFAULT
+  pod_hash: DISABLED
+  trunk_hash: src-dst-ipport
+  bonded: false
+  allowed_services:
+  - port: ""
+    protocol: "1"
+  - port: "${CFG_EGRESS_VXLANPORT}"
+    protocol: udp
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKVlan
+metadata:
+  name: internal
+  namespace: f5-bnk
+spec:
+  name: internal
+  interfaces:
+  - "1.2"
+  internal: true
+  mtu: ${CFG_BNK_TMMMTU}
+  prefixlen_v4: 16
+  selfip_v4s:
+  - ${TMM_INT_SELFIP}
+  tag: 0
+  auto_lasthop: AUTO_LASTHOP_DEFAULT
+  cmp_hash: DEFAULT
+  pod_hash: DISABLED
+  trunk_hash: src-dst-ipport
+  bonded: false
+  allowed_services: []
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: route-ext-gw
+  namespace: f5-bnk
+spec:
+  destination: ${DERIVED_EXT_GW_IP}
+  prefixLen: 32
+  type: interface
+  interface: external
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: route-int-gw
+  namespace: f5-bnk
+spec:
+  destination: ${DERIVED_INT_GW_IP}
+  prefixLen: 32
+  type: interface
+  interface: internal
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: route-ext-underlay
+  namespace: f5-bnk
+spec:
+  destination: ${EXT_UNDERLAY_DEST}
+  prefixLen: ${EXT_UNDERLAY_PREFIXLEN}
+  gateway: ${DERIVED_EXT_GW_IP}
+  type: gateway
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: route-cluster-pods
+  namespace: f5-bnk
+spec:
+  destination: ${MAIN_PODS_DEST}
+  prefixLen: ${MAIN_PODS_PREFIXLEN}
+  gateway: ${TMM_POD_GW}
+  type: gateway
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: route-cluster-svcs
+  namespace: f5-bnk
+spec:
+  destination: ${MAIN_SVCS_DEST}
+  prefixLen: ${MAIN_SVCS_PREFIXLEN}
+  gateway: ${TMM_POD_GW}
+  type: gateway
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: route-default-egress
+  namespace: f5-bnk
+spec:
+  destination: 0.0.0.0
+  prefixLen: 0
+  gateway: ${DERIVED_INT_GW_IP}
+  type: gateway

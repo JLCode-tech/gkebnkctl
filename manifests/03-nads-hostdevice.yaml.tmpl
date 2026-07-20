@@ -1,0 +1,38 @@
+# Rendered by bin/30-bnk-install.sh (envsubst) from discovered.env.
+# host-device NADs — NOT ipvlan, NO whereabouts. The device name is
+# discovered at runtime (25-discover.sh); never hardcode ensN/ethN here.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: tmm-ext
+  namespace: f5-bnk
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "name": "external-network",
+      "type": "host-device",
+      "device": "${TMM_EXT_IFACE}",
+      "ipam": {
+        "type": "static",
+        "addresses": [{"address": "${TMM_EXT_SELFIP}/28"}]
+      }
+    }
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: tmm-int
+  namespace: f5-bnk
+spec:
+  config: |
+    {
+      "cniVersion": "0.3.1",
+      "name": "internal-network",
+      "type": "host-device",
+      "device": "${TMM_INT_IFACE}",
+      "ipam": {
+        "type": "static",
+        "addresses": [{"address": "${TMM_INT_SELFIP}/28"}]
+      }
+    }

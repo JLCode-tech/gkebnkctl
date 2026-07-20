@@ -1,0 +1,72 @@
+# Rendered by bin/30-bnk-install.sh (envsubst) from cluster.yaml + discovered.env.
+#
+# advanced.tmm.env carries the mandatory host-device env
+# (reference/TRIAL-NOTES.md contract item 3):
+#   TMM_MAPRES_ADDL_VETHS_ON_DP=TRUE
+#   PCIDEVICE_INTEL_COM_EXT / PCIDEVICE_INTEL_COM_INT — mapres SKIPS an
+#   interface without a PCIDEVICE_* env ref ("Environment variable
+#   reference is required"); TMM_MAPRES_IFC_CLAIM_LIST alone does NOT work.
+apiVersion: k8s.f5.com/v1
+kind: CNEInstance
+metadata:
+  name: instance
+  namespace: f5-bnk
+spec:
+  advanced:
+    cneController:
+      env:
+      - name: TMM_DEFAULT_MTU
+        value: "${CFG_BNK_TMMMTU}"
+    demoMode:
+      enabled: true
+    envDiscovery:
+      enabled: false
+      runAfterSuccess: true
+      stopOnFail: true
+    maintenanceMode:
+      enabled: false
+    tmm:
+      env:
+      - name: TMM_DEFAULT_MTU
+        value: "${CFG_BNK_TMMMTU}"
+      - name: ZEBOS_STATE
+        value: legacy
+      - name: TMM_GENERIC_SOCKET_DRIVER
+        value: "true"
+      - name: TMM_MAPRES_ADDL_VETHS_ON_DP
+        value: "TRUE"
+      - name: PCIDEVICE_INTEL_COM_EXT
+        value: "${TMM_EXT_PCI}"
+      - name: PCIDEVICE_INTEL_COM_INT
+        value: "${TMM_INT_PCI}"
+  certificate:
+    clusterIssuer: ext-ca-cluster-issuer
+  coreCollection:
+    enabled: false
+  deploymentSize: Small
+  dpu:
+    enabled: false
+  dynamicRouting:
+    enabled: false
+  firewallACL:
+    enabled: false
+  manifestVersion: "${CFG_BNK_MANIFESTVERSION}"
+  networkAttachments:
+  - tmm-ext
+  - tmm-int
+  product:
+    gatewayAPI: true
+    type: BNK
+  pseudoCNI:
+    enabled: true
+  registry:
+    imagePullPolicy: Always
+    imagePullSecrets:
+    - name: far-secret
+    uri: repo.f5.com
+  telemetry:
+    loggingSubsystem:
+      enabled: false
+    metricSubsystem:
+      enabled: false
+  wholeCluster: true
