@@ -201,3 +201,49 @@ func TestSave_KeysAreSorted(t *testing.T) {
 		}
 	}
 }
+
+// TestDelete_RemovesKeyFromDisk tests that Delete removes a key entirely
+// from state.env (rather than leaving KEY= lines).
+func TestDelete_RemovesKeyFromDisk(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write initial state with keys.
+	s1, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s1.Set("KEY_A", "val_a")
+	s1.Set("KEY_B", "val_b")
+	s1.Set("KEY_C", "val_c")
+	if err := s1.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Load, delete KEY_B, save, and reload.
+	s2, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load after initial save: %v", err)
+	}
+	s2.Delete("KEY_B")
+	if s2.Get("KEY_B") != "" {
+		t.Error("Delete should remove the key from the in-memory map")
+	}
+	if err := s2.Save(); err != nil {
+		t.Fatalf("Save after delete: %v", err)
+	}
+
+	// Reload and verify KEY_B is gone and the others survive.
+	s3, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load after delete save: %v", err)
+	}
+	if s3.Get("KEY_A") != "val_a" {
+		t.Errorf("KEY_A: got %q, want val_a", s3.Get("KEY_A"))
+	}
+	if s3.Get("KEY_B") != "" {
+		t.Errorf("KEY_B: got %q, want empty (deleted)", s3.Get("KEY_B"))
+	}
+	if s3.Get("KEY_C") != "val_c" {
+		t.Errorf("KEY_C: got %q, want val_c", s3.Get("KEY_C"))
+	}
+}

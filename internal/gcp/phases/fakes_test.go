@@ -221,6 +221,7 @@ func (f *fakeGKE) CreateCluster(_ context.Context, req *containerpb.CreateCluste
 }
 
 func (f *fakeGKE) GetCluster(_ context.Context, req *containerpb.GetClusterRequest, _ ...gax.CallOption) (*containerpb.Cluster, error) {
+	//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
 	if c, ok := f.clusters[req.GetClusterId()]; ok {
 		return c, nil
 	}
@@ -228,10 +229,12 @@ func (f *fakeGKE) GetCluster(_ context.Context, req *containerpb.GetClusterReque
 }
 
 func (f *fakeGKE) DeleteCluster(_ context.Context, req *containerpb.DeleteClusterRequest, _ ...gax.CallOption) (*containerpb.Operation, error) {
+	//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
 	f.deleteClusterCalls = append(f.deleteClusterCalls, req.GetClusterId())
 	if f.deleteClusterErr != nil {
 		return nil, f.deleteClusterErr
 	}
+	//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
 	delete(f.clusters, req.GetClusterId())
 	return &containerpb.Operation{Name: "op-delete-cluster", Status: containerpb.Operation_DONE}, nil
 }
@@ -252,6 +255,7 @@ func (f *fakeGKE) CreateNodePool(_ context.Context, req *containerpb.CreateNodeP
 }
 
 func (f *fakeGKE) GetNodePool(_ context.Context, req *containerpb.GetNodePoolRequest, _ ...gax.CallOption) (*containerpb.NodePool, error) {
+	//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
 	if p, ok := f.nodePools[req.GetNodePoolId()]; ok {
 		return p, nil
 	}
@@ -261,10 +265,12 @@ func (f *fakeGKE) GetNodePool(_ context.Context, req *containerpb.GetNodePoolReq
 func (f *fakeGKE) GetOperation(_ context.Context, req *containerpb.GetOperationRequest, _ ...gax.CallOption) (*containerpb.Operation, error) {
 	status := containerpb.Operation_DONE
 	if f.getOperationStatuses != nil {
+		//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
 		if s, ok := f.getOperationStatuses[req.GetOperationId()]; ok {
 			status = s
 		}
 	}
+	//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
 	return &containerpb.Operation{Name: req.GetOperationId(), Status: status}, nil
 }
 

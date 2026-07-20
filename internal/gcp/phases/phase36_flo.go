@@ -41,6 +41,9 @@ func Phase36FLO(ctx context.Context, cl *intent.Cluster, _ *state.State, clients
 		return nil
 	}
 
+	// Force SSA (Force: true) instead of plain kubectl apply --server-side.
+	// Client-side apply would exceed CRD annotation size limits (23 CRDs, ~3 MB manifest).
+	// Force ensures idempotent application even if the manifest has been partially applied.
 	if err := applyEmbeddedManifest(ctx, clients, floManifestPath, true); err != nil {
 		return fmt.Errorf("phase36: %w", err)
 	}

@@ -297,7 +297,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) err
 	// them, so down clears the same list rather than maintaining a second,
 	// independently-drifting copy of the same 13 literals.
 	for _, k := range phases.DiscoverStateKeys {
-		st.Set(k, "")
+		st.Delete(k)
 	}
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("down: saving state: %w", err)

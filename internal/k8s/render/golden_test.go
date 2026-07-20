@@ -167,8 +167,8 @@ func TestRenderLicenseCR_Golden(t *testing.T) {
 	}
 	assertGolden(t, "license-cr.golden.yaml", got)
 
-	if !strings.Contains(string(got), "jwt: eyFAKE.JWT.TOKEN") {
-		t.Error("rendered License CR missing spec.jwt")
+	if !strings.Contains(string(got), `jwt: "eyFAKE.JWT.TOKEN"`) {
+		t.Error("rendered License CR missing spec.jwt or JWT is not quoted")
 	}
 }
 

@@ -108,6 +108,7 @@ func ensureCluster(ctx context.Context, gke gcp.GKEAPI, project, zone, name stri
 			fmt.Fprintf(os.Stderr, "[phase 20] cluster %s already exists, status=RUNNING, skipping create\n", name)
 			return existing, nil
 		case containerpb.Cluster_ERROR:
+			//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
 			return nil, fmt.Errorf("cluster %s is in ERROR state: %s", name, existing.GetStatusMessage())
 		default:
 			fmt.Fprintf(os.Stderr, "[phase 20] cluster %s already exists, status=%s, waiting for RUNNING\n", name, existing.GetStatus())
@@ -235,6 +236,7 @@ func ensureNodePool(ctx context.Context, gke gcp.GKEAPI, project, zone, clusterN
 			fmt.Fprintf(os.Stderr, "[phase 20] node pool %s already exists, skipping create\n", pool.GetName())
 			return nil
 		case containerpb.NodePool_ERROR:
+			//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
 			return fmt.Errorf("node pool %s is in ERROR state: %s", pool.GetName(), existing.GetStatusMessage())
 		default:
 			fmt.Fprintf(os.Stderr, "[phase 20] node pool %s already exists, status=%s, waiting for RUNNING\n", pool.GetName(), existing.GetStatus())
@@ -275,6 +277,7 @@ func waitForGKEOp(ctx context.Context, gke gcp.GKEAPI, project, zone, opName str
 			}
 			return nil
 		case containerpb.Operation_ABORTING:
+			//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
 			return fmt.Errorf("operation %s is aborting: %s", opName, op.GetStatusMessage())
 		}
 		if time.Now().After(deadline) {
@@ -325,6 +328,7 @@ func waitForNodePoolRunning(ctx context.Context, gke gcp.GKEAPI, project, zone, 
 		case containerpb.NodePool_RUNNING:
 			return nil
 		case containerpb.NodePool_ERROR:
+			//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
 			return fmt.Errorf("node pool %s in ERROR state: %s", poolName, p.GetStatusMessage())
 		}
 		if time.Now().After(deadline) {

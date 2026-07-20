@@ -99,6 +99,11 @@ func (s *State) Set(key, value string) {
 	s.data[key] = value
 }
 
+// Delete removes key from the state. Call Save to persist.
+func (s *State) Delete(key string) {
+	delete(s.data, key)
+}
+
 // MarkReadOnly puts the State into read-only mode: Set still updates the
 // in-memory map (so a dry-run can thread placeholder values between phases),
 // but Save becomes a no-op so the on-disk state.env is never modified. Call
