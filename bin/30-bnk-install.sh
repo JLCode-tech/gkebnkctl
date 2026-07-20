@@ -153,11 +153,11 @@ if [[ ! -f "$CFG_BNK_JWTPATH" ]]; then
   log::error "JWT not found at $CFG_BNK_JWTPATH (cluster.yaml bnk.jwtPath)"
   exit 1
 fi
-export BNK_JWT_CONTENT
-BNK_JWT_CONTENT="$(cat "$CFG_BNK_JWTPATH")"
+export LICENSE_JWT
+LICENSE_JWT="$(tr -d '[:space:]' <"$CFG_BNK_JWTPATH")"
 common::render_template "$MANIFESTS/09-license.yaml.tmpl" "$RENDERED/09-license.yaml"
 kubectl apply -f "$RENDERED/09-license.yaml"
-unset BNK_JWT_CONTENT
+unset LICENSE_JWT
 # strip the rendered copy immediately — it's the only place the JWT content
 # ever touches disk outside the user's own $CFG_BNK_JWTPATH.
 rm -f "$RENDERED/09-license.yaml"

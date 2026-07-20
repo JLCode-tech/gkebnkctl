@@ -146,13 +146,24 @@ with an `AUTHORED, NOT CAPTURED LIVE` or `AMBIGUITY` comment:
 - `manifests/02-multus-rbac.yaml`, `02-multus-crd.yaml`, `02-multus-configmap.yaml`
   — the Multus SA/ClusterRole/CRB/ConfigMap/NAD-CRD bundle; only the
   DaemonSet was captured live.
-- `manifests/09-license.yaml.tmpl` — the `License` CRD's field name for the
-  JWT payload (`licenseToken`) is a best guess; no license CR YAML exists in
-  `reference/install/`. Verify with `kubectl explain license.spec` before
-  relying on it.
+
+Resolved during verification (no longer ambiguous):
+
+- `manifests/09-license.yaml.tmpl` — **live-proven** 2026-07-20 on
+  bnk-hostdev (reached License status Active/eval in ~60s). The `License`
+  CRD's `spec` carries the raw JWT string directly under `jwt` (not
+  base64, not a nested `licenseToken` field), plus the three `teem*Url`
+  fields:
+  ```yaml
+  spec:
+    operationMode: connected
+    jwt: ${LICENSE_JWT}
+    teemCertUrl: https://product.apis.f5.com/ee/v1
+    teemEntitlementUrl: https://product-s.apis.f5.com/ee/v1
+    teemInitialConfigUrl: https://product-s.apis.f5.com/ee/v1
+  ```
 - `network.main.podsCidr`/`svcsCidr` defaults (`10.66.0.0/16` /
-  `10.67.0.0/20`) follow the values actually present in the applied
-  `reference/install/06-vlans-routes.yaml` and the 7-item contract in
-  `TRIAL-NOTES.md`, which disagree with the earlier `10.64/16` / `10.65/20`
-  mentioned in that same file's "Built so far" narrative section (an
-  in-progress renumbering during the trial, never reconciled in the notes).
+  `10.67.0.0/20`) — **confirmed correct**: this is what was actually
+  applied and proven live. The earlier `10.64/16` / `10.65/20` mentioned in
+  `TRIAL-NOTES.md`'s "Built so far" narrative section was an earlier plan,
+  superseded mid-session.

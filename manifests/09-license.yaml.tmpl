@@ -1,16 +1,12 @@
-# AMBIGUITY — NOT CAPTURED LIVE. reference/install/ has no License CR file;
-# reference/TRIAL-NOTES.md only says "License CR (k8s.f5net.com/v1, ns
-# f5-utils, operationMode connected, jwt = ...)" without giving the exact
-# spec field name for the JWT payload. `licenseToken` below is a best-effort
-# guess at the F5 BNK License CRD field name — VERIFY against your BNK
-# manifestVersion's CRD schema (`kubectl explain license.spec`) before
-# relying on this. If wrong, the symptom per TRIAL-NOTES item 6 is:
-# "Configs are not allowed since license is not activated" and no VLAN
-# programming.
+# PROVEN LIVE 2026-07-20 on bnk-hostdev — this exact shape reached
+# License status Active/eval in ~60s. Without it: "Configs are not allowed
+# since license is not activated" and no VLAN programming (contract item 6
+# in reference/TRIAL-NOTES.md).
 #
 # Rendered by bin/30-bnk-install.sh from the JWT file at cluster.yaml's
-# bnk.jwtPath — the JWT content itself is read at apply time and is never
-# written to a file in this repo.
+# bnk.jwtPath — `jwt` is the RAW token string (whitespace-trimmed file
+# contents, NOT base64). The JWT content is read at apply time and is
+# never written to a file in this repo.
 apiVersion: k8s.f5net.com/v1
 kind: License
 metadata:
@@ -18,4 +14,7 @@ metadata:
   namespace: f5-utils
 spec:
   operationMode: connected
-  licenseToken: "${BNK_JWT_CONTENT}"
+  jwt: ${LICENSE_JWT}
+  teemCertUrl: https://product.apis.f5.com/ee/v1
+  teemEntitlementUrl: https://product-s.apis.f5.com/ee/v1
+  teemInitialConfigUrl: https://product-s.apis.f5.com/ee/v1
