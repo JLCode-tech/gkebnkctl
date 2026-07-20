@@ -116,6 +116,13 @@ type Clients struct {
 	// RESTMapper resolves apiVersion+kind -> GroupVersionResource using a
 	// live discovery client. Constructed alongside K8s by AttachK8s.
 	RESTMapper meta.RESTMapper
+
+	// RestConfig is the rest.Config AttachK8s built K8s/Dynamic/RESTMapper
+	// from. Kept alongside the derived clients (Task D) so phases needing raw
+	// transport access — Phase50's pod-exec verification, which must build a
+	// remotecommand SPDY executor directly against the API server — don't
+	// need to rebuild it from GetCluster a second time.
+	RestConfig *rest.Config
 }
 
 // NewClients constructs real GCP SDK clients over Application Default
@@ -225,6 +232,7 @@ func attachK8sFromConfig(c *Clients, cfg *rest.Config) error {
 	c.K8s = cs
 	c.Dynamic = dyn
 	c.RESTMapper = restmapper.NewDeferredDiscoveryRESTMapper(memCachedDiscovery{disc})
+	c.RestConfig = cfg
 	return nil
 }
 

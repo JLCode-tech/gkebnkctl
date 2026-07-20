@@ -102,3 +102,38 @@ type LicenseCRVars struct {
 func RenderLicenseCR(tmpl []byte, v LicenseCRVars) ([]byte, error) {
 	return Render(tmpl, v)
 }
+
+// EgressVars is the Vars struct for templates/egress.yaml.tmpl.
+// Field mapping: docs/SPEC-go-tracer.md §5.
+type EgressVars struct {
+	TestNamespace string
+	VxlanKey      int
+	VxlanMtu      int
+	AgentExtIface string
+	VxlanPort     int
+	AgentPoolName string
+}
+
+// RenderEgress renders templates/egress.yaml.tmpl (Phase50): the
+// F5SPKEgress pseudo-CNI vxlan CR + the egress-client test pod.
+func RenderEgress(tmpl []byte, v EgressVars) ([]byte, error) {
+	return Render(tmpl, v)
+}
+
+// AgentRouteSetterVars is the Vars struct for
+// templates/agent-route-setter.yaml.tmpl. Field mapping:
+// docs/SPEC-go-tracer.md §5.
+type AgentRouteSetterVars struct {
+	AgentPoolName string
+	ExtPodsCidr   string
+	ExtGwIP       string
+	AgentExtIface string
+}
+
+// RenderAgentRouteSetter renders templates/agent-route-setter.yaml.tmpl
+// (Phase50): the bnk-agent-route-setter DaemonSet that keeps the
+// pseudo-CNI-vxlan egress route alive on agent nodes
+// (reference/TRIAL-NOTES.md item 7).
+func RenderAgentRouteSetter(tmpl []byte, v AgentRouteSetterVars) ([]byte, error) {
+	return Render(tmpl, v)
+}

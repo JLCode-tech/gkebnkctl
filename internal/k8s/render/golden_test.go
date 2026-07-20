@@ -43,6 +43,20 @@ var (
 	goldenLicenseCRVars = LicenseCRVars{
 		JWT: "eyFAKE.JWT.TOKEN",
 	}
+	goldenEgressVars = EgressVars{
+		TestNamespace: "egress-test",
+		VxlanKey:      100,
+		VxlanMtu:      1410,
+		AgentExtIface: "ens5",
+		VxlanPort:     5789,
+		AgentPoolName: "agent-pool",
+	}
+	goldenAgentRouteSetterVars = AgentRouteSetterVars{
+		AgentPoolName: "agent-pool",
+		ExtPodsCidr:   "10.31.0.0/24",
+		ExtGwIP:       "10.30.0.1",
+		AgentExtIface: "ens5",
+	}
 )
 
 // readTemplate loads a template source from ../manifests/templates by name
@@ -155,5 +169,61 @@ func TestRenderLicenseCR_Golden(t *testing.T) {
 
 	if !strings.Contains(string(got), "jwt: eyFAKE.JWT.TOKEN") {
 		t.Error("rendered License CR missing spec.jwt")
+	}
+}
+
+// TestRenderEgress_Golden asserts the F5SPKEgress pseudo-CNI vxlan config
+// (nodeInterfaceName from Phase25-discovered AGENT_EXT_IFACE, plus
+// testNamespace/vxlanKey/vxlanMtu/vxlanPort from cluster.yaml) and the
+// egress-client test pod's agentPool nodeSelector both render correctly.
+func TestRenderEgress_Golden(t *testing.T) {
+	tmpl := readTemplate(t, "egress.yaml.tmpl")
+	got, err := RenderEgress(tmpl, goldenEgressVars)
+	if err != nil {
+		t.Fatalf("RenderEgress: %v", err)
+	}
+	assertGolden(t, "egress.golden.yaml", got)
+
+	s := string(got)
+	for _, want := range []string{
+		"kind: F5SPKEgress",
+		"- egress-test",
+		"key: 100",
+		"mtu: 1410",
+		"nodeInterfaceName: ens5",
+		"port: 5789",
+		"name: egress-client",
+		"namespace: egress-test",
+		"cloud.google.com/gke-nodepool: agent-pool",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("rendered egress manifest missing %q", want)
+		}
+	}
+}
+
+// TestRenderAgentRouteSetter_Golden asserts the agent-node route-reconcile
+// DaemonSet carries the external-pods-CIDR/gateway/iface triple
+// (reference/TRIAL-NOTES.md item 7) and targets the configured agent pool.
+func TestRenderAgentRouteSetter_Golden(t *testing.T) {
+	tmpl := readTemplate(t, "agent-route-setter.yaml.tmpl")
+	got, err := RenderAgentRouteSetter(tmpl, goldenAgentRouteSetterVars)
+	if err != nil {
+		t.Fatalf("RenderAgentRouteSetter: %v", err)
+	}
+	assertGolden(t, "agent-route-setter.golden.yaml", got)
+
+	s := string(got)
+	for _, want := range []string{
+		"kind: DaemonSet",
+		"name: bnk-agent-route-setter",
+		"cloud.google.com/gke-nodepool: agent-pool",
+		"want_cidr='10.31.0.0/24'",
+		"want_gw='10.30.0.1'",
+		"want_dev='ens5'",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("rendered agent-route-setter DS missing %q", want)
+		}
 	}
 }

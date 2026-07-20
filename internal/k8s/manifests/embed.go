@@ -11,8 +11,10 @@
 //	flo/            — FLO operator manifest (~3 MB, 23 CRDs), copied from
 //	                  reference/recon/flo-manifest.yaml (Task C)
 //	templates/      — text/template sources for dynamic SSA: nads-hostdevice,
-//	                  cneinstance, vlans-routes, license-cr, egress,
-//	                  agent-route-setter, discover-pod (Task C/D)
+//	                  cneinstance, vlans-routes, license-cr (Task C), egress,
+//	                  agent-route-setter (Task D). No discover-pod.yaml.tmpl —
+//	                  Phase25's ephemeral pod is a typed corev1.Pod struct
+//	                  instead (see templates/README.md)
 //
 // Task A pre-declares the full go:embed directive (all five directories)
 // with placeholder README.md content so Tasks C/D are append-only — they add

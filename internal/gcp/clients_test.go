@@ -25,6 +25,9 @@ func TestAttachK8sFromConfig(t *testing.T) {
 	if c.RESTMapper == nil {
 		t.Error("RESTMapper is nil after attachK8sFromConfig")
 	}
+	if c.RestConfig != cfg {
+		t.Error("RestConfig is not the cfg passed to attachK8sFromConfig")
+	}
 }
 
 func TestNewClients_EmptyProject(t *testing.T) {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -46,11 +45,12 @@ StaticRoutes, TMM settle, egress).
 When --dry-run is set, every phase prints its planned actions and makes zero
 GCP mutations.
 
-Phases 00 (preflight) through 42 (TMM settle) are real — see
-internal/gcp/phases. Phase 50 (egress) remains a stub pending Task D.
-GKEBNKCTL_SKIP_AUTH=1 skips Phase00's ADC + API-enabled checks entirely
-(passing a nil *gcp.Clients through every real phase) so CI can run
---dry-run without live GCP credentials.`,
+Every phase, 00 (preflight) through 50 (egress), is real — see
+internal/gcp/phases. GKEBNKCTL_SKIP_AUTH=1 skips Phase00's ADC +
+API-enabled checks entirely (passing a nil *gcp.Clients through every real
+phase) so CI can run --dry-run without live GCP credentials.
+GKEBNKCTL_VERIFY_EGRESS=1 additionally enables Phase50's best-effort
+pkts_in/curl egress verification (default: skipped).`,
 	RunE: runUp,
 }
 
@@ -95,16 +95,12 @@ func runDown(cmd *cobra.Command, _ []string) error {
 	return runPhasedDown(cmd.Context(), flagConfig, flagYes, flagDownDryRun)
 }
 
-// upPhase describes one entry in the up phase graph. 00-42 dispatch to real
-// internal/gcp/phases functions (Task B: 00/10/20/25; Task C: 30-42); 50
-// remains a stub pending Task D (egress).
+// upPhase describes one entry in the up phase graph. Every phase (00-50)
+// dispatches to a real internal/gcp/phases function via realUpPhases (Task
+// B: 00/10/20/25; Task C: 30-42; Task D: 50).
 type upPhase struct {
 	num  string
 	name string
-	// needsLiveCluster is only meaningful for the still-stubbed phase (50) —
-	// the stub path prints "needs live cluster" instead of attempting real
-	// work. Every real phase (00-42) prints its own dry-run note directly.
-	needsLiveCluster bool
 }
 
 var upPhases = []upPhase{
@@ -125,12 +121,14 @@ var upPhases = []upPhase{
 	{num: "40", name: "license"},
 	{num: "41", name: "vlans-routes"},
 	{num: "42", name: "tmm-settle"},
-	{num: "50", name: "egress", needsLiveCluster: true},
+	{num: "50", name: "egress"},
 }
 
-// realUpPhases dispatches the phase numbers Task B/C implemented for real to
-// their internal/gcp/phases function. Every other phase in upPhases (only
-// 50, pending Task D) falls through to runStubPhase.
+// realUpPhases dispatches every phase number in upPhases to its
+// internal/gcp/phases function. No phase falls through to runStubPhase
+// anymore (Task D landed the last one, 50/egress) — runStubPhase is kept
+// only as a defensive fallback (see the loop in runPhasedUp) in case a
+// future phase is added to upPhases before its implementation lands.
 var realUpPhases = map[string]func(ctx context.Context, cl *intent.Cluster, st *state.State, clients *gcp.Clients, dryRun bool) error{
 	"00": phases.Phase00Preflight,
 	"10": phases.Phase10Networks,
@@ -149,11 +147,12 @@ var realUpPhases = map[string]func(ctx context.Context, cl *intent.Cluster, st *
 	"40": phases.Phase40License,
 	"41": phases.Phase41VlansRoutes,
 	"42": phases.Phase42TMMSettle,
+	"50": phases.Phase50Egress,
 }
 
 // runPhasedUp is the Go-SDK phased provisioning path activated by
-// `gkebnkctl up -f <file>`. Phases 00-42 (see realUpPhases) call real
-// internal/gcp/phases functions; 50 remains a stub pending Task D.
+// `gkebnkctl up -f <file>`. Every phase 00-50 (see realUpPhases) calls a
+// real internal/gcp/phases function.
 //
 // When dryRun is true, state.MarkReadOnly() is called immediately after
 // Load so any placeholder state phases Set during the run never persists to
@@ -204,8 +203,7 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 		fmt.Fprintln(os.Stderr, "→ dry-run complete")
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "✓ up complete: cluster=%s state=%s (phase 50/egress is a stub — see docs/SPEC-go-tracer.md §8 Task D)\n",
-		cl.Metadata.Name, cl.StateDir())
+	fmt.Fprintf(os.Stderr, "✓ up complete: cluster=%s state=%s\n", cl.Metadata.Name, cl.StateDir())
 	return nil
 }
 
@@ -225,20 +223,13 @@ func buildGCPClients(ctx context.Context, cl *intent.Cluster, dryRun bool) (*gcp
 	return nil, nil
 }
 
-// runStubPhase prints the `[phase NN] <name> (stub)` banner for the phases
-// Task C/D still owns (30-50), plus a "needs live cluster" annotation for
-// the ones that render against Phase25's discovered state.
+// runStubPhase prints the `[phase NN] <name> (stub)` banner. As of Task D
+// every entry in upPhases has a realUpPhases implementation, so this is
+// unreachable in practice — kept as a defensive fallback so a future phase
+// number added to upPhases without a matching realUpPhases entry fails
+// loudly (a stub banner) instead of silently vanishing from the run.
 func runStubPhase(p upPhase) {
-	var notes []string
-	if p.needsLiveCluster {
-		notes = append(notes, "needs live cluster")
-	}
-
-	if len(notes) == 0 {
-		fmt.Fprintf(os.Stderr, "[phase %s] %s (stub)\n", p.num, p.name)
-		return
-	}
-	fmt.Fprintf(os.Stderr, "[phase %s] %s (stub) — %s\n", p.num, p.name, strings.Join(notes, "; "))
+	fmt.Fprintf(os.Stderr, "[phase %s] %s (stub)\n", p.num, p.name)
 }
 
 // confirmDestroy prompts the operator to type 'destroy' and reports whether
