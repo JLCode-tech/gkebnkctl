@@ -31,7 +31,8 @@ func TestAttachK8sFromConfig(t *testing.T) {
 }
 
 func TestNewClients_EmptyProject(t *testing.T) {
-	if _, err := NewClients(nil, ""); err == nil { //nolint:staticcheck // nil ctx is fine, we fail before it's used
+	//lint:ignore SA1012 project=="" is checked before ctx is ever touched
+	if _, err := NewClients(nil, ""); err == nil {
 		t.Fatal("expected error for empty project, got nil")
 	}
 }

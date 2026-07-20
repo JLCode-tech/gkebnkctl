@@ -9,11 +9,6 @@ import (
 	"github.com/JLCode-tech/gkebnkctl/internal/k8s/manifests"
 )
 
-// bnkFieldManager is the field-manager string used by every dynamic SSA call
-// in the BNK-install phases (30-42) — matches k8s.FieldManager, kept as a
-// local alias so this file's intent is self-documenting without a jump.
-const bnkFieldManager = k8s.FieldManager
-
 // applierFor builds a k8s.Applier from clients.Dynamic + clients.RESTMapper,
 // which gcp.Clients.AttachK8s populates once (after Phase20 — the GKE
 // cluster must be RUNNING). Every phase 30-42 real-work branch calls this
