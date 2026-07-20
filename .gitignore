@@ -1,5 +1,7 @@
 # Local config (copy cluster.yaml.example -> cluster.yaml and edit)
 cluster.yaml
+# Exception: the committed working example (see examples/host-device/).
+!examples/host-device/cluster.yaml
 
 # Post-provision discovery output (regenerate with bin/25-discover.sh)
 discovered.env
@@ -14,6 +16,18 @@ kubeconfig
 *.kubeconfig
 dockerconfig.json
 .dockerconfigjson
+# Exception: an obvious, committed placeholder so `gkebnkctl validate` /
+# `up --dry-run` have something to point bnk.jwtPath at without a real
+# secret. Never put real subscription JWT content here.
+!examples/host-device/license.jwt
+
+# Go build artifacts
+/gkebnkctl
+*.test
+
+# Go-SDK state dirs (`.gkebnkctl/<cluster>/state.env` IDs cache — see
+# internal/gcp/state)
+.gkebnkctl/
 
 # OS / editor cruft
 .DS_Store

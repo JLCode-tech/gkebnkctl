@@ -1,0 +1,41 @@
+package gcp
+
+import (
+	"testing"
+
+	"k8s.io/client-go/rest"
+)
+
+// TestAttachK8sFromConfig proves the typed/dynamic/RESTMapper trio is built
+// from a rest.Config without requiring a live API server — client-go client
+// construction only validates the Host string, it doesn't dial.
+func TestAttachK8sFromConfig(t *testing.T) {
+	c := &Clients{}
+	cfg := &rest.Config{Host: "https://127.0.0.1:1"}
+	if err := attachK8sFromConfig(c, cfg); err != nil {
+		t.Fatalf("attachK8sFromConfig: unexpected error: %v", err)
+	}
+	if c.K8s == nil {
+		t.Error("K8s client is nil after attachK8sFromConfig")
+	}
+	if c.Dynamic == nil {
+		t.Error("Dynamic client is nil after attachK8sFromConfig")
+	}
+	if c.RESTMapper == nil {
+		t.Error("RESTMapper is nil after attachK8sFromConfig")
+	}
+}
+
+func TestNewClients_EmptyProject(t *testing.T) {
+	if _, err := NewClients(nil, ""); err == nil { //nolint:staticcheck // nil ctx is fine, we fail before it's used
+		t.Fatal("expected error for empty project, got nil")
+	}
+}
+
+func TestClients_AttachK8s_NotImplementedStub(t *testing.T) {
+	c := &Clients{}
+	err := c.AttachK8s(nil, "bnk-hostdev", "us-central1-a") //nolint:staticcheck // stub never uses ctx
+	if err == nil {
+		t.Fatal("expected AttachK8s stub to return an error (not implemented until Task B), got nil")
+	}
+}
