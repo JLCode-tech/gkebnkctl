@@ -30,7 +30,7 @@ internal/
     auth.go                rest.Config builder (container API + ADC, no kubeconfig)
     state/                 state.env local cache (discovered values only)
     labels/                label scheme for GCP resources that support labels
-    phases/                Phase00..Phase50 + PhaseDown{Cluster,Networks}
+    phases/                Phase00..Phase51 + PhaseDown{Cluster,Networks}
   netcalc/                 pure-Go port of the bash seed's IPv4 math
   k8s/
     apply.go                dynamic server-side-apply
@@ -56,7 +56,7 @@ Two MTUs are configured independently and must not be conflated:
 
 ## Phase model
 
-`up` runs every phase 00→50 in order; each phase is idempotent and
+`up` runs every phase 00→51 in order; each phase is idempotent and
 re-runnable (name-based `Get`-then-skip — see "State & idempotency"
 below). Full per-phase SDK-call/idempotency-check detail:
 [`SPEC-go-tracer.md` §3](SPEC-go-tracer.md#3-phase-inventory).
@@ -81,6 +81,40 @@ below). Full per-phase SDK-call/idempotency-check detail:
 | 41 | vlans-routes | `F5SPKVlan` ×2 + `F5SPKStaticRoute` ×6 (incl. `route-int-gw`) |
 | 42 | tmm-settle | Reactive NIC-handoff-deadlock recovery (best-effort, never errors) |
 | 50 | egress | `F5SPKEgress` + `bnk-agent-route-setter` DS + `egress-client` pod + gated verification |
+| 51 | ingress-vxlan-routes | One `F5SPKStaticRoute` per agent-pool node with a discovered `vxlan100` VTEP — fixes ingress-to-egress-pod asymmetric routing |
+
+### Bidirectional dataplane: why ingress needs its own vxlan route
+
+Phase50's pseudo-CNI egress vxlan makes an egress-namespace pod's *outbound*
+traffic symmetric (pod → vxlan100 → TMM → SNAT → internet) but leaves
+*inbound* traffic to that same pod asymmetric: the pod's default route for
+vxlan-steered traffic is `vxlan100 -> TMM`, so its replies leave over the
+vxlan, but TMM *originates* ingress connections to the pod over the
+standard Cilium route (`route-cluster-pods`, Phase41's cluster-wide pod
+CIDR) — a path mismatch TMM's stateful connection tracking drops (the
+return never arrives on the vxlan TMM expects it on). Phase51 closes this
+by adding one `F5SPKStaticRoute` per agent-pool node — that node's pod CIDR
+routed back over the SAME vxlan egress uses — more specific than
+`route-cluster-pods` so it only affects TMM-originated ingress to that
+node's pods, not the rest of the cluster.
+
+The route's `gateway` is the node's `vxlan100` VTEP address, which
+Phase51 **discovers**, not derives: neither `cluster.yaml` nor the
+`F5SPKEgress` CR (`templates/egress.yaml.tmpl`) carry any vxlan *subnet*
+configuration — only `vxlanKey`/`vxlanMtu`/`vxlanPort` — so the pseudo-CNI
+controller is the sole owner of `vxlan100`'s IPAM and there is no
+reproducible formula for it. Phase51 discovers each agent-pool node's live
+`vxlan100` address the same way Phase25 discovers NIC iface/PCI info: an
+ephemeral privileged pod, `nsenter -t1`'d into the node's host netns,
+reading the interface directly — after Phase50 has applied `F5SPKEgress`
+and waited for `egress-client` Ready, so the vxlan has had a chance to come
+up. A node with no egress-namespace pod scheduled on it has no `vxlan100`
+at all; Phase51 skips that node (no route emitted) rather than guessing,
+since a wrong or absent gateway on a route this specific would black-hole
+*all* ingress to that node's pods — worse than the bug it fixes. Proven
+live on cluster `bnk-hostdev` 2026-07-21: destination `10.66.4.0/24`,
+gateway `10.0.64.1` — VIP ingress returned HTTP 200 and egress still SNAT'd
+correctly, on the same pod.
 
 ### The GKE host-device contract
 

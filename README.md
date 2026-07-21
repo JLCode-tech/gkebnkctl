@@ -75,7 +75,7 @@ or `--dry-run`.
 cp examples/host-device/cluster.yaml my-cluster.yaml   # edit project/zone/name/CIDRs
 
 gkebnkctl validate my-cluster.yaml       # parse + validate — no GCP calls
-gkebnkctl up   -f my-cluster.yaml        # provision + install (phases 00-50)
+gkebnkctl up   -f my-cluster.yaml        # provision + install (phases 00-51)
 gkebnkctl up   -f my-cluster.yaml --dry-run   # print the full plan, zero mutations
 
 gkebnkctl down -f my-cluster.yaml        # tear down (cluster + main VPC only)
@@ -102,7 +102,7 @@ GKEBNKCTL_SKIP_AUTH=1 gkebnkctl up -f my-cluster.yaml --dry-run
 ```
 
 `GKEBNKCTL_SKIP_AUTH=1` skips every GCP/Kubernetes credential check
-entirely, so the full phased plan (through phase 50) prints without
+entirely, so the full phased plan (through phase 51) prints without
 Application Default Credentials, a GCP project, or network access — this is
 the offline/CI dry-run path (see `.github/workflows/ci.yml`'s
 `validate-dryrun` job). It is rejected outside `--dry-run`: a live run needs
