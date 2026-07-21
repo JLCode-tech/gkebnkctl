@@ -76,6 +76,13 @@ const vxlanAddrScript = `ip addr show dev ` + vxlanIfaceName + ` 2>/dev/null | g
 // specific would black-hole ALL ingress to that node's pods outright —
 // worse than the asymmetric-routing bug this phase fixes.
 //
+// The declared routes are authoritative: any F5SPKStaticRoute already
+// occupying one of their destinations under a different name (a hand-applied
+// fix, or an older release's naming) is deleted first — BNK's uniqueness
+// webhook forbids two routes on the same destination+prefixLen, so coexistence
+// is not an option and skipping would leave unmanaged drift. See
+// reconcileStaticRouteDrift in staticroute_drift.go.
+//
 // Needs a live cluster; must run after Phase50 (vxlan100 must exist to be
 // discoverable) and after Phase41 (route-cluster-pods must already exist —
 // this phase's routes are deliberately more specific overrides of it, not a
@@ -84,7 +91,7 @@ func Phase51IngressVxlanRoutes(ctx context.Context, cl *intent.Cluster, _ *state
 	fmt.Fprintf(os.Stderr, "[phase 51] ingress-vxlan-routes: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
-		fmt.Fprintln(os.Stderr, "[phase 51] would discover vxlan100 VTEP on each agent-pool node and apply one F5SPKStaticRoute per node with a live VTEP (needs live cluster)")
+		fmt.Fprintln(os.Stderr, "[phase 51] would discover vxlan100 VTEP on each agent-pool node and apply one F5SPKStaticRoute per node with a live VTEP, replacing any route already occupying those destinations (needs live cluster)")
 		return nil
 	}
 
@@ -109,7 +116,7 @@ func Phase51IngressVxlanRoutes(ctx context.Context, cl *intent.Cluster, _ *state
 	if err != nil {
 		return fmt.Errorf("phase51: rendering ingress-vxlan-routes: %w", err)
 	}
-	if err := applyManifestBytes(ctx, clients, rendered, false); err != nil {
+	if err := applyStaticRouteManifestBytes(ctx, clients, rendered, false); err != nil {
 		return fmt.Errorf("phase51: applying F5SPKStaticRoutes: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "[phase 51] ingress-vxlan-routes OK (%d route(s))\n", len(routes))

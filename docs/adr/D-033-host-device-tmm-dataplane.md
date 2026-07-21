@@ -34,6 +34,50 @@ Phase51 discovers each agent-pool node's live `vxlan100` address at runtime rath
 - Phase51 instead discovers it live: an ephemeral privileged pod is scheduled on each agent-pool node, `nsenter -t1`'d into the node's host network namespace (the same pattern Phase25 uses to discover NIC iface/MAC/PCI info), reading `vxlan100`'s address directly with `ip addr show`. This must happen *after* Phase50 has applied `F5SPKEgress` and waited for the `egress-client` pod to go Ready, so the vxlan interface has actually come up on that node.
 - A node with no egress-namespace pod scheduled on it has no `vxlan100` interface at all. Phase51 treats that as "skip this node" (no route emitted), not an error — a wrong or absent gateway on a route this specific would **black-hole all ingress** to that node's pods outright, which is strictly worse than the asymmetric-routing bug this phase exists to fix.
 
+### Declared routes are authoritative (drift reconciliation)
+
+BNK's `f5validate.f5net.com` admission webhook enforces a unique
+`destination`+`prefixLen` across **all** `F5SPKStaticRoute`s, *regardless of CR
+name* — confirmed live on `bnk-hostdev` 2026-07-21:
+
+```
+CR route-ingress-vxlan-10-66-4-0 cannot be created or updated with an already
+existing staticroute destination address 10.66.4.0 with prefixLen 24
+```
+
+So a hand-applied route occupying a destination this tool declares does not
+merely coexist — it hard-fails the apply and aborts the whole `up` run. Since
+`gkebnkctl` registers its clusters into Forge, which manages drift, the tool
+must be the source of truth for what it declares rather than yielding to
+whatever is already on the cluster.
+
+Phase41 and Phase51 therefore apply their manifests through
+`reconcileStaticRouteDrift` (`internal/gcp/phases/staticroute_drift.go`), which
+deletes any `F5SPKStaticRoute` occupying a declared destination under a
+*different* name before applying. Three cases, one code path:
+
+- **greenfield** — no conflict; nothing deleted; plain apply.
+- **idempotent re-run** — the occupying route *is* ours (same name); it is left
+  alone and server-side apply updates it in place. Verified live: the webhook
+  accepts a same-name re-apply and only rejects a different CR claiming a taken
+  destination.
+- **drift** — an operator hand-applied the route, or an older release used a
+  different name; it is replaced by the declared one.
+
+Scope is deliberately narrow: a route is deleted only on an **exact**
+`destination`+`prefixLen` match with one being created under a different name.
+Phase41's cluster-wide `route-cluster-pods` (`10.66.0.0/16`) is therefore never
+a conflict for Phase51's per-node `10.66.4.0/24` — same supernet, different
+prefix. Deletion also waits for the CR to actually disappear rather than merely
+be marked for deletion: these routes carry the `handletmmconfig_inconsistency`
+finalizer, so removal is asynchronous and a premature re-apply would still trip
+the webhook.
+
+Replacing a live route is briefly traffic-affecting — between delete and
+re-apply TMM has no route for that destination. The webhook forbids
+create-before-delete, so the window is unavoidable; it is logged loudly at
+`[drift]` rather than hidden.
+
 ## Consequences
 
 - Ingress and egress now both work correctly, simultaneously, on the same egress-steered pod — the primary goal.

@@ -55,7 +55,7 @@ func Phase41VlansRoutes(ctx context.Context, cl *intent.Cluster, st *state.State
 		return fmt.Errorf("phase41: rendering vlans-routes: %w", err)
 	}
 
-	if err := applyManifestBytes(ctx, clients, rendered, false); err != nil {
+	if err := applyStaticRouteManifestBytes(ctx, clients, rendered, false); err != nil {
 		return fmt.Errorf("phase41: applying F5SPKVlans/routes: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "[phase 41] F5SPKVlans + static routes OK")
