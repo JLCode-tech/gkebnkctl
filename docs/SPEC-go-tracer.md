@@ -136,7 +136,7 @@ network:
   natGateways: true             # default true (CFG_NETWORK_NATGATEWAYS) — create Cloud Router+NAT on ext+int
 
 cluster:
-  kubernetesVersion: "1.31"     # default "1.31" (CFG_CLUSTER_KUBERNETESVERSION)
+  kubernetesVersion: "1.35"     # default "1.35" (CFG_CLUSTER_KUBERNETESVERSION)
   defaultPool:
     machineType: e2-standard-4  # default e2-standard-4
     nodeCount: 3                # default 3

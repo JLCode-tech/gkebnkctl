@@ -148,7 +148,11 @@ type DataplaneSpec struct {
 // ClusterSpec holds the GKE cluster + node pool configuration.
 // Corresponds to the `cluster:` block in cluster.yaml.
 type ClusterSpec struct {
-	// KubernetesVersion is the GKE minor version. Default "1.31".
+	// KubernetesVersion is the GKE minor version. Default "1.35".
+	// NOT "1.31": GKE no longer offers it, and CreateCluster rejects the
+	// prefix outright with InvalidArgument ("No valid versions with the
+	// prefix \"1.31\" found") — live-hit 2026-07-21. 1.35 is what the proven
+	// bnk-hostdev cluster runs.
 	KubernetesVersion string `yaml:"kubernetesVersion,omitempty"`
 	// DefaultPool is the standard (non-TMM, non-agent) node pool.
 	DefaultPool NodePoolSpec `yaml:"defaultPool,omitempty"`
@@ -296,7 +300,7 @@ func applyDefaults(c *Cluster, baseDir string) {
 	// reject as a missing required field.
 
 	if c.ClusterSpec.KubernetesVersion == "" {
-		c.ClusterSpec.KubernetesVersion = "1.31"
+		c.ClusterSpec.KubernetesVersion = "1.35"
 	}
 	applyPoolDefaults(&c.ClusterSpec.DefaultPool, "", "e2-standard-4", 3, 0)
 	applyPoolDefaults(&c.ClusterSpec.TmmPool, "tmm-pool", "e2-standard-8", 1, 8)
