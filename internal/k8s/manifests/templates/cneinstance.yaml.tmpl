@@ -22,8 +22,16 @@ spec:
         value: "{{ .TmmMtu }}"
     demoMode:
       enabled: true
+    # envDiscovery must NOT be disabled. It is the step that injects the TMM
+    # pod's identity env (NAMESPACE/NODE/CONTAINER_IMAGE_VERSION); with it off,
+    # TMM's crashagent hard-dies —
+    #   crashagent: required environment variable is missing: NAMESPACE / NODE /
+    #   CONTAINER_IMAGE_VERSION; adding watch to /var/crash: no such file →
+    #   terminating main thread
+    # — and TMM never becomes Ready (live-hit 2026-07-21, cluster bnk-scratch3).
+    # The proven bnk-hostdev CNEInstance leaves `enabled` unset (default on);
+    # match it. runAfterSuccess/stopOnFail are kept as on bnk-hostdev.
     envDiscovery:
-      enabled: false
       runAfterSuccess: true
       stopOnFail: true
     maintenanceMode:
@@ -38,14 +46,22 @@ spec:
         value: "true"
       - name: TMM_MAPRES_ADDL_VETHS_ON_DP
         value: "TRUE"
+      # Present in the proven bnk-hostdev CNEInstance alongside the PCIDEVICE_*
+      # refs (not instead of them — see the header note); match it.
+      - name: TMM_MAPRES_IFC_CLAIM_LIST
+        value: net1,net2
       - name: PCIDEVICE_INTEL_COM_EXT
         value: "{{ .ExtPCI }}"
       - name: PCIDEVICE_INTEL_COM_INT
         value: "{{ .IntPCI }}"
   certificate:
     clusterIssuer: ext-ca-cluster-issuer
-  coreCollection:
-    enabled: false
+  # coreCollection left at its default (empty), NOT `enabled: false`. On the
+  # proven bnk-hostdev CNEInstance this is `{}`; explicitly setting
+  # `enabled: false` is what put TMM's crashagent on the path where it watches a
+  # /var/crash that was never provisioned and terminates the main thread
+  # (live-hit 2026-07-21, cluster bnk-scratch3). Match bnk-hostdev.
+  coreCollection: {}
   deploymentSize: Small
   dpu:
     enabled: false

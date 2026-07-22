@@ -8,6 +8,7 @@ import (
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
+	"github.com/JLCode-tech/gkebnkctl/internal/k8s"
 	"github.com/JLCode-tech/gkebnkctl/internal/k8s/manifests"
 	"github.com/JLCode-tech/gkebnkctl/internal/k8s/render"
 )
@@ -47,6 +48,30 @@ func Phase38CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 	if err := applyManifestBytes(ctx, clients, rendered, false); err != nil {
 		return fmt.Errorf("phase38: applying CNEInstance: %w", err)
 	}
+
+	// Applying the CNEInstance is what makes FLO spawn its crd-installer Job,
+	// which registers the k8s.f5net.com CRDs. Everything downstream applies CRs
+	// against those kinds (Phase40 License, Phase41 F5SPKVlan/StaticRoute,
+	// Phase50 F5SPKEgress, Phase51 StaticRoute), so wait here rather than
+	// letting Phase40 fail with `no matches for kind "License"` — which is
+	// exactly what happened on a greenfield run before this wait existed
+	// (2026-07-21, cluster bnk-scratch).
+	//
+	// Tolerant like Phase36's wait: a timeout warns and continues rather than
+	// aborting, so a slow crd-installer degrades to the pre-existing
+	// "re-run up" behaviour instead of a hard failure.
+	if clients.Dynamic == nil {
+		fmt.Fprintln(os.Stderr, "[phase 38] warn: Clients.Dynamic is nil — skipping FLO-installed CRD wait")
+	} else {
+		for _, crd := range floInstalledCRDs {
+			fmt.Fprintf(os.Stderr, "[phase 38] waiting for FLO-installed CRD %s to establish (up to %s)\n", crd, floCRDWait)
+			if err := k8s.WaitForCRDEstablished(ctx, clients.Dynamic, crd, floCRDWait); err != nil {
+				fmt.Fprintf(os.Stderr, "[phase 38] warn: CRD %s did not establish within %s (%v) — check FLO's crd-installer job (kubectl get jobs -n f5-utils); continuing (wait is best-effort)\n",
+					crd, floCRDWait, err)
+			}
+		}
+	}
+
 	fmt.Fprintln(os.Stderr, "[phase 38] CNEInstance OK")
 	return nil
 }

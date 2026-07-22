@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 	"github.com/JLCode-tech/gkebnkctl/internal/k8s"
 	"github.com/JLCode-tech/gkebnkctl/internal/k8s/manifests"
@@ -31,6 +33,17 @@ func applyManifestBytes(ctx context.Context, clients *gcp.Clients, data []byte, 
 	objs, err := k8s.ParseYAMLStream(data)
 	if err != nil {
 		return fmt.Errorf("parsing manifest: %w", err)
+	}
+	return applier.ApplyAll(ctx, objs, force)
+}
+
+// applyObjects server-side-applies already-parsed objects. Used by Phase36,
+// which must filter the vendored FLO manifest (dropping Secrets whose data was
+// redacted before commit) before applying rather than streaming it verbatim.
+func applyObjects(ctx context.Context, clients *gcp.Clients, objs []*unstructured.Unstructured, force bool) error {
+	applier, err := applierFor(clients)
+	if err != nil {
+		return err
 	}
 	return applier.ApplyAll(ctx, objs, force)
 }

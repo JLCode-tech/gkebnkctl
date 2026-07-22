@@ -52,7 +52,7 @@ network:
   natGateways: true
 
 cluster:
-  kubernetesVersion: "1.31"
+  kubernetesVersion: "1.35"
   defaultPool:
     machineType: e2-standard-4
     nodeCount: 3
@@ -358,8 +358,8 @@ bnk:
 	if !c.Network.NatGatewaysEnabled() {
 		t.Error("NatGatewaysEnabled() = false, want true (default)")
 	}
-	if c.ClusterSpec.KubernetesVersion != "1.31" {
-		t.Errorf("ClusterSpec.KubernetesVersion = %q, want 1.31", c.ClusterSpec.KubernetesVersion)
+	if c.ClusterSpec.KubernetesVersion != "1.35" {
+		t.Errorf("ClusterSpec.KubernetesVersion = %q, want 1.35", c.ClusterSpec.KubernetesVersion)
 	}
 	if c.ClusterSpec.DefaultPool.MachineType != "e2-standard-4" || c.ClusterSpec.DefaultPool.NodeCount != 3 {
 		t.Errorf("DefaultPool = %+v, want machineType=e2-standard-4 nodeCount=3", c.ClusterSpec.DefaultPool)

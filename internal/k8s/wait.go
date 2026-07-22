@@ -103,6 +103,35 @@ func IsCertificateReady(obj map[string]interface{}) bool {
 	return false
 }
 
+// UnstructuredConditionIsTrue reports whether obj has a status.conditions[]
+// entry of the given type with status "True". Generalises IsCertificateReady
+// to any condition type — used to read a CNEInstance's F5TmmAvailable, which
+// is a status.conditions[] entry, not a single-level status field (so
+// WaitForUnstructuredCondition, which only walks single-level status paths,
+// cannot read it).
+func UnstructuredConditionIsTrue(obj map[string]interface{}, condType string) bool {
+	status, ok := obj["status"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	conditions, ok := status["conditions"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, raw := range conditions {
+		cond, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if t, _ := cond["type"].(string); t != condType {
+			continue
+		}
+		s, _ := cond["status"].(string)
+		return s == "True"
+	}
+	return false
+}
+
 // CRDGVR is the GroupVersionResource for apiextensions.k8s.io/v1
 // CustomResourceDefinition.
 var CRDGVR = schema.GroupVersionResource{

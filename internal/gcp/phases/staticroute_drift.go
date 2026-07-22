@@ -88,7 +88,10 @@ func reconcileStaticRouteDrift(ctx context.Context, clients *gcp.Clients, objs [
 		return fmt.Errorf("Clients.Dynamic/RESTMapper is nil — AttachK8s must run first (after Phase20)")
 	}
 	gvk := schema.GroupVersionKind{Group: "k8s.f5net.com", Version: "v1", Kind: staticRouteKind}
-	mapping, err := clients.RESTMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	// Must refresh discovery on a miss: F5SPKStaticRoute's CRD is installed by
+	// Phase36 (FLO), long after AttachK8s snapshotted the API surface, so on a
+	// greenfield run the kind is absent from the mapper's cache.
+	mapping, err := k8s.RESTMappingWithRefresh(clients.RESTMapper, gvk)
 	if err != nil {
 		return fmt.Errorf("REST mapping for %s: %w", gvk, err)
 	}

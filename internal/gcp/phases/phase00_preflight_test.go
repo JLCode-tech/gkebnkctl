@@ -31,7 +31,7 @@ func testCluster() *intent.Cluster {
 			AllowInternalCidr: "10.0.0.0/8",
 		},
 		ClusterSpec: intent.ClusterSpec{
-			KubernetesVersion: "1.31",
+			KubernetesVersion: "1.35",
 			DefaultPool:       intent.NodePoolSpec{MachineType: "e2-standard-4", NodeCount: 3},
 			TmmPool:           intent.NodePoolSpec{Name: "tmm-pool", MachineType: "e2-standard-8", NodeCount: 1, MaxPodsPerNode: 8},
 			AgentPool:         intent.NodePoolSpec{Name: "agent-pool", MachineType: "e2-standard-4", NodeCount: 1, MaxPodsPerNode: 8},
