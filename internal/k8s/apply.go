@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
@@ -20,6 +21,43 @@ import (
 // call — distinct from kubectl's own field managers so an SSA conflict tells
 // the operator gkebnkctl owns the field.
 const FieldManager = "gkebnkctl"
+
+// RESTMappingWithRefresh resolves gvk to a RESTMapping, retrying ONCE against
+// a freshly-discovered API surface if the kind is initially unknown.
+//
+// This is load-bearing on a greenfield `up`. The RESTMapper is built once by
+// AttachK8s (right after Phase20) and caches a snapshot of the API surface as
+// it looked then. Later phases install CRDs into that same cluster —
+// cert-manager's in Phase31, FLO's ~23 CRDs in Phase36 — and then immediately
+// apply custom resources against them (Phase32's ClusterIssuer, Phase38's
+// CNEInstance, Phase41/51's F5SPKStaticRoutes). Those kinds are absent from
+// the snapshot.
+//
+// DeferredDiscoveryRESTMapper only re-discovers on a miss when its cache
+// reports !Fresh(), and every cache implementation (including client-go's
+// memory cache, whose Fresh() returns cacheValid) reports Fresh()==true once
+// discovery has succeeded — so the built-in retry never fires. The mapper must
+// be Reset() explicitly, which is what this does.
+//
+// Without it, a from-scratch `up` dies at Phase32 with
+// `no matches for kind "ClusterIssuer" in version "cert-manager.io/v1"`
+// (live-hit 2026-07-21 on cluster bnk-scratch). Re-running `up` masked the bug,
+// because a second process re-discovers at startup and sees the CRDs.
+//
+// The retry is bounded to one attempt: a genuinely unknown kind returns the
+// original NoMatch error rather than looping.
+func RESTMappingWithRefresh(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (*meta.RESTMapping, error) {
+	mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err == nil || !meta.IsNoMatchError(err) {
+		return mapping, err
+	}
+	deferred, ok := mapper.(*restmapper.DeferredDiscoveryRESTMapper)
+	if !ok {
+		return nil, err
+	}
+	deferred.Reset()
+	return mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+}
 
 // Applier server-side-applies unstructured objects against a live cluster.
 // Construct one per invocation via NewApplier — not safe for concurrent
@@ -64,7 +102,7 @@ func (a *Applier) Apply(ctx context.Context, obj *unstructured.Unstructured, for
 	if gvk.Kind == "" {
 		return nil, fmt.Errorf("apply: resource missing kind: %s", obj.GetName())
 	}
-	mapping, err := a.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	mapping, err := RESTMappingWithRefresh(a.mapper, gvk)
 	if err != nil {
 		return nil, fmt.Errorf("apply: REST mapping for %s: %w", gvk, err)
 	}
