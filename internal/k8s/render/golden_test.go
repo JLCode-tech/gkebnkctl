@@ -57,6 +57,26 @@ var (
 		ExtGwIP:       "10.30.0.1",
 		AgentExtIface: "ens5",
 	}
+	// goldenIngressVxlanRoutesVars carries the exact trial values proven live
+	// on cluster bnk-hostdev 2026-07-21 (podCIDR 10.66.4.0/24, VTEP
+	// 10.0.64.1) as the first entry, plus a second node to prove the
+	// multi-node loop renders more than one route.
+	goldenIngressVxlanRoutesVars = IngressVxlanRoutesVars{
+		Routes: []IngressVxlanRouteVars{
+			{
+				Name:        "route-ingress-vxlan-10-66-4-0",
+				Destination: "10.66.4.0",
+				PrefixLen:   24,
+				Gateway:     "10.0.64.1",
+			},
+			{
+				Name:        "route-ingress-vxlan-10-66-5-0",
+				Destination: "10.66.5.0",
+				PrefixLen:   24,
+				Gateway:     "10.0.65.1",
+			},
+		},
+	}
 )
 
 // readTemplate loads a template source from ../manifests/templates by name
@@ -225,5 +245,51 @@ func TestRenderAgentRouteSetter_Golden(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("rendered agent-route-setter DS missing %q", want)
 		}
+	}
+}
+
+// TestRenderIngressVxlanRoutes_Golden asserts the rendered F5SPKStaticRoute
+// set matches the exact values proven live on cluster bnk-hostdev
+// 2026-07-21 (destination 10.66.4.0/24, gateway 10.0.64.1 — see
+// internal/gcp/phases/phase51_ingress_vxlan.go's doc comment) and that a
+// second node's route is also present (multi-node-correct, not
+// hardcoded-single-node).
+func TestRenderIngressVxlanRoutes_Golden(t *testing.T) {
+	tmpl := readTemplate(t, "ingress-vxlan-routes.yaml.tmpl")
+	got, err := RenderIngressVxlanRoutes(tmpl, goldenIngressVxlanRoutesVars)
+	if err != nil {
+		t.Fatalf("RenderIngressVxlanRoutes: %v", err)
+	}
+	assertGolden(t, "ingress-vxlan-routes.golden.yaml", got)
+
+	s := string(got)
+	for _, want := range []string{
+		"kind: F5SPKStaticRoute",
+		"name: route-ingress-vxlan-10-66-4-0",
+		"destination: 10.66.4.0",
+		"prefixLen: 24",
+		"gateway: 10.0.64.1",
+		"type: gateway",
+		"name: route-ingress-vxlan-10-66-5-0",
+		"gateway: 10.0.65.1",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("rendered ingress-vxlan-routes missing %q", want)
+		}
+	}
+}
+
+// TestRenderIngressVxlanRoutes_Empty proves an empty Routes slice renders to
+// nothing (no stray "---" separators or empty documents) — Phase51 checks
+// this case itself before applying, but the template must not emit garbage
+// either way.
+func TestRenderIngressVxlanRoutes_Empty(t *testing.T) {
+	tmpl := readTemplate(t, "ingress-vxlan-routes.yaml.tmpl")
+	got, err := RenderIngressVxlanRoutes(tmpl, IngressVxlanRoutesVars{})
+	if err != nil {
+		t.Fatalf("RenderIngressVxlanRoutes: %v", err)
+	}
+	if strings.Contains(string(got), "kind:") {
+		t.Errorf("expected no rendered objects for an empty Routes slice, got:\n%s", got)
 	}
 }

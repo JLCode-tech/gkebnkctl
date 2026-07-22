@@ -10,6 +10,13 @@ Phase50), `agent-route-setter.yaml.tmpl` (Task D, Phase50). Rendered via
 dynamic SSA. See `docs/SPEC-go-tracer.md` §5 for the per-file `${VAR}` ->
 `.Field` mapping table.
 
+`ingress-vxlan-routes.yaml.tmpl` (Phase51, added after the tracer
+milestone — no bash-seed equivalent) renders a variable-length list of
+`F5SPKStaticRoute` objects from Phase51-discovered per-agent-node data,
+unlike every template above which renders a fixed document set. See
+`internal/gcp/phases/phase51_ingress_vxlan.go`'s doc comment for the
+asymmetric-routing fix this closes.
+
 Deviation from docs/SPEC-go-tracer.md §1/§5: the spec also lists a
 `discover-pod.yaml.tmpl` for Phase25's ephemeral discovery pod. Task B
 implemented that pod as a typed `corev1.Pod` Go struct

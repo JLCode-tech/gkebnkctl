@@ -99,16 +99,17 @@ else
 fi
 echo
 
-# 7. gkebnkctl up --dry-run (check for phase 50 and "dry-run complete")
+# 7. gkebnkctl up --dry-run (check for phase 50, phase 51, and "dry-run complete")
 echo "-> GKEBNKCTL_SKIP_AUTH=1 gkebnkctl up --dry-run"
 mkdir -p artifacts
 if GKEBNKCTL_SKIP_AUTH=1 ./bin/gkebnkctl up -f examples/host-device/cluster.yaml --dry-run 2>&1 | tee artifacts/up-dryrun.log; then
-	if grep -q '\[phase 50\]' artifacts/up-dryrun.log && grep -q 'dry-run complete' artifacts/up-dryrun.log; then
-		printf "%b[PASS]%b gkebnkctl up --dry-run (phase 50 + dry-run complete)\n" "$GREEN" "$NC"
+	if grep -q '\[phase 50\]' artifacts/up-dryrun.log && grep -q '\[phase 51\]' artifacts/up-dryrun.log && grep -q 'dry-run complete' artifacts/up-dryrun.log; then
+		printf "%b[PASS]%b gkebnkctl up --dry-run (phase 50 + phase 51 + dry-run complete)\n" "$GREEN" "$NC"
 		((passed_gates++))
 	else
 		echo "ERROR: output missing required strings:"
 		! grep -q '\[phase 50\]' artifacts/up-dryrun.log && echo "  - Missing '[phase 50]'"
+		! grep -q '\[phase 51\]' artifacts/up-dryrun.log && echo "  - Missing '[phase 51]'"
 		! grep -q 'dry-run complete' artifacts/up-dryrun.log && echo "  - Missing 'dry-run complete'"
 		printf "%b[FAIL]%b gkebnkctl up --dry-run assertions\n" "$RED" "$NC"
 		((failed_gates++))
