@@ -154,7 +154,7 @@ func (a *Applier) ApplyAll(ctx context.Context, objs []*unstructured.Unstructure
 // documents are skipped.
 func ParseYAMLStream(data []byte) ([]*unstructured.Unstructured, error) {
 	var out []*unstructured.Unstructured
-	for _, doc := range splitYAMLDocs(data) {
+	for _, doc := range SplitYAMLDocs(data) {
 		doc = bytes.TrimSpace(doc)
 		if len(doc) == 0 {
 			continue
@@ -171,16 +171,6 @@ func ParseYAMLStream(data []byte) ([]*unstructured.Unstructured, error) {
 	return out, nil
 }
 
-// splitYAMLDocs splits a YAML stream on the "---" document separator.
-// Conservative ("\n---\n" only, plus a leading "---\n") — matches the way
-// kubectl/yaml.NewYAMLOrJSONDecoder splits streams in practice.
-func splitYAMLDocs(data []byte) [][]byte {
-	parts := bytes.Split(data, []byte("\n---\n"))
-	if len(parts) > 0 && bytes.HasPrefix(parts[0], []byte("---\n")) {
-		parts[0] = parts[0][4:]
-	}
-	return parts
-}
 
 // memCacheClient adapts a discovery.DiscoveryInterface into a
 // CachedDiscoveryInterface (no actual caching — fine for one-shot CLI runs).
