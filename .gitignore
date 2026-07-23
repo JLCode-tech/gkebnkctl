@@ -37,6 +37,8 @@ dockerconfig.json
 # internal/gcp/state)
 .gkebnkctl/
 
-# OS / editor cruft
+# OS / editor cruft / PR temp files
 .DS_Store
 *.swp
+.*-pr-body.md
+.go-tracer-pr-body.md
