@@ -153,8 +153,9 @@ func (a *Applier) ApplyAll(ctx context.Context, objs []*unstructured.Unstructure
 // embedded manifest file) into individual unstructured objects. Empty
 // documents are skipped.
 func ParseYAMLStream(data []byte) ([]*unstructured.Unstructured, error) {
-	var out []*unstructured.Unstructured
-	for _, doc := range SplitYAMLDocs(data) {
+	parts := SplitYAMLDocs(data)
+	out := make([]*unstructured.Unstructured, 0, len(parts))
+	for _, doc := range parts {
 		doc = bytes.TrimSpace(doc)
 		if len(doc) == 0 {
 			continue
@@ -170,7 +171,6 @@ func ParseYAMLStream(data []byte) ([]*unstructured.Unstructured, error) {
 	}
 	return out, nil
 }
-
 
 // memCacheClient adapts a discovery.DiscoveryInterface into a
 // CachedDiscoveryInterface (no actual caching — fine for one-shot CLI runs).
