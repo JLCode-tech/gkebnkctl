@@ -86,7 +86,6 @@ func TestParseYAMLStream_BadYAML(t *testing.T) {
 	}
 }
 
-
 // TestApplier_Apply_MissingKind proves Apply fails fast (before ever
 // touching the RESTMapper or the dynamic client) on an object with no
 // kind.

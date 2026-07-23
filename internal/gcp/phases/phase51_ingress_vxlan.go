@@ -141,7 +141,7 @@ func discoverIngressVxlanRoutes(ctx context.Context, k8sClient kubernetes.Interf
 		return nil, fmt.Errorf("no nodes found for pool %s — run phase 20 first", agentPoolName)
 	}
 
-	var routes []render.IngressVxlanRouteVars
+	routes := make([]render.IngressVxlanRouteVars, 0, len(nodes.Items))
 	for _, node := range nodes.Items {
 		if node.Spec.PodCIDR == "" {
 			return nil, fmt.Errorf("node %s has no Spec.PodCIDR set", node.Name)
