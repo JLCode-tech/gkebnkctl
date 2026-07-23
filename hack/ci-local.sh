@@ -142,7 +142,14 @@ echo
 # Security gates (commented TODO unless tools are easily available)
 echo "-> Security gates (gosec, govulncheck, gitleaks):"
 echo "   TODO: gosec - requires securego/gosec install (github action-only for now)"
-echo "   TODO: govulncheck - requires golang.org/x/vuln/cmd/govulncheck install"
+echo "-> go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./..."
+if go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...; then
+	printf "%b[PASS]%b govulncheck\n" "$GREEN" "$NC"
+	((passed_gates++))
+else
+	printf "%b[FAIL]%b govulncheck\n" "$RED" "$NC"
+	((failed_gates++))
+fi
 echo "   TODO: gitleaks - requires gitleaks CLI install or download"
 echo
 
