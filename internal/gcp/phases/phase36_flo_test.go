@@ -32,20 +32,25 @@ func TestPhase36FLO_LiveMode_NilClientsErrors(t *testing.T) {
 // docs/SPEC-go-tracer.md §3 Phase36 exactly.
 func TestFLOCRDs_IncludesAllFiveContractCRDs(t *testing.T) {
 	want := map[string]bool{
-		"cneinstances.k8s.f5.com":         false,
-		"f5spkvlans.k8s.f5net.com":        false,
-		"f5spkstaticroutes.k8s.f5net.com": false,
-		"f5spkegresses.k8s.f5net.com":     false,
-		"licenses.k8s.f5net.com":          false,
+		"cneinstances.k8s.f5.com":           false,
+		"f5-spk-vlans.k8s.f5net.com":        false,
+		"f5-spk-staticroutes.k8s.f5net.com": false,
+		"f5-spk-egresses.k8s.f5net.com":     false,
+		"licenses.k8s.f5net.com":            false,
 	}
-	for _, c := range floCRDs {
+	// The five contract CRDs are waited for across TWO lists: floCRDs (shipped
+	// by FLO's own manifest, waited in Phase36) and floInstalledCRDs (created
+	// by FLO's crd-installer only after Phase38 applies the CNEInstance, waited
+	// in Phase38). What matters is that every kind is covered somewhere before
+	// a phase applies a CR against it.
+	for _, c := range append(append([]string{}, floCRDs...), floInstalledCRDs...) {
 		if _, ok := want[c]; ok {
 			want[c] = true
 		}
 	}
 	for crd, found := range want {
 		if !found {
-			t.Errorf("expected floCRDs to include %s, got %v", crd, floCRDs)
+			t.Errorf("CRD %s is waited for by neither floCRDs (%v) nor floInstalledCRDs (%v)", crd, floCRDs, floInstalledCRDs)
 		}
 	}
 }

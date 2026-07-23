@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
@@ -45,9 +46,65 @@ func Phase40License(ctx context.Context, cl *intent.Cluster, _ *state.State, cli
 		return fmt.Errorf("phase40: rendering license-cr: %w", err)
 	}
 
-	if err := applyManifestBytes(ctx, clients, rendered, false); err != nil {
+	if err := applyLicenseWithQuotaRetry(ctx, clients, rendered); err != nil {
 		return fmt.Errorf("phase40: applying License CR: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "[phase 40] License OK")
 	return nil
+}
+
+const (
+	// licenseQuotaRetryAttempts / Interval bound the retry for the transient
+	// ResourceQuota admission race below.
+	licenseQuotaRetryAttempts = 12
+	licenseQuotaRetryInterval = 5 * time.Second
+
+	// quotaStatusUnknownMarker is the substring the API server returns when a
+	// ResourceQuota exists but its controller has not yet populated
+	// .status.used, so admission cannot decide and rejects the request:
+	//   licenses.k8s.f5net.com "bnk-license" is forbidden: status unknown for
+	//   quota: f5-single-license-quota, resources: count/licenses.k8s.f5net.com
+	// FLO creates f5-single-license-quota moments before Phase40 applies the
+	// License, so on a greenfield run this fires until the quota controller
+	// catches up — a few seconds (live-hit 2026-07-21, cluster bnk-scratch3).
+	// A re-run masked it because the quota status was populated by then.
+	quotaStatusUnknownMarker = "status unknown for quota"
+)
+
+// applyLicenseWithQuotaRetry applies the License CR, retrying only the
+// transient "status unknown for quota" admission rejection. Any other error is
+// returned immediately — notably a genuine over-quota rejection (which would
+// not carry this marker) is not retried.
+func applyLicenseWithQuotaRetry(ctx context.Context, clients *gcp.Clients, rendered []byte) error {
+	return retryOnQuotaStatusUnknown(ctx, licenseQuotaRetryInterval, func() error {
+		return applyManifestBytes(ctx, clients, rendered, false)
+	})
+}
+
+// retryOnQuotaStatusUnknown runs apply, retrying ONLY the transient
+// "status unknown for quota" admission rejection up to licenseQuotaRetryAttempts
+// times. apply is injectable so the retry decision is unit-tested without a
+// live cluster.
+func retryOnQuotaStatusUnknown(ctx context.Context, interval time.Duration, apply func() error) error {
+	var err error
+	for attempt := 1; attempt <= licenseQuotaRetryAttempts; attempt++ {
+		err = apply()
+		if err == nil {
+			return nil
+		}
+		if !strings.Contains(err.Error(), quotaStatusUnknownMarker) {
+			return err
+		}
+		if attempt == licenseQuotaRetryAttempts {
+			break
+		}
+		fmt.Fprintf(os.Stderr, "[phase 40] License rejected while the ResourceQuota controller catches up (attempt %d/%d) — retrying in %s\n",
+			attempt, licenseQuotaRetryAttempts, interval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+	return err
 }

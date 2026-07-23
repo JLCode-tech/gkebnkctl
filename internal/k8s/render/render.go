@@ -137,3 +137,30 @@ type AgentRouteSetterVars struct {
 func RenderAgentRouteSetter(tmpl []byte, v AgentRouteSetterVars) ([]byte, error) {
 	return Render(tmpl, v)
 }
+
+// IngressVxlanRouteVars is one rendered F5SPKStaticRoute entry: an
+// agent-pool node's pod CIDR (Destination/PrefixLen) reachable over that
+// node's discovered vxlan100 VTEP (Gateway).
+type IngressVxlanRouteVars struct {
+	Name        string
+	Destination string
+	PrefixLen   int
+	Gateway     string
+}
+
+// IngressVxlanRoutesVars is the Vars struct for
+// templates/ingress-vxlan-routes.yaml.tmpl — one entry per agent-pool node
+// that has a discovered vxlan100 VTEP (Phase51).
+type IngressVxlanRoutesVars struct {
+	Routes []IngressVxlanRouteVars
+}
+
+// RenderIngressVxlanRoutes renders templates/ingress-vxlan-routes.yaml.tmpl
+// (Phase51): one F5SPKStaticRoute per agent-pool node with a live vxlan100
+// VTEP, fixing the egress/ingress asymmetric-routing gap
+// (internal/gcp/phases/phase51_ingress_vxlan.go's doc comment). An empty
+// v.Routes renders to an empty byte slice — Phase51 skips applying in that
+// case rather than SSA-ing zero objects.
+func RenderIngressVxlanRoutes(tmpl []byte, v IngressVxlanRoutesVars) ([]byte, error) {
+	return Render(tmpl, v)
+}

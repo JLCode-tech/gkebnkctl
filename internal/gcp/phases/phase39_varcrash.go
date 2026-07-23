@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +27,15 @@ var varCrashDeployments = []string{"f5-cne-controller", "f5-crdconversion"}
 
 // varCrashVolumeName is the emptyDir volume name added to both Deployments.
 const varCrashVolumeName = "var-crash"
+
+// varCrashDeployWait bounds how long Phase39 waits for FLO to create the
+// Deployments it patches. They are created by FLO reconciling the CNEInstance
+// that Phase38 just applied, so on a greenfield run they briefly do not exist.
+// Skipping immediately (the old behaviour) left f5-crdconversion permanently in
+// CrashLoopBackOff — its crashagent hard-dies without /var/crash — and the
+// "re-run up" hint was silently easy to miss (live-hit 2026-07-21 on cluster
+// bnk-scratch).
+const varCrashDeployWait = 3 * time.Minute
 
 // Phase39VarCrashPatches strategic-merge-patches both varCrashDeployments
 // with a /var/crash emptyDir volume + mount, looking up the container name
@@ -50,6 +60,11 @@ func Phase39VarCrashPatches(ctx context.Context, cl *intent.Cluster, _ *state.St
 	}
 
 	for _, deploy := range varCrashDeployments {
+		if err := waitForDeploymentExists(ctx, clients.K8s, varCrashNamespace, deploy, varCrashDeployWait); err != nil {
+			fmt.Fprintf(os.Stderr, "[phase 39] warn: %s did not appear in %s within %s (%v) — skipping its /var/crash patch; re-run up once FLO has created it\n",
+				deploy, varCrashNamespace, varCrashDeployWait, err)
+			continue
+		}
 		if err := patchVarCrash(ctx, clients.K8s, deploy); err != nil {
 			return fmt.Errorf("phase39: %s: %w", deploy, err)
 		}
@@ -93,4 +108,28 @@ func patchVarCrash(ctx context.Context, client kubernetes.Interface, deploy stri
 		return fmt.Errorf("patching deployment %s: %w", deploy, err)
 	}
 	return nil
+}
+
+// waitForDeploymentExists blocks until ns/name exists (it need not be Ready —
+// the patch itself triggers the rollout), or until timeout. Returns nil as soon
+// as the Deployment is observed.
+func waitForDeploymentExists(ctx context.Context, client kubernetes.Interface, ns, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		_, err := client.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			return nil
+		}
+		if !k8serrors.IsNotFound(err) {
+			return fmt.Errorf("getting deployment %s/%s: %w", ns, name, err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s waiting for deployment %s/%s to be created", timeout, ns, name)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
 }

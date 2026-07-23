@@ -42,15 +42,38 @@ var DiscoverStateKeys = []string{
 
 // ifaceDumpScript is run inside the discovery pod's host network/PID
 // namespace (via nsenter -t1) and emits one "IFACE=x MAC=y PCI=z" line per
-// non-loopback interface. Mirrors reference/bash-seed/bin/25-discover.sh's
-// IFACE_DUMP_SCRIPT verbatim.
+// non-loopback interface.
+//
+// Derived from reference/bash-seed/bin/25-discover.sh's IFACE_DUMP_SCRIPT, with
+// one fix the bash seed lacks: a bare `basename $(readlink -f .../device)` is
+// WRONG for virtio-net NICs. Their device symlink points at the virtio node,
+// not the PCI function —
+//
+//	/sys/class/net/eth1/device -> /sys/devices/pci0000:00/0000:00:05.0/virtio2
+//
+// so basename yields "virtio2" instead of the PCI address "0000:00:05.0". That
+// bogus value flows into CNEInstance advanced.tmm.env PCIDEVICE_INTEL_COM_*,
+// mapres cannot resolve it, so TMM never maps net1/net2, its tmm_init.tcl gets
+// `route ... vlan (null)`, and TMM crashes with `tcl_init_proxy failed`
+// (live-hit 2026-07-22, cluster bnk-scratch4 — GCE virtio nodes; bnk-hostdev's
+// NICs bind PCI directly so the seed's basename happened to work there).
+//
+// Fix: if the device leaf is already a PCI BDF (has the "0000:00:05.0" shape)
+// keep it; otherwise it is a virtio/child node, so take its parent directory,
+// which IS the PCI function (verified live: parent of virtio3 = 0000:00:06.0,
+// matching bnk-hostdev's discovered value).
 const ifaceDumpScript = `for i in /sys/class/net/*; do
   n=$(basename "$i")
   [ "$n" = "lo" ] && continue
   mac=$(cat "$i/address" 2>/dev/null || echo "")
   pci=""
   if [ -e "$i/device" ]; then
-    pci=$(basename "$(readlink -f "$i/device")")
+    dev=$(readlink -f "$i/device")
+    leaf=$(basename "$dev")
+    case "$leaf" in
+      *:*:*.*) pci=$leaf ;;
+      *) pci=$(basename "$(dirname "$dev")") ;;
+    esac
   fi
   echo "IFACE=$n MAC=$mac PCI=$pci"
 done

@@ -11,6 +11,7 @@ import (
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/googleapis/gax-go/v2/apierror"
 	"google.golang.org/api/googleapi"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
@@ -313,6 +314,20 @@ func isPermissionDenied(err error) bool {
 	return hasHTTPStatus(err, 403)
 }
 
+// grpcCodeMatchesHTTP maps the gRPC status codes the GCP GAPIC clients return
+// onto the HTTP statuses hasHTTPStatus is asked about. Only the two codes this
+// codebase gates on are mapped; anything else is not a match.
+func grpcCodeMatchesHTTP(c codes.Code, httpCode int) bool {
+	switch httpCode {
+	case 403:
+		return c == codes.PermissionDenied
+	case 404:
+		return c == codes.NotFound
+	default:
+		return false
+	}
+}
+
 // hasHTTPStatus inspects err for a matching HTTP status via the two shapes
 // the GCP Go SDKs use (googleapi.Error for REST clients, apierror.APIError
 // for gRPC/gax clients), falling back to a case-insensitive substring match
@@ -328,7 +343,22 @@ func hasHTTPStatus(err error, code int) bool {
 	}
 	var aerr *apierror.APIError
 	if errors.As(err, &aerr) {
-		return aerr.HTTPCode() == code
+		if aerr.HTTPCode() == code {
+			return true
+		}
+		// gRPC-backed GAPIC clients — notably the GKE container API used by
+		// Phase20 and the down phases — carry no HTTP status at all:
+		// HTTPCode() returns -1 and the real code lives on the gRPC status.
+		// Checking HTTPCode() alone therefore ALWAYS reports false for them.
+		// That silently inverted Phase20's "does this cluster exist?" gate:
+		// GetCluster's NotFound was read as a hard error instead of "create
+		// it", so `up` could never provision a greenfield cluster (live-hit
+		// 2026-07-21 on cluster bnk-scratch). Compute (Phase10) was unaffected
+		// because its REST client returns googleapi.Error above.
+		if st := aerr.GRPCStatus(); st != nil {
+			return grpcCodeMatchesHTTP(st.Code(), code)
+		}
+		return false
 	}
 	msg := strings.ToLower(err.Error())
 	switch code {

@@ -38,14 +38,14 @@ var upCmd = &cobra.Command{
 dataplane VPCs, the GKE cluster (default/tmm/agent pools), iface discovery,
 and the BNK install (namespaces, cert-manager, far-secret, Multus, NADs,
 FLO, node-sysctls, CNEInstance, /var/crash patches, License, F5SPKVlan +
-StaticRoutes, TMM settle, egress).
+StaticRoutes, TMM settle, egress, ingress-vxlan-routes).
 
   gkebnkctl up -f cluster.yaml [--dry-run]
 
 When --dry-run is set, every phase prints its planned actions and makes zero
 GCP mutations.
 
-Every phase, 00 (preflight) through 50 (egress), is real — see
+Every phase, 00 (preflight) through 51 (ingress-vxlan-routes), is real — see
 internal/gcp/phases. GKEBNKCTL_SKIP_AUTH=1 skips Phase00's ADC +
 API-enabled checks entirely (passing a nil *gcp.Clients through every real
 phase) so CI can run --dry-run without live GCP credentials.
@@ -95,9 +95,9 @@ func runDown(cmd *cobra.Command, _ []string) error {
 	return runPhasedDown(cmd.Context(), flagConfig, flagYes, flagDownDryRun)
 }
 
-// upPhase describes one entry in the up phase graph. Every phase (00-50)
+// upPhase describes one entry in the up phase graph. Every phase (00-51)
 // dispatches to a real internal/gcp/phases function via realUpPhases (Task
-// B: 00/10/20/25; Task C: 30-42; Task D: 50).
+// B: 00/10/20/25; Task C: 30-42; Task D: 50; ingress-vxlan-routes: 51).
 type upPhase struct {
 	num  string
 	name string
@@ -122,13 +122,15 @@ var upPhases = []upPhase{
 	{num: "41", name: "vlans-routes"},
 	{num: "42", name: "tmm-settle"},
 	{num: "50", name: "egress"},
+	{num: "51", name: "ingress-vxlan-routes"},
 }
 
 // realUpPhases dispatches every phase number in upPhases to its
 // internal/gcp/phases function. No phase falls through to runStubPhase
-// anymore (Task D landed the last one, 50/egress) — runStubPhase is kept
-// only as a defensive fallback (see the loop in runPhasedUp) in case a
-// future phase is added to upPhases before its implementation lands.
+// (Task D landed 50/egress; 51/ingress-vxlan-routes landed after) —
+// runStubPhase is kept only as a defensive fallback (see the loop in
+// runPhasedUp) in case a future phase is added to upPhases before its
+// implementation lands.
 var realUpPhases = map[string]func(ctx context.Context, cl *intent.Cluster, st *state.State, clients *gcp.Clients, dryRun bool) error{
 	"00": phases.Phase00Preflight,
 	"10": phases.Phase10Networks,
@@ -148,10 +150,11 @@ var realUpPhases = map[string]func(ctx context.Context, cl *intent.Cluster, st *
 	"41": phases.Phase41VlansRoutes,
 	"42": phases.Phase42TMMSettle,
 	"50": phases.Phase50Egress,
+	"51": phases.Phase51IngressVxlanRoutes,
 }
 
 // runPhasedUp is the Go-SDK phased provisioning path activated by
-// `gkebnkctl up -f <file>`. Every phase 00-50 (see realUpPhases) calls a
+// `gkebnkctl up -f <file>`. Every phase 00-51 (see realUpPhases) calls a
 // real internal/gcp/phases function.
 //
 // When dryRun is true, state.MarkReadOnly() is called immediately after
