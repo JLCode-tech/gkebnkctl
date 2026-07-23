@@ -2,6 +2,7 @@ package phases
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -264,82 +265,74 @@ func ensureNodePool(ctx context.Context, gke gcp.GKEAPI, project, zone, clusterN
 // docs/SPEC-go-tracer.md §3: GKE LROs are polled, unlike compute's
 // op.Wait()-capable *compute.Operation).
 func waitForGKEOp(ctx context.Context, gke gcp.GKEAPI, project, zone, opName string) error {
-	deadline := time.Now().Add(gkeOpTimeout)
-	for {
+	return gcp.PollUntil(ctx, gkeOpPollInterval, gkeOpTimeout, func(ctx context.Context) (bool, error) {
 		op, err := gke.GetOperation(ctx, &containerpb.GetOperationRequest{ProjectId: project, Zone: zone, OperationId: opName})
 		if err != nil {
-			return fmt.Errorf("GetOperation %s: %w", opName, err)
+			return false, fmt.Errorf("GetOperation %s: %w", opName, err)
 		}
 		switch op.GetStatus() {
 		case containerpb.Operation_DONE:
 			if op.GetError() != nil {
-				return fmt.Errorf("operation %s finished with error: %v", opName, op.GetError())
+				return false, fmt.Errorf("operation %s finished with error: %v", opName, op.GetError())
 			}
-			return nil
+			return true, nil
 		case containerpb.Operation_ABORTING:
 			//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-			return fmt.Errorf("operation %s is aborting: %s", opName, op.GetStatusMessage())
+			return false, fmt.Errorf("operation %s is aborting: %s", opName, op.GetStatusMessage())
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for operation %s", opName)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(gkeOpPollInterval):
-		}
-	}
+		return false, nil
+	})
 }
 
 // waitForClusterRunning polls GetCluster until the cluster reaches RUNNING.
 func waitForClusterRunning(ctx context.Context, gke gcp.GKEAPI, project, zone, name string) (*containerpb.Cluster, error) {
-	deadline := time.Now().Add(clusterTimeout)
-	for {
+	var cluster *containerpb.Cluster
+	err := gcp.PollUntil(ctx, clusterPollInterval, clusterTimeout, func(ctx context.Context) (bool, error) {
 		c, err := gke.GetCluster(ctx, &containerpb.GetClusterRequest{ProjectId: project, Zone: zone, ClusterId: name})
 		if err != nil {
-			return nil, fmt.Errorf("GetCluster %s: %w", name, err)
+			return false, fmt.Errorf("GetCluster %s: %w", name, err)
 		}
 		switch c.GetStatus() {
 		case containerpb.Cluster_RUNNING:
-			return c, nil
+			cluster = c
+			return true, nil
 		case containerpb.Cluster_ERROR, containerpb.Cluster_STOPPING:
-			return nil, fmt.Errorf("cluster %s in unexpected status %s", name, c.GetStatus())
+			return false, fmt.Errorf("cluster %s in unexpected status %s", name, c.GetStatus())
 		}
-		if time.Now().After(deadline) {
+		return false, nil
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("timeout waiting for cluster %s RUNNING", name)
 		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(clusterPollInterval):
-		}
+		return nil, err
 	}
+	return cluster, nil
 }
 
 // waitForNodePoolRunning polls GetNodePool until the pool reaches RUNNING.
 func waitForNodePoolRunning(ctx context.Context, gke gcp.GKEAPI, project, zone, clusterName, poolName string) error {
-	deadline := time.Now().Add(clusterTimeout)
-	for {
+	err := gcp.PollUntil(ctx, clusterPollInterval, clusterTimeout, func(ctx context.Context) (bool, error) {
 		p, err := gke.GetNodePool(ctx, &containerpb.GetNodePoolRequest{ProjectId: project, Zone: zone, ClusterId: clusterName, NodePoolId: poolName})
 		if err != nil {
-			return fmt.Errorf("GetNodePool %s: %w", poolName, err)
+			return false, fmt.Errorf("GetNodePool %s: %w", poolName, err)
 		}
 		switch p.GetStatus() {
 		case containerpb.NodePool_RUNNING:
-			return nil
+			return true, nil
 		case containerpb.NodePool_ERROR:
 			//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-			return fmt.Errorf("node pool %s in ERROR state: %s", poolName, p.GetStatusMessage())
+			return false, fmt.Errorf("node pool %s in ERROR state: %s", poolName, p.GetStatusMessage())
 		}
-		if time.Now().After(deadline) {
+		return false, nil
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("timeout waiting for node pool %s RUNNING", poolName)
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(clusterPollInterval):
-		}
+		return err
 	}
+	return nil
 }
 
 // labelTMMNodes labels every node in poolName's GKE node pool app=f5-tmm —
@@ -352,27 +345,28 @@ func waitForNodePoolRunning(ctx context.Context, gke gcp.GKEAPI, project, zone, 
 // erroring immediately. pollInterval is injectable so tests stay fast.
 func labelTMMNodes(ctx context.Context, k8sClient kubernetes.Interface, poolName string, pollInterval time.Duration) error {
 	var nodes *corev1.NodeList
-	for attempt := 1; attempt <= tmmNodeListMaxAttempts; attempt++ {
+	attempt := 0
+	err := gcp.PollUntil(ctx, pollInterval, time.Duration(tmmNodeListMaxAttempts)*pollInterval+time.Second, func(ctx context.Context) (bool, error) {
+		attempt++
 		var err error
 		nodes, err = k8sClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{
 			LabelSelector: gkeNodepoolLabel + "=" + poolName,
 		})
 		if err != nil {
-			return fmt.Errorf("listing nodes for pool %s: %w", poolName, err)
+			return false, fmt.Errorf("listing nodes for pool %s: %w", poolName, err)
 		}
 		if len(nodes.Items) > 0 {
-			break
+			return true, nil
 		}
-		if attempt == tmmNodeListMaxAttempts {
-			return fmt.Errorf("no nodes found for pool %s after %d attempts — node pool may still be provisioning", poolName, tmmNodeListMaxAttempts)
+		if attempt >= tmmNodeListMaxAttempts {
+			return false, fmt.Errorf("no nodes found for pool %s after %d attempts — node pool may still be provisioning", poolName, tmmNodeListMaxAttempts)
 		}
 		fmt.Fprintf(os.Stderr, "[phase 20] no nodes registered yet for pool %s (attempt %d/%d) — node objects can lag pool RUNNING status, retrying in %s\n",
 			poolName, attempt, tmmNodeListMaxAttempts, pollInterval)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(pollInterval):
-		}
+		return false, nil
+	})
+	if err != nil {
+		return err
 	}
 
 	patch := []byte(fmt.Sprintf(`{"metadata":{"labels":{%q:%q}}}`, tmmNodeLabelKey, tmmNodeLabelValue))
