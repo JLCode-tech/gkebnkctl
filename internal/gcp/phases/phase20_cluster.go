@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
+	"github.com/JLCode-tech/gkebnkctl/internal/gcp/labels"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 )
@@ -139,7 +140,9 @@ func ensureCluster(ctx context.Context, gke gcp.GKEAPI, project, zone, name stri
 // gcloud flags in reference/bash-seed/bin/20-cluster.sh (see
 // docs/SPEC-go-tracer.md §9.1): --enable-ip-alias, --enable-dataplane-v2,
 // --enable-multi-networking, --cluster-secondary-range-name,
-// --services-secondary-range-name.
+// --services-secondary-range-name. ResourceLabels includes mandatory gkebnkctl
+// labels (gkebnkctl-cluster, gkebnkctl-managed) merged with user-supplied
+// cl.Metadata.Labels.
 func buildClusterConfig(cl *intent.Cluster) *containerpb.Cluster {
 	main := cl.Network.Main
 	return &containerpb.Cluster{
@@ -147,7 +150,7 @@ func buildClusterConfig(cl *intent.Cluster) *containerpb.Cluster {
 		InitialClusterVersion: cl.ClusterSpec.KubernetesVersion,
 		Network:               main.VPC,
 		Subnetwork:            main.Subnet,
-		ResourceLabels:        cl.Metadata.Labels,
+		ResourceLabels:        labels.Merge(labels.Required(cl.Metadata.Name), cl.Metadata.Labels),
 		IpAllocationPolicy: &containerpb.IPAllocationPolicy{
 			UseIpAliases:               true,
 			ClusterSecondaryRangeName:  main.PodsRangeName,
