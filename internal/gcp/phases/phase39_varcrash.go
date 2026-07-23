@@ -2,6 +2,7 @@ package phases
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -114,22 +115,21 @@ func patchVarCrash(ctx context.Context, client kubernetes.Interface, deploy stri
 // the patch itself triggers the rollout), or until timeout. Returns nil as soon
 // as the Deployment is observed.
 func waitForDeploymentExists(ctx context.Context, client kubernetes.Interface, ns, name string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
+	err := gcp.PollUntil(ctx, 3*time.Second, timeout, func(ctx context.Context) (bool, error) {
 		_, err := client.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
-			return nil
+			return true, nil
 		}
 		if !k8serrors.IsNotFound(err) {
-			return fmt.Errorf("getting deployment %s/%s: %w", ns, name, err)
+			return false, fmt.Errorf("getting deployment %s/%s: %w", ns, name, err)
 		}
-		if time.Now().After(deadline) {
+		return false, nil
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("timed out after %s waiting for deployment %s/%s to be created", timeout, ns, name)
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(3 * time.Second):
-		}
+		return err
 	}
+	return nil
 }

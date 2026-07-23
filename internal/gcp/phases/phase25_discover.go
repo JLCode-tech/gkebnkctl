@@ -12,7 +12,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
@@ -345,9 +344,7 @@ func discoverNodeIfaces(ctx context.Context, k8sClient kubernetes.Interface, nod
 // waitForPodSucceeded polls ns/name until it reaches PodSucceeded, erroring
 // immediately on PodFailed.
 func waitForPodSucceeded(ctx context.Context, k8sClient kubernetes.Interface, ns, name string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return wait.PollUntilContextTimeout(ctx, discoverPodPollFreq, timeout, true, func(ctx context.Context) (bool, error) {
+	return gcp.PollUntil(ctx, discoverPodPollFreq, timeout, func(ctx context.Context) (bool, error) {
 		pod, err := k8sClient.CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return false, nil //nolint:nilerr
