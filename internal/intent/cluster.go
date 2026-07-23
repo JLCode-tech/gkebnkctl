@@ -416,11 +416,11 @@ func validate(c *Cluster) error {
 	if !nameRE.MatchString(c.Metadata.Name) {
 		return fmt.Errorf("metadata.name %q does not match required pattern %s", c.Metadata.Name, nameRE.String())
 	}
-	if c.Metadata.Project == "" {
-		return errors.New("metadata.project is required")
-	}
-	if c.Metadata.Zone == "" {
-		return errors.New("metadata.zone is required")
+	if err := requireNonEmpty(map[string]string{
+		"metadata.project": c.Metadata.Project,
+		"metadata.zone":    c.Metadata.Zone,
+	}); err != nil {
+		return err
 	}
 	if c.Pattern != PatternHostDevice {
 		return fmt.Errorf("pattern must be %q (the only supported value), got %q", PatternHostDevice, c.Pattern)
@@ -429,11 +429,11 @@ func validate(c *Cluster) error {
 	if err := validateNetwork(c); err != nil {
 		return err
 	}
-	if c.Bnk.ManifestVersion == "" {
-		return errors.New("bnk.manifestVersion is required")
-	}
-	if c.Bnk.JwtPath == "" {
-		return errors.New("bnk.jwtPath is required")
+	if err := requireNonEmpty(map[string]string{
+		"bnk.manifestVersion": c.Bnk.ManifestVersion,
+		"bnk.jwtPath":         c.Bnk.JwtPath,
+	}); err != nil {
+		return err
 	}
 	if _, err := os.Stat(c.Bnk.JwtPath); err != nil {
 		return fmt.Errorf("bnk.jwtPath %q: %w", c.Bnk.JwtPath, err)
@@ -456,26 +456,20 @@ type cidrField struct {
 // validateNetwork checks every required network field is set and every CIDR
 // parses.
 func validateNetwork(c *Cluster) error {
-	required := []struct {
-		path  string
-		value string
-	}{
-		{"network.main.vpc", c.Network.Main.VPC},
-		{"network.main.subnet", c.Network.Main.Subnet},
-		{"network.main.podsRangeName", c.Network.Main.PodsRangeName},
-		{"network.main.svcsRangeName", c.Network.Main.SvcsRangeName},
-		{"network.external.vpc", c.Network.External.VPC},
-		{"network.external.subnet", c.Network.External.Subnet},
-		{"network.external.podsRangeName", c.Network.External.PodsRangeName},
-		{"network.internal.vpc", c.Network.Internal.VPC},
-		{"network.internal.subnet", c.Network.Internal.Subnet},
-		{"network.internal.podsRangeName", c.Network.Internal.PodsRangeName},
-		{"network.allowInternalCidr", c.Network.AllowInternalCidr},
-	}
-	for _, f := range required {
-		if f.value == "" {
-			return fmt.Errorf("%s is required", f.path)
-		}
+	if err := requireNonEmpty(map[string]string{
+		"network.main.vpc":               c.Network.Main.VPC,
+		"network.main.subnet":            c.Network.Main.Subnet,
+		"network.main.podsRangeName":     c.Network.Main.PodsRangeName,
+		"network.main.svcsRangeName":     c.Network.Main.SvcsRangeName,
+		"network.external.vpc":           c.Network.External.VPC,
+		"network.external.subnet":        c.Network.External.Subnet,
+		"network.external.podsRangeName": c.Network.External.PodsRangeName,
+		"network.internal.vpc":           c.Network.Internal.VPC,
+		"network.internal.subnet":        c.Network.Internal.Subnet,
+		"network.internal.podsRangeName": c.Network.Internal.PodsRangeName,
+		"network.allowInternalCidr":      c.Network.AllowInternalCidr,
+	}); err != nil {
+		return err
 	}
 	if c.Network.External.MTU <= 0 {
 		return errors.New("network.external.mtu is required and must be positive")
@@ -556,4 +550,15 @@ func warnCIDROverlaps(c *Cluster) {
 			}
 		}
 	}
+}
+
+// requireNonEmpty checks that all provided string fields are not empty,
+// returning an error with the field path if any is empty.
+func requireNonEmpty(fields map[string]string) error {
+	for path, val := range fields {
+		if val == "" {
+			return fmt.Errorf("%s is required", path)
+		}
+	}
+	return nil
 }
