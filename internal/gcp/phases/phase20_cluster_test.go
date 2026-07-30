@@ -163,6 +163,22 @@ func TestBuildClusterConfig_EnablesMultiNetworkingAndDPv2(t *testing.T) {
 	}
 }
 
+func TestBuildClusterConfig_IncludesRequiredLabels(t *testing.T) {
+	cl := testCluster()
+	c := buildClusterConfig(cl)
+
+	labels := c.GetResourceLabels()
+	if labels == nil {
+		t.Fatal("expected ResourceLabels to be non-nil")
+	}
+	if labels["gkebnkctl-cluster"] != "bnk-hostdev" {
+		t.Errorf("expected gkebnkctl-cluster=bnk-hostdev, got %q", labels["gkebnkctl-cluster"])
+	}
+	if labels["gkebnkctl-managed"] != "true" {
+		t.Errorf("expected gkebnkctl-managed=true, got %q", labels["gkebnkctl-managed"])
+	}
+}
+
 func TestLabelTMMNodes_NoNodesErrors(t *testing.T) {
 	k8sClient := fakek8s.NewClientset()
 	if err := labelTMMNodes(context.Background(), k8sClient, "tmm-pool", testTMMPollInterval); err == nil {
