@@ -140,9 +140,16 @@ else
 fi
 echo
 
-# Security gates (commented TODO unless tools are easily available)
+# Security gates (advisory: pass on both success and findings, warn on findings)
 echo "-> Security gates (gosec, govulncheck, gitleaks):"
-echo "   TODO: gosec - requires securego/gosec install (github action-only for now)"
+echo "-> go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 ./... (advisory)"
+if go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 ./...; then
+	printf "%b[PASS]%b gosec\n" "$GREEN" "$NC"
+	((passed_gates++))
+else
+	printf "%b[WARN]%b gosec found findings (advisory gate - see output above)\n" "$YELLOW" "$NC"
+	((passed_gates++))
+fi
 echo "-> go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... (advisory)"
 if go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...; then
 	printf "%b[PASS]%b govulncheck\n" "$GREEN" "$NC"
@@ -151,7 +158,15 @@ else
 	printf "%b[WARN]%b govulncheck found findings (advisory gate - see output above)\n" "$YELLOW" "$NC"
 	((passed_gates++))
 fi
-echo "   TODO: gitleaks - requires gitleaks CLI install or download"
+echo "-> go run github.com/zricethezav/gitleaks/v8@v8.18.2 detect --source . --no-banner (advisory)"
+echo "   Note: local run scans the worktree only; CI covers full history via fetch-depth:0"
+if go run github.com/zricethezav/gitleaks/v8@v8.18.2 detect --source . --no-banner; then
+	printf "%b[PASS]%b gitleaks\n" "$GREEN" "$NC"
+	((passed_gates++))
+else
+	printf "%b[WARN]%b gitleaks found findings (advisory gate - see output above)\n" "$YELLOW" "$NC"
+	((passed_gates++))
+fi
 echo
 
 # Summary
