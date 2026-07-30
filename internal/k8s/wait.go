@@ -80,27 +80,7 @@ func WaitForCertificateReady(ctx context.Context, dyn dynamic.Interface, ns, nam
 // IsCertificateReady walks the unstructured status.conditions slice to find
 // a condition with type=Ready and status=True.
 func IsCertificateReady(obj map[string]interface{}) bool {
-	status, ok := obj["status"].(map[string]interface{})
-	if !ok {
-		return false
-	}
-	conditions, ok := status["conditions"].([]interface{})
-	if !ok {
-		return false
-	}
-	for _, raw := range conditions {
-		cond, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if t, _ := cond["type"].(string); t != "Ready" {
-			continue
-		}
-		if s, _ := cond["status"].(string); s == "True" {
-			return true
-		}
-	}
-	return false
+	return UnstructuredConditionIsTrue(obj, "Ready")
 }
 
 // UnstructuredConditionIsTrue reports whether obj has a status.conditions[]
@@ -156,30 +136,9 @@ func WaitForCRDEstablished(ctx context.Context, dyn dynamic.Interface, crdName s
 	})
 }
 
-// isCRDEstablished mirrors IsCertificateReady's condition walk, checking for
-// type=Established status=True instead.
+// isCRDEstablished delegates to UnstructuredConditionIsTrue to check for type=Established status=True.
 func isCRDEstablished(obj map[string]interface{}) bool {
-	status, ok := obj["status"].(map[string]interface{})
-	if !ok {
-		return false
-	}
-	conditions, ok := status["conditions"].([]interface{})
-	if !ok {
-		return false
-	}
-	for _, raw := range conditions {
-		cond, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if t, _ := cond["type"].(string); t != "Established" {
-			continue
-		}
-		if s, _ := cond["status"].(string); s == "True" {
-			return true
-		}
-	}
-	return false
+	return UnstructuredConditionIsTrue(obj, "Established")
 }
 
 // WaitForPodReady polls a Pod in ns/name until all its containers report
