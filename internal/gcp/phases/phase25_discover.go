@@ -285,16 +285,14 @@ func fieldForMAC(dump, mac, field string) string {
 	return ""
 }
 
-// buildDiscoveryPod returns the ephemeral privileged pod spec used to dump
-// /sys/class/net on nodeName via nsenter -t1 (host PID/net/mount/IPC
-// namespaces) — the k8s-API-only alternative to SSH (docs/SPEC-go-tracer.md
-// §9.6).
-func buildDiscoveryPod(nodeName string) *corev1.Pod {
+// buildNsenterPod returns the ephemeral privileged pod spec used to run script
+// on nodeName via nsenter -t 1 (host PID/net/mount/IPC namespaces).
+func buildNsenterPod(ns, podName, nodeName, script string) *corev1.Pod {
 	privileged := true
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      discoverPodName,
-			Namespace: discoverNamespace,
+			Name:      podName,
+			Namespace: ns,
 		},
 		Spec: corev1.PodSpec{
 			NodeName:      nodeName,
@@ -307,7 +305,7 @@ func buildDiscoveryPod(nodeName string) *corev1.Pod {
 				{
 					Name:    "discover",
 					Image:   "busybox:1.36",
-					Command: []string{"nsenter", "-t", "1", "-m", "-u", "-n", "-i", "--", "sh", "-c", ifaceDumpScript},
+					Command: []string{"nsenter", "-t", "1", "-m", "-u", "-n", "-i", "--", "sh", "-c", script},
 					SecurityContext: &corev1.SecurityContext{
 						Privileged: &privileged,
 					},
@@ -317,28 +315,43 @@ func buildDiscoveryPod(nodeName string) *corev1.Pod {
 	}
 }
 
-// discoverNodeIfaces applies the ephemeral discovery pod to nodeName, waits
-// for it to Succeed, reads its logs (the IFACE/MAC/PCI dump), and deletes
-// it — best-effort delete of any stale pod from a prior run happens first.
-func discoverNodeIfaces(ctx context.Context, k8sClient kubernetes.Interface, nodeName string) (string, error) {
-	pods := k8sClient.CoreV1().Pods(discoverNamespace)
-	_ = pods.Delete(ctx, discoverPodName, metav1.DeleteOptions{})
+// buildDiscoveryPod returns the ephemeral privileged pod spec used to dump
+// /sys/class/net on nodeName.
+func buildDiscoveryPod(nodeName string) *corev1.Pod {
+	return buildNsenterPod(discoverNamespace, discoverPodName, nodeName, ifaceDumpScript)
+}
 
-	if _, err := pods.Create(ctx, buildDiscoveryPod(nodeName), metav1.CreateOptions{}); err != nil {
-		return "", fmt.Errorf("creating discovery pod on %s: %w", nodeName, err)
+// runHostNsenterScript applies an ephemeral privileged pod to nodeName running
+// script via nsenter -t 1, waits for it to Succeeded, reads its stdout logs, and
+// deletes the pod (best-effort cleanup).
+func runHostNsenterScript(ctx context.Context, k8sClient kubernetes.Interface, ns, podName, nodeName, script string, timeout time.Duration) (string, error) {
+	pods := k8sClient.CoreV1().Pods(ns)
+	_ = pods.Delete(ctx, podName, metav1.DeleteOptions{})
+
+	if _, err := pods.Create(ctx, buildNsenterPod(ns, podName, nodeName, script), metav1.CreateOptions{}); err != nil {
+		return "", fmt.Errorf("creating discovery pod %s/%s on %s: %w", ns, podName, nodeName, err)
 	}
 	defer func() {
-		_ = pods.Delete(ctx, discoverPodName, metav1.DeleteOptions{})
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		_ = pods.Delete(cleanupCtx, podName, metav1.DeleteOptions{})
 	}()
 
-	if err := waitForPodSucceeded(ctx, k8sClient, discoverNamespace, discoverPodName, discoverPodTimeout); err != nil {
+	if err := waitForPodSucceeded(ctx, k8sClient, ns, podName, timeout); err != nil {
 		return "", err
 	}
-	logs, err := podLogs(ctx, k8sClient, discoverNamespace, discoverPodName)
+	logs, err := podLogs(ctx, k8sClient, ns, podName)
 	if err != nil {
-		return "", fmt.Errorf("reading discovery pod logs: %w", err)
+		return "", fmt.Errorf("reading discovery pod %s/%s logs: %w", ns, podName, err)
 	}
 	return string(logs), nil
+}
+
+// discoverNodeIfaces applies the ephemeral discovery pod to nodeName, waits
+// for it to Succeed, reads its logs (the IFACE/MAC/PCI dump), and deletes
+// it. Delegates to runHostNsenterScript.
+func discoverNodeIfaces(ctx context.Context, k8sClient kubernetes.Interface, nodeName string) (string, error) {
+	return runHostNsenterScript(ctx, k8sClient, discoverNamespace, discoverPodName, nodeName, ifaceDumpScript, discoverPodTimeout)
 }
 
 // waitForPodSucceeded polls ns/name until it reaches PodSucceeded, erroring

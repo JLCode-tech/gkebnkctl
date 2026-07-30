@@ -512,6 +512,9 @@ func validateFarSecret(f FarSecretSpec) error {
 		if f.DockerConfigFile == "" {
 			return errors.New("bnk.farSecret.dockerConfigFile is required when bnk.farSecret.source == \"dockerconfig\"")
 		}
+		if _, err := os.Stat(f.DockerConfigFile); err != nil {
+			return fmt.Errorf("bnk.farSecret.dockerConfigFile %q: %w", f.DockerConfigFile, err)
+		}
 	default:
 		return fmt.Errorf("bnk.farSecret.source must be one of {kubecontext, dockerconfig}, got %q", f.Source)
 	}

@@ -80,7 +80,7 @@ func NewApplier(cfg *rest.Config) (*Applier, error) {
 	if err != nil {
 		return nil, fmt.Errorf("apply: discovery client: %w", err)
 	}
-	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memCacheClient{disc})
+	mapper := restmapper.NewDeferredDiscoveryRESTMapper(NewNoopCachedDiscovery(disc))
 	return &Applier{dyn: dyn, mapper: mapper}, nil
 }
 
@@ -172,8 +172,12 @@ func ParseYAMLStream(data []byte) ([]*unstructured.Unstructured, error) {
 	return out, nil
 }
 
-// memCacheClient adapts a discovery.DiscoveryInterface into a
+// NewNoopCachedDiscovery adapts a discovery.DiscoveryInterface into a
 // CachedDiscoveryInterface (no actual caching — fine for one-shot CLI runs).
+func NewNoopCachedDiscovery(delegate discovery.DiscoveryInterface) discovery.CachedDiscoveryInterface {
+	return memCacheClient{DiscoveryInterface: delegate}
+}
+
 type memCacheClient struct{ discovery.DiscoveryInterface }
 
 func (memCacheClient) Fresh() bool { return true }
