@@ -9,7 +9,7 @@ These templates are rendered via `internal/k8s/render` against typed `Vars` stru
 
 ---
 
-## 📄 Available Templates
+## Available Templates
 
 ### Fixed Document Sets
 The following templates render a fixed set of documents:
@@ -29,7 +29,7 @@ The following templates render a fixed set of documents:
 
 ---
 
-## ⚠️ Deviations from Spec
+## Deviations from Spec
 
 > [!IMPORTANT]
 > The specification (`docs/SPEC-go-tracer.md` §1/§5) lists a `discover-pod.yaml.tmpl` for Phase25's ephemeral discovery pod. This file **does not exist** and is not needed.

@@ -1,0 +1,18 @@
+version: 1
+default_profile: build
+profiles:
+  build:
+    lead_overlay: .opencode/profiles/build/lead-overlay.md
+  quick:
+    lead_overlay: .opencode/profiles/quick/lead-overlay.md
+    reviewer_overlay: .opencode/profiles/quick/reviewer-overlay.md
+    builder_overlay: .opencode/profiles/quick/builder-overlay.md
+  hardening:
+    lead_overlay: .opencode/profiles/hardening/lead-overlay.md
+    reviewer_overlay: .opencode/profiles/hardening/reviewer-overlay.md
+    builder_overlay: .opencode/profiles/hardening/builder-overlay.md
+materialization:
+  selected_profile_targets:
+    lead_overlay: .opencode/profile/lead-overlay.md
+    reviewer_overlay: .opencode/profile/reviewer-overlay.md
+    builder_overlay: .opencode/profile/builder-overlay.md

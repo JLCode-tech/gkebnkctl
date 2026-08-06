@@ -9,7 +9,7 @@ This binary is a Go port of a bash-first recipe proven live on cluster `bnk-host
 
 ---
 
-## 🏗 Architecture & Design
+## Architecture & Design
 
 - **Architecture:** For the phase-by-phase architecture (creation, teardown, state/idempotency strategy, and testing), see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - **Build Contract:** For the authoritative build contract (schema, phase inventory, SDK call detail), see [`docs/SPEC-go-tracer.md`](docs/SPEC-go-tracer.md).
@@ -17,7 +17,7 @@ This binary is a Go port of a bash-first recipe proven live on cluster `bnk-host
 
 ---
 
-## 📜 The GKE host-device contract
+## The GKE host-device contract
 
 Everything this binary does exists because of specific, live-discovered requirements. 
 
@@ -36,7 +36,7 @@ Here are the 7 core requirements:
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -106,7 +106,7 @@ GKEBNKCTL_VERIFY_EGRESS=1 gkebnkctl up -f my-cluster.yaml
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 The `cluster.yaml` (`apiVersion: gkebnkctl/v1`, `kind: Cluster`) file is the source of truth for your cluster. 
 
@@ -127,7 +127,7 @@ The `cluster.yaml` (`apiVersion: gkebnkctl/v1`, `kind: Cluster`) file is the sou
 
 ---
 
-## 🧪 Testing & CI
+## Testing & CI
 
 To run the local gate set before pushing:
 
@@ -147,7 +147,7 @@ go test -race ./...
 
 ---
 
-## 🔍 Known Open Items
+## Known Open Items
 
 Carried over from the trial, unresolved by this binary:
 - DNS-under-capture

@@ -1,0 +1,5 @@
+# OpenCode runtime state (per-session, never tracked)
+state/
+node_modules/
+package-lock.json
+*.log
