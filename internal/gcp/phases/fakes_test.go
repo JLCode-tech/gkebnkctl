@@ -165,6 +165,14 @@ func (f *fakeInstances) Get(_ context.Context, req *computepb.GetInstanceRequest
 	return nil, errNotFound
 }
 
+func (f *fakeInstances) Insert(_ context.Context, req *computepb.InsertInstanceRequest, _ ...gax.CallOption) (*compute.Operation, error) {
+	return nil, nil
+}
+
+func (f *fakeInstances) Delete(_ context.Context, req *computepb.DeleteInstanceRequest, _ ...gax.CallOption) (*compute.Operation, error) {
+	return nil, nil
+}
+
 // --- compute.RegionsAPI ---
 
 type fakeRegions struct {

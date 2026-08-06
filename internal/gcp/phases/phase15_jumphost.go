@@ -19,7 +19,7 @@ import (
 func Phase15Jumphost(ctx context.Context, cl *intent.Cluster, st *state.State, clients *gcp.Clients, dryRun bool) error {
 	fmt.Fprintf(os.Stderr, "[phase 15] jumphost: cluster=%s\n", cl.Metadata.Name)
 
-	if cl.Testing.Jumphost.Enabled == false {
+	if !cl.Testing.Jumphost.Enabled {
 		fmt.Fprintln(os.Stderr, "[phase 15] skipped: jumphost disabled")
 		return nil
 	}
