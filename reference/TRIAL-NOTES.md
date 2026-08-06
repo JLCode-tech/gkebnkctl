@@ -44,7 +44,7 @@ Do NOT touch their clusters.
 - far-secret (repo.f5.com pull) — needs user creds or authorized cluster-to-cluster copy
   (classifier blocks credential materialization to disk).
 
-## ✅ RESULT 2026-07-20: BNK HOST-DEVICE EGRESS **WORKS ON GKE** — first ever
+## RESULT 2026-07-20: BNK HOST-DEVICE EGRESS **WORKS ON GKE** — first ever
 Cluster `bnk-hostdev` (qwiklabs BNY project, us-central1-a — venue moved there after spk-dev
 403'd cluster-create; own bnkhd-vpc, dataplane NICs on shared tmm-ext/tmm-int subnets).
 **Proven: pod → CSRC vxlan100 (port 5789) → TMM egress virtual (pkts_in climbing) → SNAT

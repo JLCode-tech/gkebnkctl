@@ -55,7 +55,7 @@ With this cluster registered in a localhost Forge:
 
 ---
 
-## ⚠️ One gotcha to rehearse before a real demo
+## One gotcha to rehearse before a real demo
 
 The **SNAT identity flip always works**. The **firewall-block beat** depends on the ACL blob being loaded into TMM — and on BNK 2.3 there is a `blobd` TLS bug where the blob only reaches TMM right **after a TMM pod restart**. If, while BNK is ON, `1.1.1.1` comes back reachable (e.g. HTTP 301) instead of BLOCKED, bounce TMM and wait ~2–3 minutes:
 
