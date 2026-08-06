@@ -69,7 +69,7 @@ func Phase10Networks(ctx context.Context, cl *intent.Cluster, _ *state.State, cl
 		{"external", cl.Network.External},
 		{"internal", cl.Network.Internal},
 	} {
-		if err := ensureVPC(ctx, clients.Networks, cl.Metadata.Project, dp.spec.VPC, int32(dp.spec.MTU)); err != nil { //nolint:gosec -- MTU is validated as a positive int at intent.Load
+		if err := ensureVPC(ctx, clients.Networks, cl.Metadata.Project, dp.spec.VPC, int32(dp.spec.MTU)); err != nil { //nolint:gosec,g115 -- MTU is validated as a positive int at intent.Load
 			return fmt.Errorf("phase10: %s vpc: %w", dp.label, err)
 		}
 		if err := ensureSubnet(ctx, clients.Subnetworks, cl.Metadata.Project, cl.Region, dp.spec.VPC, dp.spec.Subnet, dp.spec.CIDR, []secondaryRange{
