@@ -306,6 +306,22 @@ func TestValidate_FarSecretDockerConfigRequiresFile(t *testing.T) {
 	}
 }
 
+func TestLoad_DockerConfigFileMustExist(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Replace(validYAML,
+		"farSecret:\n    source: kubecontext\n    sourceContext: some-other-cluster\n    sourceNamespace: f5-bnk\n    namespaces: [f5-bnk, f5-utils]",
+		"farSecret:\n    source: dockerconfig\n    dockerConfigFile: ./nonexistent.json\n    sourceNamespace: f5-bnk\n    namespaces: [f5-bnk, f5-utils]",
+		1)
+	path := writeCluster(t, dir, body)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for missing dockerConfigFile, got nil")
+	}
+	if !strings.Contains(err.Error(), "dockerConfigFile") {
+		t.Errorf("error = %q, want substring \"dockerConfigFile\"", err.Error())
+	}
+}
+
 func TestApplyDefaults(t *testing.T) {
 	dir := t.TempDir()
 	// Minimal YAML that omits every field with a documented default.

@@ -103,6 +103,19 @@ func RenderLicenseCR(tmpl []byte, v LicenseCRVars) ([]byte, error) {
 	return Render(tmpl, v)
 }
 
+// NamespacesVars is the Vars struct for templates/namespaces.yaml.tmpl.
+// Field mapping: docs/SPEC-go-tracer.md §5.
+type NamespacesVars struct {
+	TestNamespace string
+}
+
+// RenderNamespaces renders templates/namespaces.yaml.tmpl (Phase30):
+// the f5-bnk, f5-utils, and egress test namespaces. f5-bnk and f5-utils
+// are static; TestNamespace is templated to support custom egress namespaces.
+func RenderNamespaces(tmpl []byte, v NamespacesVars) ([]byte, error) {
+	return Render(tmpl, v)
+}
+
 // EgressVars is the Vars struct for templates/egress.yaml.tmpl.
 // Field mapping: docs/SPEC-go-tracer.md §5.
 type EgressVars struct {

@@ -2,6 +2,7 @@ package phases
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -171,25 +172,24 @@ func nestedNumber(obj map[string]interface{}, fields ...string) (int64, bool) {
 // the finalizer makes this necessary.
 func waitStaticRouteGone(ctx context.Context, clients *gcp.Clients, gvr schema.GroupVersionResource, ns, name string) error {
 	ri := clients.Dynamic.Resource(gvr).Namespace(ns)
-	deadline := time.Now().Add(staticRouteGoneTimeout)
-	for {
+	err := gcp.PollUntil(ctx, staticRouteGonePoll, staticRouteGoneTimeout, func(ctx context.Context) (bool, error) {
 		_, err := ri.Get(ctx, name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
-			return nil
+			return true, nil
 		}
 		if err != nil {
-			return fmt.Errorf("waiting for %s/%s to be deleted: %w", ns, name, err)
+			return false, fmt.Errorf("waiting for %s/%s to be deleted: %w", ns, name, err)
 		}
-		if time.Now().After(deadline) {
+		return false, nil
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("timed out after %s waiting for drifted route %s/%s to finish deleting (finalizer %q still held?)",
 				staticRouteGoneTimeout, ns, name, "handletmmconfig_inconsistency")
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(staticRouteGonePoll):
-		}
+		return err
 	}
+	return nil
 }
 
 // applyStaticRouteManifestBytes is applyManifestBytes plus a

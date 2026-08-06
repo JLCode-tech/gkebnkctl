@@ -4,10 +4,8 @@ import "testing"
 
 // TestFS_ManifestsEmbedded is a sanity check that the go:embed directive
 // compiles and picks up files from every declared directory. static/,
-// multus/, cert-manager/, and flo/ now carry Task C's real content (the
-// Task A placeholder README.md files were removed once real files landed);
-// templates/README.md is still a placeholder — egress.yaml.tmpl and
-// agent-route-setter.yaml.tmpl remain Task D scope.
+// multus/, cert-manager/, and flo/ carry real content; templates/ holds
+// text/template sources for dynamic rendering (Task C/D/later phases).
 func TestFS_ManifestsEmbedded(t *testing.T) {
 	for _, path := range []string{
 		"static/01-namespaces.yaml",
@@ -19,10 +17,14 @@ func TestFS_ManifestsEmbedded(t *testing.T) {
 		"multus/02-multus-ds.yaml",
 		"cert-manager/cert-manager-v1.16.1.yaml",
 		"flo/flo-manifest.yaml",
+		"templates/namespaces.yaml.tmpl",
 		"templates/nads-hostdevice.yaml.tmpl",
 		"templates/cneinstance.yaml.tmpl",
 		"templates/vlans-routes.yaml.tmpl",
 		"templates/license-cr.yaml.tmpl",
+		"templates/egress.yaml.tmpl",
+		"templates/agent-route-setter.yaml.tmpl",
+		"templates/ingress-vxlan-routes.yaml.tmpl",
 		"templates/README.md",
 	} {
 		if _, err := FS.ReadFile(path); err != nil {

@@ -1,5 +1,5 @@
 // Unit tests for the pure YAML-parsing helpers in apply.go
-// (ParseYAMLStream, splitYAMLDocs) plus Applier.Apply's pre-Patch
+// (ParseYAMLStream) plus Applier.Apply's pre-Patch
 // validation branches (missing kind, unmapped GVK). Server-side apply's
 // Patch(ApplyPatchType) call needs a real API server — client-go's
 // dynamicfake does not support it (docs/SPEC-go-tracer.md §7) — so the SSA
@@ -83,20 +83,6 @@ func TestParseYAMLStream_BadYAML(t *testing.T) {
 	_, err := ParseYAMLStream([]byte("not: yaml: : :"))
 	if err == nil {
 		t.Fatal("expected a parse error, got nil")
-	}
-}
-
-func TestSplitYAMLDocs_LeadingSeparator(t *testing.T) {
-	in := []byte("---\nfoo: bar\n---\nbaz: qux\n")
-	parts := splitYAMLDocs(in)
-	if len(parts) != 2 {
-		t.Fatalf("expected 2 parts, got %d: %q", len(parts), parts)
-	}
-	if !strings.Contains(string(parts[0]), "foo: bar") {
-		t.Errorf("first part lost content: %q", parts[0])
-	}
-	if !strings.Contains(string(parts[1]), "baz: qux") {
-		t.Errorf("second part lost content: %q", parts[1])
 	}
 }
 

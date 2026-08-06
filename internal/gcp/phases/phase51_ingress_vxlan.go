@@ -141,7 +141,7 @@ func discoverIngressVxlanRoutes(ctx context.Context, k8sClient kubernetes.Interf
 		return nil, fmt.Errorf("no nodes found for pool %s — run phase 20 first", agentPoolName)
 	}
 
-	var routes []render.IngressVxlanRouteVars
+	routes := make([]render.IngressVxlanRouteVars, 0, len(nodes.Items))
 	for _, node := range nodes.Items {
 		if node.Spec.PodCIDR == "" {
 			return nil, fmt.Errorf("node %s has no Spec.PodCIDR set", node.Name)
@@ -201,62 +201,19 @@ func hostIPFromCIDR(cidr string) (string, error) {
 	return ip, nil
 }
 
-// discoverVxlanAddr applies an ephemeral privileged pod to nodeName
-// (mirrors phase25_discover.go's discoverNodeIfaces pattern: nsenter -t1
-// into the node's host netns, wait for Succeed, read logs, delete),
-// running vxlanAddrScript instead of phase25's iface dump. Reuses
-// waitForPodSucceeded/podLogs (phase25_discover.go) — both are already
-// generic over namespace/pod name. Returns the raw "<ip>/<prefixlen>"
-// line, or "" if vxlan100 does not exist / has no IPv4 address on this
-// node (not an error — see Phase51IngressVxlanRoutes's doc comment).
+// discoverVxlanAddr applies an ephemeral privileged pod to nodeName via
+// runHostNsenterScript, running vxlanAddrScript. Returns the raw
+// "<ip>/<prefixlen>" line, or "" if vxlan100 does not exist / has no IPv4
+// address on this node (not an error).
 func discoverVxlanAddr(ctx context.Context, k8sClient kubernetes.Interface, nodeName string) (string, error) {
-	pods := k8sClient.CoreV1().Pods(vxlanDiscoverNamespace)
-	_ = pods.Delete(ctx, vxlanDiscoverPodName, metav1.DeleteOptions{})
-
-	if _, err := pods.Create(ctx, buildVxlanDiscoveryPod(nodeName), metav1.CreateOptions{}); err != nil {
-		return "", fmt.Errorf("creating vxlan-discover pod on %s: %w", nodeName, err)
-	}
-	defer func() {
-		_ = pods.Delete(ctx, vxlanDiscoverPodName, metav1.DeleteOptions{})
-	}()
-
-	if err := waitForPodSucceeded(ctx, k8sClient, vxlanDiscoverNamespace, vxlanDiscoverPodName, vxlanDiscoverPodTimeout); err != nil {
+	out, err := runHostNsenterScript(ctx, k8sClient, vxlanDiscoverNamespace, vxlanDiscoverPodName, nodeName, vxlanAddrScript, vxlanDiscoverPodTimeout)
+	if err != nil {
 		return "", err
 	}
-	logs, err := podLogs(ctx, k8sClient, vxlanDiscoverNamespace, vxlanDiscoverPodName)
-	if err != nil {
-		return "", fmt.Errorf("reading vxlan-discover pod logs: %w", err)
-	}
-	return strings.TrimSpace(string(logs)), nil
+	return strings.TrimSpace(out), nil
 }
 
-// buildVxlanDiscoveryPod returns the ephemeral privileged pod spec used to
-// read vxlan100's IPv4 address on nodeName via nsenter -t1, mirroring
-// phase25_discover.go's buildDiscoveryPod shape.
+// buildVxlanDiscoveryPod delegates to buildNsenterPod for the vxlan discovery pod.
 func buildVxlanDiscoveryPod(nodeName string) *corev1.Pod {
-	privileged := true
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      vxlanDiscoverPodName,
-			Namespace: vxlanDiscoverNamespace,
-		},
-		Spec: corev1.PodSpec{
-			NodeName:      nodeName,
-			HostPID:       true,
-			RestartPolicy: corev1.RestartPolicyNever,
-			Tolerations: []corev1.Toleration{
-				{Operator: corev1.TolerationOpExists},
-			},
-			Containers: []corev1.Container{
-				{
-					Name:    "vxlan-discover",
-					Image:   "busybox:1.36",
-					Command: []string{"nsenter", "-t", "1", "-m", "-u", "-n", "-i", "--", "sh", "-c", vxlanAddrScript},
-					SecurityContext: &corev1.SecurityContext{
-						Privileged: &privileged,
-					},
-				},
-			},
-		},
-	}
+	return buildNsenterPod(vxlanDiscoverNamespace, vxlanDiscoverPodName, nodeName, vxlanAddrScript)
 }

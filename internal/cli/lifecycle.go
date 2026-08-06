@@ -106,6 +106,7 @@ type upPhase struct {
 var upPhases = []upPhase{
 	{num: "00", name: "preflight"},
 	{num: "10", name: "networks"},
+	{num: "15", name: "jumphost"},
 	{num: "20", name: "cluster"},
 	{num: "25", name: "discover"},
 	{num: "30", name: "namespaces"},
@@ -134,6 +135,7 @@ var upPhases = []upPhase{
 var realUpPhases = map[string]func(ctx context.Context, cl *intent.Cluster, st *state.State, clients *gcp.Clients, dryRun bool) error{
 	"00": phases.Phase00Preflight,
 	"10": phases.Phase10Networks,
+	"15": phases.Phase15Jumphost,
 	"20": phases.Phase20Cluster,
 	"25": phases.Phase25Discover,
 	"30": phases.Phase30Namespaces,
@@ -285,6 +287,9 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) err
 		return fmt.Errorf("down: %w", err)
 	}
 
+	if err := phases.PhaseDownJumphost(ctx, cl, st, gcl); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
 	if err := phases.PhaseDownCluster(ctx, cl, st, gcl); err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
@@ -321,10 +326,16 @@ func printDownPlan(w io.Writer, cl *intent.Cluster) {
 	fmt.Fprintf(w, "→ dry-run: destroy plan for cluster %q (project=%s zone=%s) — no GCP mutations\n",
 		cl.Metadata.Name, cl.Metadata.Project, cl.Metadata.Zone)
 	fmt.Fprintf(w, "  • delete  GKE cluster                %s\n", cl.Metadata.Name)
+	count := 4
+	if cl.Testing.Jumphost.Enabled {
+		count += 2
+		fmt.Fprintf(w, "  • delete  jumphost VM                %s-jumphost\n", cl.Metadata.Name)
+		fmt.Fprintf(w, "  • delete  IAP firewall               %s-allow-iap-ssh\n", cl.Metadata.Name)
+	}
 	fmt.Fprintf(w, "  • delete  main VPC firewall          %s-allow-internal\n", cl.Network.Main.VPC)
 	fmt.Fprintf(w, "  • delete  main VPC subnet            %s\n", cl.Network.Main.Subnet)
 	fmt.Fprintf(w, "  • delete  main VPC                   %s\n", cl.Network.Main.VPC)
 	fmt.Fprintf(w, "→ shared dataplane VPCs %s/%s are NEVER deleted by teardown.\n",
 		cl.Network.External.VPC, cl.Network.Internal.VPC)
-	fmt.Fprintln(w, "→ dry-run complete: 4 resource(s) would be destroyed, 0 GCP mutations made")
+	fmt.Fprintf(w, "→ dry-run complete: %d resource(s) would be destroyed, 0 GCP mutations made\n", count)
 }

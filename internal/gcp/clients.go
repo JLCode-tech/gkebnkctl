@@ -22,6 +22,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
+
+	"github.com/JLCode-tech/gkebnkctl/internal/k8s"
 )
 
 // NetworksAPI is the subset of compute.NetworksClient used by Phase10.
@@ -61,6 +63,8 @@ type RoutersAPI interface {
 // (iface/MAC/PCI discovery via NetworkInterfaces + AliasIpRanges).
 type InstancesAPI interface {
 	Get(ctx context.Context, req *computepb.GetInstanceRequest, opts ...gax.CallOption) (*computepb.Instance, error)
+	Insert(ctx context.Context, req *computepb.InsertInstanceRequest, opts ...gax.CallOption) (*compute.Operation, error)
+	Delete(ctx context.Context, req *computepb.DeleteInstanceRequest, opts ...gax.CallOption) (*compute.Operation, error)
 }
 
 // RegionsAPI is the subset of compute.RegionsClient used by Phase00's
@@ -231,14 +235,7 @@ func attachK8sFromConfig(c *Clients, cfg *rest.Config) error {
 	}
 	c.K8s = cs
 	c.Dynamic = dyn
-	c.RESTMapper = restmapper.NewDeferredDiscoveryRESTMapper(memCachedDiscovery{disc})
+	c.RESTMapper = restmapper.NewDeferredDiscoveryRESTMapper(k8s.NewNoopCachedDiscovery(disc))
 	c.RestConfig = cfg
 	return nil
 }
-
-// memCachedDiscovery adapts a discovery.DiscoveryInterface into a
-// CachedDiscoveryInterface (no actual caching — fine for one-shot CLI runs).
-type memCachedDiscovery struct{ discovery.DiscoveryInterface }
-
-func (memCachedDiscovery) Fresh() bool { return true }
-func (memCachedDiscovery) Invalidate() {}

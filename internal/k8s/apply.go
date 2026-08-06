@@ -80,7 +80,7 @@ func NewApplier(cfg *rest.Config) (*Applier, error) {
 	if err != nil {
 		return nil, fmt.Errorf("apply: discovery client: %w", err)
 	}
-	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memCacheClient{disc})
+	mapper := restmapper.NewDeferredDiscoveryRESTMapper(NewNoopCachedDiscovery(disc))
 	return &Applier{dyn: dyn, mapper: mapper}, nil
 }
 
@@ -153,8 +153,9 @@ func (a *Applier) ApplyAll(ctx context.Context, objs []*unstructured.Unstructure
 // embedded manifest file) into individual unstructured objects. Empty
 // documents are skipped.
 func ParseYAMLStream(data []byte) ([]*unstructured.Unstructured, error) {
-	var out []*unstructured.Unstructured
-	for _, doc := range splitYAMLDocs(data) {
+	parts := SplitYAMLDocs(data)
+	out := make([]*unstructured.Unstructured, 0, len(parts))
+	for _, doc := range parts {
 		doc = bytes.TrimSpace(doc)
 		if len(doc) == 0 {
 			continue
@@ -171,19 +172,12 @@ func ParseYAMLStream(data []byte) ([]*unstructured.Unstructured, error) {
 	return out, nil
 }
 
-// splitYAMLDocs splits a YAML stream on the "---" document separator.
-// Conservative ("\n---\n" only, plus a leading "---\n") — matches the way
-// kubectl/yaml.NewYAMLOrJSONDecoder splits streams in practice.
-func splitYAMLDocs(data []byte) [][]byte {
-	parts := bytes.Split(data, []byte("\n---\n"))
-	if len(parts) > 0 && bytes.HasPrefix(parts[0], []byte("---\n")) {
-		parts[0] = parts[0][4:]
-	}
-	return parts
+// NewNoopCachedDiscovery adapts a discovery.DiscoveryInterface into a
+// CachedDiscoveryInterface (no actual caching — fine for one-shot CLI runs).
+func NewNoopCachedDiscovery(delegate discovery.DiscoveryInterface) discovery.CachedDiscoveryInterface {
+	return memCacheClient{DiscoveryInterface: delegate}
 }
 
-// memCacheClient adapts a discovery.DiscoveryInterface into a
-// CachedDiscoveryInterface (no actual caching — fine for one-shot CLI runs).
 type memCacheClient struct{ discovery.DiscoveryInterface }
 
 func (memCacheClient) Fresh() bool { return true }

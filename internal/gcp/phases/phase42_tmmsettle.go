@@ -2,6 +2,7 @@ package phases
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -105,31 +106,29 @@ func Phase42TMMSettle(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 // tests stay fast. Returns nil once F5TmmAvailable=True, or an error if the
 // timeout elapses first.
 func settleAndGateTMM(ctx context.Context, client kubernetes.Interface, dyn dynamic.Interface, pollInterval, timeout time.Duration) error {
-	// The overall timeout is enforced by the explicit `deadline` below, not by
-	// wrapping ctx in WithTimeout — a wrapped ctx would race the deadline check
-	// and surface a bare "context deadline exceeded" instead of the actionable
-	// message. The parent ctx is still honoured for real cancellation (Ctrl-C).
-	deadline := time.Now().Add(timeout)
-	for {
+	err := gcp.PollUntil(ctx, pollInterval, timeout, func(ctx context.Context) (bool, error) {
 		if tmmAvailable(ctx, dyn) {
 			fmt.Fprintln(os.Stderr, "[phase 42] CNEInstance F5TmmAvailable=True — TMM is up")
-			return nil
+			return true, nil
 		}
 
 		cycleStuckTMMPods(ctx, client)
 
-		if time.Now().After(deadline) {
+		return false, nil
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("phase42: TMM did not become available within %s (CNEInstance %s/%s %s != True) — "+
 				"check `kubectl get pods -n %s -l %s` and `kubectl describe cneinstance -n %s %s`",
 				timeout, tmmSettleNamespace, cneInstanceName, tmmAvailableCondition,
 				tmmSettleNamespace, tmmSettleLabelSel, tmmSettleNamespace, cneInstanceName)
 		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("phase42: cancelled while waiting for TMM to become available: %w", ctx.Err())
-		case <-time.After(pollInterval):
+		if errors.Is(err, context.Canceled) {
+			return fmt.Errorf("phase42: cancelled while waiting for TMM to become available: %w", err)
 		}
+		return err
 	}
+	return nil
 }
 
 // tmmAvailable reports whether the CNEInstance's F5TmmAvailable condition is

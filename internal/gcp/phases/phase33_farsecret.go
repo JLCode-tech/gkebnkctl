@@ -63,7 +63,7 @@ func Phase33FarSecret(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 		}
 
 	case "dockerconfig":
-		dockerCfg, err := os.ReadFile(cl.Bnk.FarSecret.DockerConfigFile) //nolint:gosec -- path is operator-supplied via cluster.yaml, validated at intent.Load
+		dockerCfg, err := os.ReadFile(cl.Bnk.FarSecret.DockerConfigFile) //nolint:gosec -- path is operator-supplied via cluster.yaml, existence validated at intent.Load
 		if err != nil {
 			return fmt.Errorf("phase33: reading dockerConfigFile %s: %w", cl.Bnk.FarSecret.DockerConfigFile, err)
 		}

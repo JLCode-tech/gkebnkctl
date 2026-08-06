@@ -1,0 +1,98 @@
+# BNK egress demo — workloads.
+#
+# Applies:
+#   - namespace bnk-egress-demo      (CAPTURED by the F5SPKEgress CR)
+#   - configmap  egress-probe        (probe.sh + watch.sh, mounted at /demo)
+#   - deploy     agent               (the captured app pod; mounts the probe)
+#   - namespace bnk-egress-control   (NOT captured — the "unaffected workload")
+#   - deploy     control             (side-by-side control pod)
+#
+# NOTE: keep probe.sh / watch.sh here in sync with the standalone files in this
+# directory. They are duplicated inline because the pod loads them from a
+# ConfigMap; the standalone copies are for reading/editing.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bnk-egress-demo
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: egress-probe
+  namespace: bnk-egress-demo
+data:
+  probe.sh: |
+    #!/bin/sh
+    # BNK egress probe — run inside the agent pod. Shows the identity the
+    # outside world sees + reachability. The result FLIPS depending on whether
+    # BNK egress capture is ON (F5SPKEgress present) or OFF.
+    LINE="------------------------------------------------------------"
+    echo "$LINE"
+    echo " BNK EGRESS PROBE   pod=$(hostname)  ns=${POD_NS:-?}  podIP=$(hostname -i 2>/dev/null)"
+    echo "$LINE"
+    SRC=$(curl -s --max-time 8 https://ifconfig.me/ip 2>/dev/null)
+    echo " egress source IP the internet sees : ${SRC:-<unreachable>}"
+    echo -n " reach google.com                   : "
+    curl -s -o /dev/null -w "HTTP %{http_code}  (%{time_total}s)\n" --max-time 10 https://www.google.com 2>/dev/null || echo "UNREACHABLE"
+    echo -n " reach api.github.com               : "
+    curl -s -o /dev/null -w "HTTP %{http_code}  (%{time_total}s)\n" --max-time 10 https://api.github.com 2>/dev/null || echo "UNREACHABLE"
+    echo -n " reach 1.1.1.1 (policy target)      : "
+    curl -s -o /dev/null -w "HTTP %{http_code}\n" --connect-timeout 6 --max-time 8 https://1.1.1.1 2>/dev/null || echo "BLOCKED / timeout"
+    echo "$LINE"
+    echo " TIP: NAT-GW EIP => via BNK (controlled).  node public IP => direct (uncontrolled)."
+    echo "$LINE"
+  watch.sh: |
+    #!/bin/sh
+    # continuous view — leave running on-screen during the demo while you flip BNK
+    while true; do clear 2>/dev/null; sh /demo/probe.sh; sleep 3; done
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+  namespace: bnk-egress-demo
+  labels: { app: agent }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: agent } }
+  template:
+    metadata: { labels: { app: agent } }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          env:
+            - name: POD_NS
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          command: ["/bin/sh", "-c"]
+          args:
+            - apk add --no-cache curl bind-tools >/dev/null 2>&1 || true; nginx -g 'daemon off;'
+          volumeMounts:
+            - { name: probe, mountPath: /demo }
+      volumes:
+        - name: probe
+          configMap: { name: egress-probe, defaultMode: 0755 }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bnk-egress-control
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control
+  namespace: bnk-egress-control
+  labels: { app: control }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: control } }
+  template:
+    metadata: { labels: { app: control } }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          command: ["/bin/sh", "-c"]
+          args: ["apk add --no-cache curl >/dev/null 2>&1 || true; nginx -g 'daemon off;'"]

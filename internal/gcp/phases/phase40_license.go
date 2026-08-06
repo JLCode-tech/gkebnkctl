@@ -2,6 +2,7 @@ package phases
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -86,25 +87,29 @@ func applyLicenseWithQuotaRetry(ctx context.Context, clients *gcp.Clients, rende
 // times. apply is injectable so the retry decision is unit-tested without a
 // live cluster.
 func retryOnQuotaStatusUnknown(ctx context.Context, interval time.Duration, apply func() error) error {
-	var err error
-	for attempt := 1; attempt <= licenseQuotaRetryAttempts; attempt++ {
-		err = apply()
-		if err == nil {
-			return nil
+	attempt := 0
+	var lastErr error
+	err := gcp.PollUntil(ctx, interval, time.Duration(licenseQuotaRetryAttempts)*interval+time.Second, func(ctx context.Context) (bool, error) {
+		attempt++
+		lastErr = apply()
+		if lastErr == nil {
+			return true, nil
 		}
-		if !strings.Contains(err.Error(), quotaStatusUnknownMarker) {
-			return err
+		if !strings.Contains(lastErr.Error(), quotaStatusUnknownMarker) {
+			return false, lastErr
 		}
-		if attempt == licenseQuotaRetryAttempts {
-			break
+		if attempt >= licenseQuotaRetryAttempts {
+			return false, lastErr
 		}
 		fmt.Fprintf(os.Stderr, "[phase 40] License rejected while the ResourceQuota controller catches up (attempt %d/%d) — retrying in %s\n",
 			attempt, licenseQuotaRetryAttempts, interval)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(interval):
+		return false, nil
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return lastErr
 		}
+		return err
 	}
-	return err
+	return nil
 }
