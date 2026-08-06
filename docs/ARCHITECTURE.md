@@ -2,21 +2,14 @@
 
 This is the operator-facing map of the Go binary: what it provisions, how
 the phases fit together, and the decisions that aren't obvious from the
-code alone. The authoritative build contract is
-[`SPEC-go-tracer.md`](SPEC-go-tracer.md) — this document summarizes and
-links into it rather than duplicating it; when the two disagree, the spec
-wins.
+code alone.
 
 ## What this is
 
 `gkebnkctl` provisions a GKE cluster and installs **F5 BIG-IP Next for
 Kubernetes (BNK)** with the **host-device** dataplane pattern, in pure Go
 against the GCP SDKs + an in-process Kubernetes client — no `gcloud`,
-`kubectl`, or `helm` shellouts. It is a 1:1 port of the live-proven bash
-recipe under [`reference/bash-seed/`](../reference/bash-seed/), which
-remains in the tree, untouched, as the provenance record. See
-[`reference/TRIAL-NOTES.md`](../reference/TRIAL-NOTES.md) for the narrative
-of the original live trial this binary encodes.
+`kubectl`, or `helm` shellouts.
 
 ## Repo layout
 
@@ -39,15 +32,13 @@ internal/
     exec.go                  non-interactive pod-exec capture (Phase50 verification)
     render/                  Go text/template rendering against typed Vars structs
     manifests/               go:embed of the manifest tree (static + templates)
-examples/host-device/     the proven bnk-hostdev cluster.yaml
-reference/                 bash-seed (untouched) + the original install/recon captures
+examples/host-device/     example cluster.yaml intent file
 ```
 
 ## `cluster.yaml` intent schema
 
 `apiVersion: gkebnkctl/v1`, `kind: Cluster`, strict-decoded (unknown fields
-are load errors). Full field-by-field reference, defaults, and validation
-rules: [`SPEC-go-tracer.md` §2](SPEC-go-tracer.md#2-clusteryaml-intent-schema).
+are load errors).
 Working example: [`examples/host-device/cluster.yaml`](../examples/host-device/cluster.yaml).
 
 Two MTUs are configured independently and must not be conflated:
@@ -58,8 +49,7 @@ Two MTUs are configured independently and must not be conflated:
 
 `up` runs every phase 00→51 in order; each phase is idempotent and
 re-runnable (name-based `Get`-then-skip — see "State & idempotency"
-below). Full per-phase SDK-call/idempotency-check detail:
-[`SPEC-go-tracer.md` §3](SPEC-go-tracer.md#3-phase-inventory).
+below).
 
 | # | Phase | What it creates |
 |---|-------|------------------|
@@ -111,20 +101,14 @@ and waited for `egress-client` Ready, so the vxlan has had a chance to come
 up. A node with no egress-namespace pod scheduled on it has no `vxlan100`
 at all; Phase51 skips that node (no route emitted) rather than guessing,
 since a wrong or absent gateway on a route this specific would black-hole
-*all* ingress to that node's pods — worse than the bug it fixes. Proven
-live on cluster `bnk-hostdev` 2026-07-21: destination `10.66.4.0/24`,
-gateway `10.0.64.1` — VIP ingress returned HTTP 200 and egress still SNAT'd
-correctly, on the same pod.
+*all* ingress to that node's pods — worse than the bug it fixes.
 
 ### The GKE host-device contract
 
 Seven items, each a specific live-discovered requirement, are threaded
 through the phases above (Phase20's multi-networking, Phase25's discovery,
 Phase38's `PCIDEVICE_*` env, Phase37's sysctls DS, Phase39's `/var/crash`
-patch, Phase40's License CR, Phase41's `route-int-gw`). Full contract →
-phase coverage map: [`SPEC-go-tracer.md` "GKE host-device contract →
-coverage map"](SPEC-go-tracer.md#gke-host-device-contract--coverage-map-all-7-items-must-appear-declaratively);
-narrative origin: [`reference/TRIAL-NOTES.md`](../reference/TRIAL-NOTES.md).
+patch, Phase40's License CR, Phase41's `route-int-gw`).
 
 ### Down phases — deliberately asymmetric
 
@@ -156,8 +140,7 @@ mutation is guarded by a `Get(<name>)` → skip-if-exists check. `state.env`
 (`.gkebnkctl/<cluster>/state.env`) caches only the values that are **not**
 derivable from names — the Phase25-discovered iface/MAC/PCI/alias-CIDR/
 self-IP/pod-GW set. Losing `state.env` is fully recoverable: delete it and
-re-run `up`; it is a cache, not the record of truth. Full rationale:
-[`SPEC-go-tracer.md` §4](SPEC-go-tracer.md#4-state-strategy).
+re-run `up`; it is a cache, not the record of truth.
 
 ## Kubernetes access
 
@@ -165,8 +148,7 @@ No kubeconfig file, no exec-credential plugin. `internal/gcp/auth.go`
 builds a `rest.Config` directly from `ClusterManagerClient.GetCluster`'s
 endpoint + CA cert, with `WrapTransport` wiring an OAuth2 transport over
 Application Default Credentials so tokens auto-refresh across long waits
-(the CNEInstance/License polls can run 20+ minutes). Full design:
-[`SPEC-go-tracer.md` §5](SPEC-go-tracer.md#5-kubernetes-access-design-in-process-no-gcloudkubectl).
+(the CNEInstance/License polls can run 20+ minutes).
 
 F5 CRs and NADs are outside the typed client-go scheme, so every apply
 goes through `internal/k8s/apply.go`'s dynamic server-side-apply
@@ -176,31 +158,16 @@ goes through `internal/k8s/apply.go`'s dynamic server-side-apply
 
 `up --dry-run` and `down --dry-run` make **zero** GCP/Kubernetes mutations.
 The only permitted cloud/auth touch on `up --dry-run` is Phase00's ADC +
-API-enabled read — and that too is skippable via `GKEBNKCTL_SKIP_AUTH=1`
-(see "CI + local dev hooks" below). Full expected-output shape:
-[`SPEC-go-tracer.md` §6](SPEC-go-tracer.md#6-dry-run-design).
+API-enabled read — and that too is skippable via `GKEBNKCTL_SKIP_AUTH=1`.
 
 ## CI + local dev hooks
 
 - **`GKEBNKCTL_SKIP_AUTH=1`** — skips Phase00's ADC + API-enabled checks
   entirely and passes a `nil *gcp.Clients` through every phase. Valid
-  **only** together with `--dry-run` (rejected otherwise — a live run with
-  nil clients would nil-pointer-deref on the first real GCP call). This is
-  the offline/CI dry-run path: `hack/ci-local.sh` uses it to smoke-test
-  `up --dry-run` and `down --dry-run` without any GCP credentials.
+  **only** together with `--dry-run` (rejected otherwise).
 - **`GKEBNKCTL_VERIFY_EGRESS=1`** — enables Phase50's best-effort
-  `tmctl clientside.pkts_in` delta + `curl` trace verification pass
-  (ported from `reference/bash-seed/bin/40-egress.sh`). Default: skipped
-  (build-first tracer milestone). A verification failure is logged but
-  never fails `up`.
-
-**Pre-push gate:** This repository is private and GitHub Actions budget is
-unavailable, so `.github/workflows/ci.yml` is manual-dispatch only (no PR/push
-triggers). Before pushing, run `bash hack/ci-local.sh` locally — it runs the
-same gate set (unit tests, lint, format, staticcheck, offline validate-dryrun)
-and exits non-zero on failure. `.github/workflows/ci.yml` will be restored
-with full triggers when the Actions budget situation changes or the repo goes
-public.
+  `tmctl clientside.pkts_in` delta + `curl` trace verification pass.
+  Default: skipped. A verification failure is logged but never fails `up`.
 
 ## Testing strategy
 
@@ -223,8 +190,6 @@ GCP-side dependency is a narrow interface defined in `internal/gcp/clients.go`
   the load-bearing host-device contract fields render correctly and double
   as a regression guard on the live-proven manifests.
 
-Full strategy: [`SPEC-go-tracer.md` §7](SPEC-go-tracer.md#7-testing-strategy).
-
 ## Known open items
 
 Carried over from the trial, intentionally out of scope for this binary:
@@ -233,35 +198,26 @@ Carried over from the trial, intentionally out of scope for this binary:
   (`10.67.0.0/20`) UDP/53 fails under TMM capture. Proven workaround: pod
   `dnsConfig` pointing at `8.8.8.8`. Not addressed by any phase.
 - **TMM DaemonSet `OnDelete` update strategy** — Phase42 recovers from the
-  NIC-handoff deadlock reactively (matches the bash ground truth exactly,
-  including its no-same-node-matching quirk — see the deviation note in
+  NIC-handoff deadlock reactively (including its no-same-node-matching quirk — see the deviation note in
   `internal/gcp/phases/phase42_tmmsettle.go`). Setting the DS to
   `updateStrategy: OnDelete` declaratively would avoid the deadlock
   proactively, but CNEInstance owns/reconciles that DS — fighting its
-  declarative ownership needs more certainty than this tracer has.
-- **`discover-pod.yaml.tmpl`** — the spec's original plan for Phase25's
-  ephemeral discovery pod. Implemented instead as a typed `corev1.Pod` Go
+  declarative ownership needs more certainty.
+- `discover-pod.yaml.tmpl` — implemented instead as a typed `corev1.Pod` Go
   struct (`buildDiscoveryPod` in `internal/gcp/phases/phase25_discover.go`)
   since there's no F5/CRD-specific unstructured content in that pod spec.
 - **SA1019 (deprecated GKE SDK ID-based request fields)** — the
   `container/apiv1` SDK's `ProjectId`/`Zone`/`ClusterId`/`NodePoolId`/
   `OperationId` fields are marked deprecated in favor of a single
   fully-qualified `Name` field. This codebase intentionally kept the
-  ID-based constructors (matches the bash seed's discrete
+  ID-based constructors (discrete
   `--project`/`--zone`/`--cluster` flags); staticcheck's SA1019 is
   disabled repo-wide in `staticcheck.conf` rather than migrating every
   `GKEAPI` call site as a side effect of turning staticcheck on. Flagged as
   a follow-up.
 - **FLO manifest is ~3 MB / 23 CRDs embedded into the binary.** Correctness
-  over binary size for the tracer; slimming is a documented follow-up.
+  over binary size; slimming is a documented follow-up.
 
 ## Further reading
 
-- [`SPEC-go-tracer.md`](SPEC-go-tracer.md) — the authoritative build
-  contract (schema, phase inventory, state strategy, testing strategy,
-  Builder task decomposition).
-- [`reference/TRIAL-NOTES.md`](../reference/TRIAL-NOTES.md) — the original
-  live-trial narrative this binary is a Go port of.
-- [`reference/install/RUNBOOK.md`](../reference/install/RUNBOOK.md) — the
-  exact install order used live.
 - [`../README.md`](../README.md) — install/usage quick-start.

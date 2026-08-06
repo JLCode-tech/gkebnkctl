@@ -12,17 +12,12 @@ This binary is a Go port of a bash-first recipe proven live on cluster `bnk-host
 ## Architecture & Design
 
 - **Architecture:** For the phase-by-phase architecture (creation, teardown, state/idempotency strategy, and testing), see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-- **Build Contract:** For the authoritative build contract (schema, phase inventory, SDK call detail), see [`docs/SPEC-go-tracer.md`](docs/SPEC-go-tracer.md).
-- **Bash Seed:** The original bash recipe is preserved untouched under [`reference/bash-seed/`](reference/bash-seed/) as a provenance record. See [`reference/TRIAL-NOTES.md`](reference/TRIAL-NOTES.md) for the full live-trial write-up.
 
 ---
 
 ## The GKE host-device contract
 
-Everything this binary does exists because of specific, live-discovered requirements. 
-
-> [!IMPORTANT]
-> The full write-up is available in [`reference/TRIAL-NOTES.md`](reference/TRIAL-NOTES.md).
+Everything this binary does exists because of specific, live-discovered requirements.
 
 Here are the 7 core requirements:
 
@@ -111,7 +106,7 @@ GKEBNKCTL_VERIFY_EGRESS=1 gkebnkctl up -f my-cluster.yaml
 The `cluster.yaml` (`apiVersion: gkebnkctl/v1`, `kind: Cluster`) file is the source of truth for your cluster. 
 
 > [!TIP]
-> See [`examples/host-device/cluster.yaml`](examples/host-device/cluster.yaml) for a full annotated example and [`docs/SPEC-go-tracer.md` §2](docs/SPEC-go-tracer.md#2-clusteryaml-intent-schema) for the complete reference.
+> See [`examples/host-device/cluster.yaml`](examples/host-device/cluster.yaml) for a full annotated example.
 
 | Section | Covers |
 |---|---|
