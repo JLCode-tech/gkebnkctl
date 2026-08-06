@@ -24,7 +24,7 @@ internal/
     state/                 state.env local cache (discovered values only)
     labels/                label scheme for GCP resources that support labels
     phases/                Phase00..Phase51 + PhaseDown{Cluster,Networks}
-  netcalc/                 pure-Go port of the bash seed's IPv4 math
+  netcalc/                 pure-Go IPv4 math
   k8s/
     apply.go                dynamic server-side-apply
     client.go                rest.Config -> typed/dynamic client construction
@@ -192,7 +192,7 @@ GCP-side dependency is a narrow interface defined in `internal/gcp/clients.go`
 
 ## Known open items
 
-Carried over from the trial, intentionally out of scope for this binary:
+These items are intentionally out of scope for this binary:
 
 - **Cluster-service DNS under capture times out** — pod → svc-CIDR
   (`10.67.0.0/20`) UDP/53 fails under TMM capture. Proven workaround: pod

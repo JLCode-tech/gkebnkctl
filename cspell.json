@@ -41,6 +41,15 @@
     "testdata",
     "tmmsettle",
     "corev",
-    "shellouts"
+    "shellouts",
+    "ipvlan",
+    "macvlan",
+    "serverside",
+    "staticroute",
+    "supernet",
+    "handletmmconfig",
+    "finalizer",
+    "GENEVE",
+    "renderable"
   ]
 }
