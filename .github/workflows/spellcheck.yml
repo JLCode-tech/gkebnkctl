@@ -1,0 +1,17 @@
+name: Spellcheck
+on:
+  pull_request:
+    paths:
+      - 'docs/**/*.md'
+      - '**/*.go'
+jobs:
+  spell:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: streetsidesoftware/cspell-action@v6
+        with:
+          config: cspell.json
+          files: |
+            docs/**/*.md
