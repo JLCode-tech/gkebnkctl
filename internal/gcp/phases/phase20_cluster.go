@@ -123,8 +123,8 @@ func ensureCluster(ctx context.Context, gke gcp.GKEAPI, project, zone, name stri
 
 	fmt.Fprintf(os.Stderr, "[phase 20] creating GKE cluster %s (DPv2 + multi-networking + ip-alias)\n", name)
 	op, err := gke.CreateCluster(ctx, &containerpb.CreateClusterRequest{
-		Parent: fmt.Sprintf("projects/%s/locations/%s", project, zone),
-		Cluster:   buildClusterConfig(cl),
+		Parent:  fmt.Sprintf("projects/%s/locations/%s", project, zone),
+		Cluster: buildClusterConfig(cl),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("CreateCluster: %w", err)
