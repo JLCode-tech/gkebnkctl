@@ -145,7 +145,7 @@ jobs:
     # reachability-aware (only fails on vulns the binary actually
     # exercises). gitleaks — secret-scan over the full repo tree +
     # history, doubly important given this repo's history of scrubbed
-    # live secrets (see reference/TRIAL-NOTES.md).
+    # live secrets.
     runs-on: ubuntu-latest
     permissions:
       contents: read

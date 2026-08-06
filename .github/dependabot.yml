@@ -1,0 +1,23 @@
+# Dependabot keeps go.mod and the Actions pins fresh. This matters more
+# than usual here: the CI security gate (ci.yml security-audit job) fails
+# the moment govulncheck reports a reachable vulnerability WITH a released
+# fix — so the repo depends on prompt dependency bumps to stay green.
+# Weekly PRs make those bumps routine instead of emergency.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    # Group patch/minor updates into one PR to keep review load low;
+    # majors stay separate since they can carry breaking changes.
+    groups:
+      go-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
