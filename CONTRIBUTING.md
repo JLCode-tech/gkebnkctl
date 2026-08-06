@@ -16,7 +16,7 @@ This project is tested on Linux and macOS hosts.
 **NOT Required:**
 - `terraform` (gkebnkctl uses the GCP SDK directly)
 - `kubectl` (Internalized via `client-go`)
-- `aws` CLI (Internalized via the GCP SDK, unless you need `aws sso login`)
+- `aws` CLI
 - `goreleaser` (Pulled at release time automatically)
 
 ---
@@ -85,7 +85,7 @@ For deeper architectural context, read the [Architecture Guide](docs/ARCHITECTUR
 ## Adding a New Phase
 
 If you're extending the provisioning graph:
-1. Read the existing phase you're closest to in shape (e.g. `phase17_secondary_enis.go`).
+1. Read the existing phase you're closest to in shape (e.g. `phase25_discover.go`).
 2. Add a new file `phaseNN_<name>.go` and its corresponding test.
 3. Wire it into `internal/cli/lifecycle.go:runPhasedUp` and the inverse in `runPhasedDown` at the correct ordering.
 4. Make sure the phase is **idempotent** on healthy re-runs.

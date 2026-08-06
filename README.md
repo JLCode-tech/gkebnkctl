@@ -5,7 +5,7 @@ A single Go binary that provisions a GKE cluster and installs **F5 BIG-IP Next f
 > [!NOTE]
 > This tool uses the pure GCP Go SDK and an in-process Kubernetes client. It requires **no** `gcloud`, `kubectl`, or `helm` shellouts, relying entirely on Application Default Credentials.
 
-This binary is a Go port of a bash-first recipe proven live on cluster `bnk-hostdev` — the first-ever BNK host-device dataplane on GKE.
+This binary automates the provisioning of the host-device dataplane on GKE.
 
 ---
 
@@ -140,14 +140,4 @@ go tool staticcheck ./...
 go test -race ./...
 ```
 
----
 
-## Known Open Items
-
-Carried over from the trial, unresolved by this binary:
-- DNS-under-capture
-- The TMM DS update strategy
-- The `discover-pod.yaml.tmpl` deviation
-- The FLO manifest size
-
-See [`docs/ARCHITECTURE.md` "Known open items"](docs/ARCHITECTURE.md#known-open-items) for the full rationale.
