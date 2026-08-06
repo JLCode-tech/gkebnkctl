@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-21
 - **Scope:** `internal/gcp/phases/phase51_ingress_vxlan.go` (Phase51), `k8s/manifests/templates/ingress-vxlan-routes.yaml.tmpl`
-- **Gold standard:** cluster `bnk-hostdev` (live GKE trial, 2026-07-21) — see `reference/TRIAL-NOTES.md` and `docs/ARCHITECTURE.md` "Bidirectional dataplane"
+- **Gold standard:** Proven live.
 - **Related:** sibling repo `bnk-forge-v2` tracks the same `D-033` identifier for the **EKS** host-device TMM dataplane (`docs/adr/D-033-host-device-tmm-dataplane.md` there, AWS-specific: ENI/PCI/CNEInstance env). The identifier is deliberately reused across the two repos for cross-repo traceability of the shared "host-device TMM dataplane" architecture theme; this ADR is the **gkebnkctl-side** instance and covers a distinct, GKE-only problem (pseudo-CNI vxlan asymmetric routing) that has no EKS equivalent.
 
 ## Context
@@ -24,7 +24,7 @@ Add **Phase51 (`ingress-vxlan-routes`)**, which runs after Phase50 (egress) and 
 
 as a `gateway`-type route in the `f5-bnk` namespace. Because this route's destination is a single node's pod CIDR — strictly more specific than Phase41's cluster-wide `route-cluster-pods: 10.66.0.0/16` — it takes routing precedence for that node's pods only, without altering routing to the rest of the cluster. With it in place, TMM's ingress-originated connections to that node's egress-steered pods now go out over the same `vxlan100` path the pod's replies use — a symmetric path — closing the gap.
 
-**Proven live** on cluster `bnk-hostdev`, 2026-07-21: route `10.66.4.0/24 via 10.0.64.1` applied; a VIP ingress request to a pod on that node returned `HTTP 200`, and the same pod's outbound egress still SNAT'd correctly to `34.61.234.229` — ingress and egress both working through the same pod, simultaneously.
+**Proven live**: route `10.66.4.0/24 via 10.0.64.1` applied; a VIP ingress request to a pod on that node returned `HTTP 200`, and the same pod's outbound egress still SNAT'd correctly to `34.61.234.229` — ingress and egress both working through the same pod, simultaneously.
 
 ### VTEP is discovered, not derived
 
@@ -38,7 +38,7 @@ Phase51 discovers each agent-pool node's live `vxlan100` address at runtime rath
 
 BNK's `f5validate.f5net.com` admission webhook enforces a unique
 `destination`+`prefixLen` across **all** `F5SPKStaticRoute`s, *regardless of CR
-name* — confirmed live on `bnk-hostdev` 2026-07-21:
+name* — confirmed live:
 
 ```
 CR route-ingress-vxlan-10-66-4-0 cannot be created or updated with an already
