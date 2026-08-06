@@ -1,0 +1,19 @@
+# Controls the "New issue" chooser on github.com/JLCode-tech/awsbnkctl/issues/new/choose.
+#
+# blank_issues_enabled: false forces every new issue to start from one
+# of the templates in this directory (bug_report.md / feature_request.md),
+# so we don't get unstructured filings.
+#
+# contact_links surface alongside the template buttons — non-issue
+# destinations for traffic that doesn't belong as a GitHub Issue. Keep
+# the list small: each link adds noise to the chooser.
+
+blank_issues_enabled: false
+
+contact_links:
+  - name: 📖 Read the docs
+    url: https://github.com/JLCode-tech/awsbnkctl#readme
+    about: |
+      How-to questions about deploying or using awsbnkctl are usually
+      answered in the README and the examples/ directory — read first;
+      file an issue if the docs are wrong or missing something.
