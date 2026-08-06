@@ -32,7 +32,7 @@ func Phase40License(ctx context.Context, cl *intent.Cluster, _ *state.State, cli
 		return nil
 	}
 
-	jwtRaw, err := os.ReadFile(cl.Bnk.JwtPath) //nolint:gosec -- path is operator-supplied via cluster.yaml, existence-validated at intent.Load
+	jwtRaw, err := os.ReadFile(cl.Bnk.JwtPath) // #nosec G304 -- path is operator-supplied via cluster.yaml, existence-validated at intent.Load
 	if err != nil {
 		return fmt.Errorf("phase40: reading JWT %s: %w", cl.Bnk.JwtPath, err)
 	}

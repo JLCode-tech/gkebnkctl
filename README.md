@@ -148,7 +148,6 @@ Carried over from the trial, unresolved by this binary:
 - DNS-under-capture
 - The TMM DS update strategy
 - The `discover-pod.yaml.tmpl` deviation
-- The SA1019 staticcheck exception
 - The FLO manifest size
 
 See [`docs/ARCHITECTURE.md` "Known open items"](docs/ARCHITECTURE.md#known-open-items) for the full rationale.
