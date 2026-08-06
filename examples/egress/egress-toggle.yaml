@@ -1,0 +1,35 @@
+# BNK egress demo — THE TOGGLE. See examples/egress-demo/README.md.
+#
+#   BNK ON :  kubectl apply  -f examples/egress-demo/egress-toggle.yaml
+#   BNK OFF:  kubectl delete -f examples/egress-demo/egress-toggle.yaml
+#             (or: kubectl delete f5-spk-egresses.k8s.f5net.com bnk-egress-demo -n f5-cne-system)
+#
+#   Watch from the pod:
+#     kubectl exec -it -n bnk-egress-demo deploy/agent -c nginx -- sh /demo/watch.sh
+#
+#   ON  -> egress source IP = the BNK NAT EIP  (single controlled identity)
+#   OFF -> egress source IP = the pod's node public IP  (uncontrolled)
+#
+# tmmInterfaceName is the client-side F5SPKVlan name (external-only => ext-vlan).
+# nodeInterfaceName is the node's data-plane NIC; LIVE-CONFIRM on first apply
+# (do not blindly copy — it is topology-specific).
+apiVersion: k8s.f5net.com/v3
+kind: F5SPKEgress
+metadata:
+  name: bnk-egress-demo
+  namespace: f5-cne-system
+spec:
+  snatType: SRC_TRANS_AUTOMAP
+  firewallEnforcedPolicy: egress-demo-fw
+  pseudoCNIConfig:
+    namespaces:
+      - bnk-egress-demo
+    appPodInterface: eth0
+    vxlan:
+      create: true
+      tmmInterfaceName: ext-vlan
+      nodeInterfaceName: ens5
+      ipv4Subnet: "192.168.0.0"
+      ipv4PrefixLen: 16
+      ipv6Subnet: "fd50::"
+      ipv6PrefixLen: 112

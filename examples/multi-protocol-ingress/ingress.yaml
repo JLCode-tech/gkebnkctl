@@ -1,0 +1,23 @@
+apiVersion: "k8s.f5net.com/v1"
+kind: F5SPKIngressTCP
+metadata:
+  name: demo-ingress-tcp
+  namespace: default
+spec:
+  destinationAddress: "10.30.0.100"
+  destinationPort: 80
+  service:
+    name: demo-app-tcp-svc
+    port: 80
+---
+apiVersion: "k8s.f5net.com/v1"
+kind: F5SPKIngressUDP
+metadata:
+  name: demo-ingress-udp
+  namespace: default
+spec:
+  destinationAddress: "10.30.0.100"
+  destinationPort: 53
+  service:
+    name: demo-app-udp-svc
+    port: 53

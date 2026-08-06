@@ -1,0 +1,31 @@
+# BNK egress demo — firewall policy (already applied on the cluster; re-apply only if rebuilt)
+# Blocks 1.1.1.1 for captured pods, allows everything else, logs both.
+# NOTE (BNK 2.3 eval bug): after changing this policy, the ACL blob only reaches TMM
+# right after a TMM pod restart:  kubectl delete pod -n f5-cne-system -l app=f5-tmm
+apiVersion: k8s.f5net.com/v1
+kind: F5BigCneAddresslist
+metadata:
+  name: egress-demo-blocked
+  namespace: f5-cne-system
+spec:
+  addresses:
+    - 1.1.1.1/32
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5BigFwPolicy
+metadata:
+  name: egress-demo-fw
+  namespace: f5-cne-system
+spec:
+  rule:
+    - name: block-test-target
+      action: drop
+      ipProtocol: any
+      destination:
+        addressLists:
+          - egress-demo-blocked
+      logging: true
+    - name: default-allow
+      action: accept
+      ipProtocol: any
+      logging: true

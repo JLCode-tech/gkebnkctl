@@ -50,6 +50,7 @@ type Cluster struct {
 	ClusterSpec ClusterSpec       `yaml:"cluster,omitempty"`
 	Bnk         BnkSpec           `yaml:"bnk"`
 	Egress      EgressSpec        `yaml:"egress,omitempty"`
+	Testing     TestingSpec       `yaml:"testing,omitempty"`
 	Tags        map[string]string `yaml:"tags,omitempty"`
 
 	// --- Derived fields. Never operator-set; computed after validate()
@@ -221,6 +222,18 @@ type EgressSpec struct {
 	VxlanPort     int    `yaml:"vxlanPort,omitempty"`
 	VxlanKey      int    `yaml:"vxlanKey,omitempty"`
 	VxlanMtu      int    `yaml:"vxlanMtu,omitempty"`
+}
+
+// TestingSpec configures optional testing infrastructure.
+type TestingSpec struct {
+	Jumphost JumphostSpec `yaml:"jumphost,omitempty"`
+}
+
+// JumphostSpec configures a dedicated VM jumphost outside the cluster.
+type JumphostSpec struct {
+	Enabled         bool   `yaml:"enabled"`
+	MachineType     string `yaml:"machineType,omitempty"`
+	MgmtSubnetIndex int    `yaml:"mgmtSubnetIndex,omitempty"`
 }
 
 // StateDir returns the path to the IDs-cache directory for this cluster
