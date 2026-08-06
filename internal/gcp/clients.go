@@ -63,6 +63,8 @@ type RoutersAPI interface {
 // (iface/MAC/PCI discovery via NetworkInterfaces + AliasIpRanges).
 type InstancesAPI interface {
 	Get(ctx context.Context, req *computepb.GetInstanceRequest, opts ...gax.CallOption) (*computepb.Instance, error)
+	Insert(ctx context.Context, req *computepb.InsertInstanceRequest, opts ...gax.CallOption) (*compute.Operation, error)
+	Delete(ctx context.Context, req *computepb.DeleteInstanceRequest, opts ...gax.CallOption) (*compute.Operation, error)
 }
 
 // RegionsAPI is the subset of compute.RegionsClient used by Phase00's
