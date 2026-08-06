@@ -28,7 +28,7 @@ func Nth(cidr string, n int) (string, error) {
 		return "", fmt.Errorf("netcalc: %q is not an IPv4 network", cidr)
 	}
 	base := uint32(base4[0])<<24 | uint32(base4[1])<<16 | uint32(base4[2])<<8 | uint32(base4[3])
-	addr := base + uint32(n) // #nosec G115 -- n is caller-supplied small offset, not attacker-controlled
+	addr := base + uint32(n)                                                      // #nosec G115 -- n is caller-supplied small offset, not attacker-controlled
 	result := net.IPv4(byte(addr>>24), byte(addr>>16), byte(addr>>8), byte(addr)) // #nosec G115 -- addr shift fits inside byte bounds
 	if !ipnet.Contains(result) {
 		return "", fmt.Errorf("netcalc: %s is outside %s", result, ipnet)
