@@ -162,7 +162,7 @@ func buildClusterConfig(cl *intent.Cluster) *containerpb.Cluster {
 		NodePools: []*containerpb.NodePool{
 			{
 				Name:             "default-pool",
-				InitialNodeCount: int32(cl.ClusterSpec.DefaultPool.NodeCount), //nolint:gosec -- node counts are small operator-set values
+				InitialNodeCount: int32(cl.ClusterSpec.DefaultPool.NodeCount), //nolint:gosec,g115 -- node counts are small operator-set values
 				Config: &containerpb.NodeConfig{
 					MachineType: cl.ClusterSpec.DefaultPool.MachineType,
 				},
@@ -183,7 +183,7 @@ func buildTMMPoolConfig(cl *intent.Cluster) *containerpb.NodePool {
 
 	return &containerpb.NodePool{
 		Name:             pool.Name,
-		InitialNodeCount: int32(pool.NodeCount), //nolint:gosec -- node counts are small operator-set values
+		InitialNodeCount: int32(pool.NodeCount), //nolint:gosec,g115 -- node counts are small operator-set values
 		Config: &containerpb.NodeConfig{
 			MachineType: pool.MachineType,
 			Labels:      map[string]string{"f5-dataplane": "true"},
