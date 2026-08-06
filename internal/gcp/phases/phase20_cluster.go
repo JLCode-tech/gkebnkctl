@@ -103,15 +103,15 @@ func printPhase20Plan(cl *intent.Cluster) {
 // ensureCluster creates the GKE cluster if absent, or waits for RUNNING if
 // it already exists in a transitional state. Returns the RUNNING cluster.
 func ensureCluster(ctx context.Context, gke gcp.GKEAPI, project, zone, name string, cl *intent.Cluster) (*containerpb.Cluster, error) {
-	existing, err := gke.GetCluster(ctx, &containerpb.GetClusterRequest{ProjectId: project, Zone: zone, ClusterId: name})
+	clusterNameStr := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", project, zone, name)
+	existing, err := gke.GetCluster(ctx, &containerpb.GetClusterRequest{Name: clusterNameStr})
 	if err == nil {
 		switch existing.GetStatus() {
 		case containerpb.Cluster_RUNNING:
 			fmt.Fprintf(os.Stderr, "[phase 20] cluster %s already exists, status=RUNNING, skipping create\n", name)
 			return existing, nil
 		case containerpb.Cluster_ERROR:
-			//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-			return nil, fmt.Errorf("cluster %s is in ERROR state: %s", name, existing.GetStatusMessage())
+			return nil, fmt.Errorf("cluster %s is in ERROR state", name)
 		default:
 			fmt.Fprintf(os.Stderr, "[phase 20] cluster %s already exists, status=%s, waiting for RUNNING\n", name, existing.GetStatus())
 			return waitForClusterRunning(ctx, gke, project, zone, name)
@@ -123,8 +123,7 @@ func ensureCluster(ctx context.Context, gke gcp.GKEAPI, project, zone, name stri
 
 	fmt.Fprintf(os.Stderr, "[phase 20] creating GKE cluster %s (DPv2 + multi-networking + ip-alias)\n", name)
 	op, err := gke.CreateCluster(ctx, &containerpb.CreateClusterRequest{
-		ProjectId: project,
-		Zone:      zone,
+		Parent: fmt.Sprintf("projects/%s/locations/%s", project, zone),
 		Cluster:   buildClusterConfig(cl),
 	})
 	if err != nil {
@@ -231,8 +230,9 @@ func buildAgentPoolConfig(cl *intent.Cluster) *containerpb.NodePool {
 // ensureNodePool creates pool on cluster clusterName if it doesn't already
 // exist (or waits for RUNNING if it's mid-provisioning).
 func ensureNodePool(ctx context.Context, gke gcp.GKEAPI, project, zone, clusterName string, pool *containerpb.NodePool) error {
+	nodePoolNameStr := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s", project, zone, clusterName, pool.GetName())
 	existing, err := gke.GetNodePool(ctx, &containerpb.GetNodePoolRequest{
-		ProjectId: project, Zone: zone, ClusterId: clusterName, NodePoolId: pool.GetName(),
+		Name: nodePoolNameStr,
 	})
 	if err == nil {
 		switch existing.GetStatus() {
@@ -240,8 +240,7 @@ func ensureNodePool(ctx context.Context, gke gcp.GKEAPI, project, zone, clusterN
 			fmt.Fprintf(os.Stderr, "[phase 20] node pool %s already exists, skipping create\n", pool.GetName())
 			return nil
 		case containerpb.NodePool_ERROR:
-			//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-			return fmt.Errorf("node pool %s is in ERROR state: %s", pool.GetName(), existing.GetStatusMessage())
+			return fmt.Errorf("node pool %s is in ERROR state", pool.GetName())
 		default:
 			fmt.Fprintf(os.Stderr, "[phase 20] node pool %s already exists, status=%s, waiting for RUNNING\n", pool.GetName(), existing.GetStatus())
 			return waitForNodePoolRunning(ctx, gke, project, zone, clusterName, pool.GetName())
@@ -253,7 +252,7 @@ func ensureNodePool(ctx context.Context, gke gcp.GKEAPI, project, zone, clusterN
 
 	fmt.Fprintf(os.Stderr, "[phase 20] creating node pool %s (%s x%d)\n", pool.GetName(), pool.GetConfig().GetMachineType(), pool.GetInitialNodeCount())
 	op, err := gke.CreateNodePool(ctx, &containerpb.CreateNodePoolRequest{
-		ProjectId: project, Zone: zone, ClusterId: clusterName, NodePool: pool,
+		Parent: fmt.Sprintf("projects/%s/locations/%s/clusters/%s", project, zone, clusterName), NodePool: pool,
 	})
 	if err != nil {
 		return fmt.Errorf("CreateNodePool %s: %w", pool.GetName(), err)
@@ -269,7 +268,8 @@ func ensureNodePool(ctx context.Context, gke gcp.GKEAPI, project, zone, clusterN
 // op.Wait()-capable *compute.Operation).
 func waitForGKEOp(ctx context.Context, gke gcp.GKEAPI, project, zone, opName string) error {
 	return gcp.PollUntil(ctx, gkeOpPollInterval, gkeOpTimeout, func(ctx context.Context) (bool, error) {
-		op, err := gke.GetOperation(ctx, &containerpb.GetOperationRequest{ProjectId: project, Zone: zone, OperationId: opName})
+		opNameStr := fmt.Sprintf("projects/%s/locations/%s/operations/%s", project, zone, opName)
+		op, err := gke.GetOperation(ctx, &containerpb.GetOperationRequest{Name: opNameStr})
 		if err != nil {
 			return false, fmt.Errorf("GetOperation %s: %w", opName, err)
 		}
@@ -280,8 +280,7 @@ func waitForGKEOp(ctx context.Context, gke gcp.GKEAPI, project, zone, opName str
 			}
 			return true, nil
 		case containerpb.Operation_ABORTING:
-			//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-			return false, fmt.Errorf("operation %s is aborting: %s", opName, op.GetStatusMessage())
+			return false, fmt.Errorf("operation %s is aborting: %s", opName, op.GetError().GetMessage())
 		}
 		return false, nil
 	})
@@ -291,7 +290,8 @@ func waitForGKEOp(ctx context.Context, gke gcp.GKEAPI, project, zone, opName str
 func waitForClusterRunning(ctx context.Context, gke gcp.GKEAPI, project, zone, name string) (*containerpb.Cluster, error) {
 	var cluster *containerpb.Cluster
 	err := gcp.PollUntil(ctx, clusterPollInterval, clusterTimeout, func(ctx context.Context) (bool, error) {
-		c, err := gke.GetCluster(ctx, &containerpb.GetClusterRequest{ProjectId: project, Zone: zone, ClusterId: name})
+		clusterNameStr := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", project, zone, name)
+		c, err := gke.GetCluster(ctx, &containerpb.GetClusterRequest{Name: clusterNameStr})
 		if err != nil {
 			return false, fmt.Errorf("GetCluster %s: %w", name, err)
 		}
@@ -316,7 +316,8 @@ func waitForClusterRunning(ctx context.Context, gke gcp.GKEAPI, project, zone, n
 // waitForNodePoolRunning polls GetNodePool until the pool reaches RUNNING.
 func waitForNodePoolRunning(ctx context.Context, gke gcp.GKEAPI, project, zone, clusterName, poolName string) error {
 	err := gcp.PollUntil(ctx, clusterPollInterval, clusterTimeout, func(ctx context.Context) (bool, error) {
-		p, err := gke.GetNodePool(ctx, &containerpb.GetNodePoolRequest{ProjectId: project, Zone: zone, ClusterId: clusterName, NodePoolId: poolName})
+		nodePoolNameStr := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s", project, zone, clusterName, poolName)
+		p, err := gke.GetNodePool(ctx, &containerpb.GetNodePoolRequest{Name: nodePoolNameStr})
 		if err != nil {
 			return false, fmt.Errorf("GetNodePool %s: %w", poolName, err)
 		}
@@ -324,8 +325,7 @@ func waitForNodePoolRunning(ctx context.Context, gke gcp.GKEAPI, project, zone, 
 		case containerpb.NodePool_RUNNING:
 			return true, nil
 		case containerpb.NodePool_ERROR:
-			//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-			return false, fmt.Errorf("node pool %s in ERROR state: %s", poolName, p.GetStatusMessage())
+			return false, fmt.Errorf("node pool %s in ERROR state", poolName)
 		}
 		return false, nil
 	})

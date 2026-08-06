@@ -206,15 +206,6 @@ Carried over from the trial, intentionally out of scope for this binary:
 - `discover-pod.yaml.tmpl` — implemented instead as a typed `corev1.Pod` Go
   struct (`buildDiscoveryPod` in `internal/gcp/phases/phase25_discover.go`)
   since there's no F5/CRD-specific unstructured content in that pod spec.
-- **SA1019 (deprecated GKE SDK ID-based request fields)** — the
-  `container/apiv1` SDK's `ProjectId`/`Zone`/`ClusterId`/`NodePoolId`/
-  `OperationId` fields are marked deprecated in favor of a single
-  fully-qualified `Name` field. This codebase intentionally kept the
-  ID-based constructors (discrete
-  `--project`/`--zone`/`--cluster` flags); staticcheck's SA1019 is
-  disabled repo-wide in `staticcheck.conf` rather than migrating every
-  `GKEAPI` call site as a side effect of turning staticcheck on. Flagged as
-  a follow-up.
 - **FLO manifest is ~3 MB / 23 CRDs embedded into the binary.** Correctness
   over binary size; slimming is a documented follow-up.
 

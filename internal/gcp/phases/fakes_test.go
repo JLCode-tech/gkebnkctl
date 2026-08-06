@@ -3,6 +3,7 @@ package phases
 import (
 	"context"
 	"errors"
+	"strings"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
@@ -229,21 +230,22 @@ func (f *fakeGKE) CreateCluster(_ context.Context, req *containerpb.CreateCluste
 }
 
 func (f *fakeGKE) GetCluster(_ context.Context, req *containerpb.GetClusterRequest, _ ...gax.CallOption) (*containerpb.Cluster, error) {
-	//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-	if c, ok := f.clusters[req.GetClusterId()]; ok {
+	parts := strings.Split(req.GetName(), "/")
+	shortName := parts[len(parts)-1]
+	if c, ok := f.clusters[shortName]; ok {
 		return c, nil
 	}
 	return nil, errNotFound
 }
 
 func (f *fakeGKE) DeleteCluster(_ context.Context, req *containerpb.DeleteClusterRequest, _ ...gax.CallOption) (*containerpb.Operation, error) {
-	//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-	f.deleteClusterCalls = append(f.deleteClusterCalls, req.GetClusterId())
+	parts := strings.Split(req.GetName(), "/")
+	shortName := parts[len(parts)-1]
+	f.deleteClusterCalls = append(f.deleteClusterCalls, shortName)
 	if f.deleteClusterErr != nil {
 		return nil, f.deleteClusterErr
 	}
-	//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-	delete(f.clusters, req.GetClusterId())
+	delete(f.clusters, shortName)
 	return &containerpb.Operation{Name: "op-delete-cluster", Status: containerpb.Operation_DONE}, nil
 }
 
@@ -263,8 +265,9 @@ func (f *fakeGKE) CreateNodePool(_ context.Context, req *containerpb.CreateNodeP
 }
 
 func (f *fakeGKE) GetNodePool(_ context.Context, req *containerpb.GetNodePoolRequest, _ ...gax.CallOption) (*containerpb.NodePool, error) {
-	//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-	if p, ok := f.nodePools[req.GetNodePoolId()]; ok {
+	parts := strings.Split(req.GetName(), "/")
+	shortName := parts[len(parts)-1]
+	if p, ok := f.nodePools[shortName]; ok {
 		return p, nil
 	}
 	return nil, errNotFound
@@ -272,14 +275,14 @@ func (f *fakeGKE) GetNodePool(_ context.Context, req *containerpb.GetNodePoolReq
 
 func (f *fakeGKE) GetOperation(_ context.Context, req *containerpb.GetOperationRequest, _ ...gax.CallOption) (*containerpb.Operation, error) {
 	status := containerpb.Operation_DONE
+	parts := strings.Split(req.GetName(), "/")
+	shortName := parts[len(parts)-1]
 	if f.getOperationStatuses != nil {
-		//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-		if s, ok := f.getOperationStatuses[req.GetOperationId()]; ok {
+		if s, ok := f.getOperationStatuses[shortName]; ok {
 			status = s
 		}
 	}
-	//lint:ignore SA1019 GKE SDK uses deprecated ID-based request fields; Name-based migration is a follow-up
-	return &containerpb.Operation{Name: req.GetOperationId(), Status: status}, nil
+	return &containerpb.Operation{Name: req.GetName(), Status: status}, nil
 }
 
 func strPtr(s string) *string { return &s }

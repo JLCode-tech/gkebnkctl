@@ -23,7 +23,8 @@ func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 
 	fmt.Fprintf(os.Stderr, "[down] cluster: deleting %s (node pools go with it)\n", name)
 
-	if _, err := clients.GKE.GetCluster(ctx, &containerpb.GetClusterRequest{ProjectId: project, Zone: zone, ClusterId: name}); err != nil {
+	clusterName := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", project, zone, name)
+	if _, err := clients.GKE.GetCluster(ctx, &containerpb.GetClusterRequest{Name: clusterName}); err != nil {
 		if isNotFound(err) {
 			fmt.Fprintf(os.Stderr, "[down] cluster %s not found — skipping\n", name)
 			return nil
@@ -31,7 +32,7 @@ func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 		return fmt.Errorf("down: cluster: GetCluster: %w", err)
 	}
 
-	op, err := clients.GKE.DeleteCluster(ctx, &containerpb.DeleteClusterRequest{ProjectId: project, Zone: zone, ClusterId: name})
+	op, err := clients.GKE.DeleteCluster(ctx, &containerpb.DeleteClusterRequest{Name: clusterName})
 	if err != nil {
 		if isNotFound(err) {
 			fmt.Fprintf(os.Stderr, "[down] cluster %s already gone\n", name)
