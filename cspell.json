@@ -1,0 +1,21 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "ignorePaths": [
+    "go.sum",
+    "vendor/**"
+  ],
+  "words": [
+    "gkebnkctl",
+    "fakes",
+    "govulncheck",
+    "gosec",
+    "goreleaser",
+    "gitleaks",
+    "staticcheck",
+    "apiv",
+    "computepb",
+    "containerpb",
+    "serviceusage"
+  ]
+}
