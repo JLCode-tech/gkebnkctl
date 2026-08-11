@@ -323,17 +323,39 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun, keepData
 func printDownPlan(w io.Writer, cl *intent.Cluster, keepDataplane bool) {
 	fmt.Fprintf(w, "→ dry-run: destroy plan for cluster %q (project=%s zone=%s) — no GCP mutations\n",
 		cl.Metadata.Name, cl.Metadata.Project, cl.Metadata.Zone)
-	fmt.Fprintf(w, "  • delete  GKE cluster                %s\n", cl.Metadata.Name)
-	count := 4
+
+	var plan []string
+	plan = append(plan, fmt.Sprintf("  • delete  GKE cluster                %s", cl.Metadata.Name))
 	if cl.Testing.Jumphost.Enabled {
-		count += 2
-		fmt.Fprintf(w, "  • delete  jumphost VM                %s-jumphost\n", cl.Metadata.Name)
-		fmt.Fprintf(w, "  • delete  IAP firewall               %s-allow-iap-ssh\n", cl.Metadata.Name)
+		plan = append(plan, fmt.Sprintf("  • delete  jumphost VM                %s-jumphost", cl.Metadata.Name))
+		plan = append(plan, fmt.Sprintf("  • delete  IAP firewall               %s-allow-iap-ssh", cl.Metadata.Name))
 	}
-	fmt.Fprintf(w, "  • delete  main VPC firewall          %s-allow-internal\n", cl.Network.Main.VPC)
-	fmt.Fprintf(w, "  • delete  main VPC subnet            %s\n", cl.Network.Main.Subnet)
-	fmt.Fprintf(w, "  • delete  main VPC                   %s\n", cl.Network.Main.VPC)
+	plan = append(plan, fmt.Sprintf("  • delete  main VPC firewall          %s-allow-internal", cl.Network.Main.VPC))
+	plan = append(plan, fmt.Sprintf("  • delete  main VPC subnet            %s", cl.Network.Main.Subnet))
+	plan = append(plan, fmt.Sprintf("  • delete  main VPC                   %s", cl.Network.Main.VPC))
+
+	for _, line := range plan {
+		fmt.Fprintln(w, line)
+	}
+
+	if !keepDataplane {
+		fmt.Fprintln(w, "→ in SHARED dataplane VPCs (deleted only if owned by this cluster):")
+		var sharedPlan []string
+		for _, dp := range []intent.DataplaneSpec{cl.Network.External, cl.Network.Internal} {
+			sharedPlan = append(sharedPlan, fmt.Sprintf("  • delete  subnet    %s", dp.Subnet))
+			sharedPlan = append(sharedPlan, fmt.Sprintf("  • delete  firewall  %s-allow-internal", dp.VPC))
+			if cl.Network.NatGatewaysEnabled() {
+				sharedPlan = append(sharedPlan, fmt.Sprintf("  • delete  Cloud NAT %s-nat  (BILLABLE while it exists)", dp.VPC))
+			}
+			sharedPlan = append(sharedPlan, fmt.Sprintf("  • delete  Router    %s-router", dp.VPC))
+		}
+		for _, line := range sharedPlan {
+			fmt.Fprintln(w, line)
+		}
+		plan = append(plan, sharedPlan...)
+	}
+
 	fmt.Fprintf(w, "→ shared dataplane VPCs %s/%s are NEVER deleted by teardown.\n",
 		cl.Network.External.VPC, cl.Network.Internal.VPC)
-	fmt.Fprintf(w, "→ dry-run complete: %d resource(s) would be destroyed, 0 GCP mutations made\n", count)
+	fmt.Fprintf(w, "→ dry-run complete: %d resource(s) would be destroyed, 0 GCP mutations made\n", len(plan))
 }
