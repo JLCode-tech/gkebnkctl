@@ -45,9 +45,9 @@ func TestPhaseDownCluster_ToleratesAlreadyGone(t *testing.T) {
 func TestPhaseDownNetworks_NeverReferencesSharedVPCs(t *testing.T) {
 	cl := testCluster()
 	st := testState(t)
-	networks := &fakeNetworks{existing: map[string]bool{"bnkhd-vpc": true}}
-	subnetworks := &fakeSubnetworks{existing: map[string]bool{"bnkhd-subnet": true}}
-	firewalls := &fakeFirewalls{existing: map[string]bool{"bnkhd-vpc-allow-internal": true}}
+	networks := &fakeNetworks{existing: map[string]string{"bnkhd-vpc": ""}}
+	subnetworks := &fakeSubnetworks{existing: map[string]string{"bnkhd-subnet": ""}}
+	firewalls := &fakeFirewalls{existing: map[string]string{"bnkhd-vpc-allow-internal": ""}}
 	clients := &gcp.Clients{Networks: networks, Subnetworks: subnetworks, Firewalls: firewalls}
 
 	if err := PhaseDownNetworks(context.Background(), cl, st, clients); err != nil {
@@ -78,9 +78,9 @@ func TestPhaseDownNetworks_ToleratesAlreadyGone(t *testing.T) {
 	cl := testCluster()
 	st := testState(t)
 	clients := &gcp.Clients{
-		Networks:    &fakeNetworks{existing: map[string]bool{}},
-		Subnetworks: &fakeSubnetworks{existing: map[string]bool{}},
-		Firewalls:   &fakeFirewalls{existing: map[string]bool{}},
+		Networks:    &fakeNetworks{existing: map[string]string{}},
+		Subnetworks: &fakeSubnetworks{existing: map[string]string{}},
+		Firewalls:   &fakeFirewalls{existing: map[string]string{}},
 	}
 	if err := PhaseDownNetworks(context.Background(), cl, st, clients); err != nil {
 		t.Fatalf("PhaseDownNetworks: expected already-gone to be tolerated, got: %v", err)

@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
+	"github.com/JLCode-tech/gkebnkctl/internal/gcp/labels"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 )
@@ -49,16 +50,16 @@ func Phase10Networks(ctx context.Context, cl *intent.Cluster, _ *state.State, cl
 	}
 
 	main := cl.Network.Main
-	if err := ensureVPC(ctx, clients.Networks, cl.Metadata.Project, main.VPC, mainVPCDefaultMTU); err != nil {
+	if err := ensureVPC(ctx, clients.Networks, cl.Metadata.Project, main.VPC, cl.Metadata.Name, mainVPCDefaultMTU); err != nil {
 		return fmt.Errorf("phase10: main vpc: %w", err)
 	}
-	if err := ensureSubnet(ctx, clients.Subnetworks, cl.Metadata.Project, cl.Region, main.VPC, main.Subnet, main.CIDR, []secondaryRange{
+	if err := ensureSubnet(ctx, clients.Subnetworks, cl.Metadata.Project, cl.Region, main.VPC, main.Subnet, cl.Metadata.Name, main.CIDR, []secondaryRange{
 		{name: main.PodsRangeName, cidr: main.PodsCIDR},
 		{name: main.SvcsRangeName, cidr: main.SvcsCIDR},
 	}); err != nil {
 		return fmt.Errorf("phase10: main subnet: %w", err)
 	}
-	if err := ensureAllowInternalFW(ctx, clients.Firewalls, cl.Metadata.Project, main.VPC, cl.Network.AllowInternalCidr); err != nil {
+	if err := ensureAllowInternalFW(ctx, clients.Firewalls, cl.Metadata.Project, main.VPC, cl.Metadata.Name, cl.Network.AllowInternalCidr); err != nil {
 		return fmt.Errorf("phase10: main firewall: %w", err)
 	}
 
@@ -69,24 +70,24 @@ func Phase10Networks(ctx context.Context, cl *intent.Cluster, _ *state.State, cl
 		{"external", cl.Network.External},
 		{"internal", cl.Network.Internal},
 	} {
-		if err := ensureVPC(ctx, clients.Networks, cl.Metadata.Project, dp.spec.VPC, int32(dp.spec.MTU)); err != nil { // #nosec G115 -- MTU is validated as a positive int at intent.Load
+		if err := ensureVPC(ctx, clients.Networks, cl.Metadata.Project, dp.spec.VPC, cl.Metadata.Name, int32(dp.spec.MTU)); err != nil { // #nosec G115 -- MTU is validated as a positive int at intent.Load
 			return fmt.Errorf("phase10: %s vpc: %w", dp.label, err)
 		}
-		if err := ensureSubnet(ctx, clients.Subnetworks, cl.Metadata.Project, cl.Region, dp.spec.VPC, dp.spec.Subnet, dp.spec.CIDR, []secondaryRange{
+		if err := ensureSubnet(ctx, clients.Subnetworks, cl.Metadata.Project, cl.Region, dp.spec.VPC, dp.spec.Subnet, cl.Metadata.Name, dp.spec.CIDR, []secondaryRange{
 			{name: dp.spec.PodsRangeName, cidr: dp.spec.PodsCIDR},
 		}); err != nil {
 			return fmt.Errorf("phase10: %s subnet: %w", dp.label, err)
 		}
-		if err := ensureAllowInternalFW(ctx, clients.Firewalls, cl.Metadata.Project, dp.spec.VPC, cl.Network.AllowInternalCidr); err != nil {
+		if err := ensureAllowInternalFW(ctx, clients.Firewalls, cl.Metadata.Project, dp.spec.VPC, cl.Metadata.Name, cl.Network.AllowInternalCidr); err != nil {
 			return fmt.Errorf("phase10: %s firewall: %w", dp.label, err)
 		}
 	}
 
 	if cl.Network.NatGatewaysEnabled() {
-		if err := ensureRouterNAT(ctx, clients.Routers, cl.Metadata.Project, cl.Region, cl.Network.External.VPC); err != nil {
+		if err := ensureRouterNAT(ctx, clients.Routers, cl.Metadata.Project, cl.Region, cl.Network.External.VPC, cl.Metadata.Name); err != nil {
 			return fmt.Errorf("phase10: external router+nat: %w", err)
 		}
-		if err := ensureRouterNAT(ctx, clients.Routers, cl.Metadata.Project, cl.Region, cl.Network.Internal.VPC); err != nil {
+		if err := ensureRouterNAT(ctx, clients.Routers, cl.Metadata.Project, cl.Region, cl.Network.Internal.VPC, cl.Metadata.Name); err != nil {
 			return fmt.Errorf("phase10: internal router+nat: %w", err)
 		}
 	} else {
@@ -133,11 +134,16 @@ func insertAndWait(ctx context.Context, op *compute.Operation) error {
 	return op.Wait(ctx)
 }
 
-func ensureVPC(ctx context.Context, networks gcp.NetworksAPI, project, vpc string, mtu int32) error {
-	_, err := networks.Get(ctx, &computepb.GetNetworkRequest{Project: project, Network: vpc})
+func ensureVPC(ctx context.Context, networks gcp.NetworksAPI, project, vpc, clName string, mtu int32) error {
+	net, err := networks.Get(ctx, &computepb.GetNetworkRequest{Project: project, Network: vpc})
 	if err == nil {
 		fmt.Fprintf(os.Stderr, "[phase 10] VPC %s already exists, skipping\n", vpc)
-		return nil
+		return adoptResource(ctx, "VPC", vpc, net.GetDescription(), clName, func(marker string) (*compute.Operation, error) {
+			return networks.Patch(ctx, &computepb.PatchNetworkRequest{
+				Project: project, Network: vpc,
+				NetworkResource: &computepb.Network{Description: proto.String(marker)},
+			})
+		})
 	}
 	if !isNotFound(err) {
 		return fmt.Errorf("checking VPC %s: %w", vpc, err)
@@ -148,6 +154,7 @@ func ensureVPC(ctx context.Context, networks gcp.NetworksAPI, project, vpc strin
 		Project: project,
 		NetworkResource: &computepb.Network{
 			Name:                  proto.String(vpc),
+			Description:           proto.String(labels.OwnerMarker(clName)),
 			AutoCreateSubnetworks: proto.Bool(false),
 			Mtu:                   proto.Int32(mtu),
 		},
@@ -158,11 +165,16 @@ func ensureVPC(ctx context.Context, networks gcp.NetworksAPI, project, vpc strin
 	return insertAndWait(ctx, op)
 }
 
-func ensureSubnet(ctx context.Context, subnets gcp.SubnetworksAPI, project, region, vpc, subnet, cidr string, ranges []secondaryRange) error {
-	_, err := subnets.Get(ctx, &computepb.GetSubnetworkRequest{Project: project, Region: region, Subnetwork: subnet})
+func ensureSubnet(ctx context.Context, subnets gcp.SubnetworksAPI, project, region, vpc, subnet, clName, cidr string, ranges []secondaryRange) error {
+	snet, err := subnets.Get(ctx, &computepb.GetSubnetworkRequest{Project: project, Region: region, Subnetwork: subnet})
 	if err == nil {
 		fmt.Fprintf(os.Stderr, "[phase 10] subnet %s already exists, skipping\n", subnet)
-		return nil
+		return adoptResource(ctx, "subnet", subnet, snet.GetDescription(), clName, func(marker string) (*compute.Operation, error) {
+			return subnets.Patch(ctx, &computepb.PatchSubnetworkRequest{
+				Project: project, Region: region, Subnetwork: subnet,
+				SubnetworkResource: &computepb.Subnetwork{Description: proto.String(marker)},
+			})
+		})
 	}
 	if !isNotFound(err) {
 		return fmt.Errorf("checking subnet %s: %w", subnet, err)
@@ -185,6 +197,7 @@ func ensureSubnet(ctx context.Context, subnets gcp.SubnetworksAPI, project, regi
 		Region:  region,
 		SubnetworkResource: &computepb.Subnetwork{
 			Name:              proto.String(subnet),
+			Description:       proto.String(labels.OwnerMarker(clName)),
 			Network:           proto.String(networkSelfLink(project, vpc)),
 			IpCidrRange:       proto.String(cidr),
 			SecondaryIpRanges: secondary,
@@ -196,12 +209,17 @@ func ensureSubnet(ctx context.Context, subnets gcp.SubnetworksAPI, project, regi
 	return insertAndWait(ctx, op)
 }
 
-func ensureAllowInternalFW(ctx context.Context, firewalls gcp.FirewallsAPI, project, vpc, allowCIDR string) error {
+func ensureAllowInternalFW(ctx context.Context, firewalls gcp.FirewallsAPI, project, vpc, clName, allowCIDR string) error {
 	name := vpc + "-allow-internal"
-	_, err := firewalls.Get(ctx, &computepb.GetFirewallRequest{Project: project, Firewall: name})
+	fw, err := firewalls.Get(ctx, &computepb.GetFirewallRequest{Project: project, Firewall: name})
 	if err == nil {
 		fmt.Fprintf(os.Stderr, "[phase 10] firewall %s already exists, skipping\n", name)
-		return nil
+		return adoptResource(ctx, "firewall", name, fw.GetDescription(), clName, func(marker string) (*compute.Operation, error) {
+			return firewalls.Patch(ctx, &computepb.PatchFirewallRequest{
+				Project: project, Firewall: name,
+				FirewallResource: &computepb.Firewall{Description: proto.String(marker)},
+			})
+		})
 	}
 	if !isNotFound(err) {
 		return fmt.Errorf("checking firewall %s: %w", name, err)
@@ -212,6 +230,7 @@ func ensureAllowInternalFW(ctx context.Context, firewalls gcp.FirewallsAPI, proj
 		Project: project,
 		FirewallResource: &computepb.Firewall{
 			Name:         proto.String(name),
+			Description:  proto.String(labels.OwnerMarker(clName)),
 			Network:      proto.String(networkSelfLink(project, vpc)),
 			Direction:    proto.String("INGRESS"),
 			SourceRanges: []string{allowCIDR},
@@ -237,7 +256,7 @@ func ensureAllowInternalFW(ctx context.Context, firewalls gcp.FirewallsAPI, proj
 //     applies whether the router was just freshly created or already
 //     existed, matching bash's `|| { log::warn ...; }` on the NAT create
 //     call.
-func ensureRouterNAT(ctx context.Context, routers gcp.RoutersAPI, project, region, vpc string) error {
+func ensureRouterNAT(ctx context.Context, routers gcp.RoutersAPI, project, region, vpc, clName string) error {
 	routerName := vpc + "-router"
 	natName := vpc + "-nat"
 
@@ -245,6 +264,14 @@ func ensureRouterNAT(ctx context.Context, routers gcp.RoutersAPI, project, regio
 	switch {
 	case err == nil:
 		fmt.Fprintf(os.Stderr, "[phase 10] router %s already exists, skipping create\n", routerName)
+		if err := adoptResource(ctx, "router", routerName, existing.GetDescription(), clName, func(marker string) (*compute.Operation, error) {
+			return routers.Patch(ctx, &computepb.PatchRouterRequest{
+				Project: project, Region: region, Router: routerName,
+				RouterResource: &computepb.Router{Description: proto.String(marker)},
+			})
+		}); err != nil {
+			return err
+		}
 
 	case isNotFound(err):
 		fmt.Fprintf(os.Stderr, "[phase 10] creating Cloud Router %s on %s\n", routerName, vpc)
@@ -252,8 +279,9 @@ func ensureRouterNAT(ctx context.Context, routers gcp.RoutersAPI, project, regio
 			Project: project,
 			Region:  region,
 			RouterResource: &computepb.Router{
-				Name:    proto.String(routerName),
-				Network: proto.String(networkSelfLink(project, vpc)),
+				Name:        proto.String(routerName),
+				Description: proto.String(labels.OwnerMarker(clName)),
+				Network:     proto.String(networkSelfLink(project, vpc)),
 			},
 		})
 		if insErr != nil {
@@ -369,4 +397,85 @@ func hasHTTPStatus(err error, code int) bool {
 	default:
 		return false
 	}
+}
+
+func adoptResource(ctx context.Context, kind, name, desc, clName string, patchFn func(string) (*compute.Operation, error)) error {
+	marker := labels.OwnerMarker(clName)
+	_, managed := labels.ParseOwner(desc)
+	if !managed {
+		fmt.Fprintf(os.Stderr, "[phase 10] adopting unmarked %s %s\n", kind, name)
+		op, err := patchFn(marker)
+		if err != nil {
+			return fmt.Errorf("adopting %s %s: %w", kind, name, err)
+		}
+		return insertAndWait(ctx, op)
+	}
+	return nil
+}
+
+type VPCResources struct {
+	Subnets   []*computepb.Subnetwork
+	Firewalls []*computepb.Firewall
+	Routers   []*computepb.Router
+}
+
+// DiscoverDataplaneResources lists all subnets, firewalls, and routers in the given VPC,
+// parses their descriptions for ownership markers, and returns them grouped by cluster.
+func DiscoverDataplaneResources(ctx context.Context, clients *gcp.Clients, project, region, vpc string) (map[string]*VPCResources, error) {
+	byCluster := make(map[string]*VPCResources)
+	getCluster := func(c string) *VPCResources {
+		if c == "" {
+			c = "unmarked"
+		}
+		if _, ok := byCluster[c]; !ok {
+			byCluster[c] = &VPCResources{}
+		}
+		return byCluster[c]
+	}
+
+	vpcSelfLink := networkSelfLink(project, vpc)
+
+	subnets, err := clients.Subnetworks.ListAll(ctx, project, region)
+	if err != nil {
+		return nil, fmt.Errorf("listing subnets: %w", err)
+	}
+	for _, s := range subnets {
+		if s.GetNetwork() == vpcSelfLink {
+			owner, managed := labels.ParseOwner(s.GetDescription())
+			if !managed {
+				owner = ""
+			}
+			getCluster(owner).Subnets = append(getCluster(owner).Subnets, s)
+		}
+	}
+
+	firewalls, err := clients.Firewalls.ListAll(ctx, project)
+	if err != nil {
+		return nil, fmt.Errorf("listing firewalls: %w", err)
+	}
+	for _, fw := range firewalls {
+		if fw.GetNetwork() == vpcSelfLink {
+			owner, managed := labels.ParseOwner(fw.GetDescription())
+			if !managed {
+				owner = ""
+			}
+			getCluster(owner).Firewalls = append(getCluster(owner).Firewalls, fw)
+		}
+	}
+
+	routers, err := clients.Routers.ListAll(ctx, project, region)
+	if err != nil {
+		return nil, fmt.Errorf("listing routers: %w", err)
+	}
+	for _, r := range routers {
+		if r.GetNetwork() == vpcSelfLink {
+			owner, managed := labels.ParseOwner(r.GetDescription())
+			if !managed {
+				owner = ""
+			}
+			getCluster(owner).Routers = append(getCluster(owner).Routers, r)
+		}
+	}
+
+	return byCluster, nil
 }

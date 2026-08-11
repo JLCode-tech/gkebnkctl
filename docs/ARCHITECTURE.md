@@ -134,7 +134,7 @@ zero GCP calls, zero state reads required.
 ## State & idempotency
 
 GCP has no universal resource-tag/label discovery the way AWS does, so
-idempotency here is **deterministic naming**, not label-discovery: every
+idempotency here is **deterministic naming for wholly-owned resources; a parsed `Description` ownership marker for resources inside the shared dataplane VPCs (GCP networking resources cannot carry labels)**. Every
 resource name is a pure function of `cluster.yaml`, so every phase's
 mutation is guarded by a `Get(<name>)` → skip-if-exists check. `state.env`
 (`.gkebnkctl/<cluster>/state.env`) caches only the values that are **not**
