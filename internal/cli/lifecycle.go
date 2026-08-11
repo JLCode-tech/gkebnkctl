@@ -339,7 +339,8 @@ func printDownPlan(w io.Writer, cl *intent.Cluster, keepDataplane bool) {
 	}
 
 	if !keepDataplane {
-		fmt.Fprintln(w, "→ in SHARED dataplane VPCs (deleted only if owned by this cluster):")
+		fmt.Fprintln(w, "→ in SHARED dataplane VPCs (cluster-owned resources only):")
+		fmt.Fprintln(w, "  (firewalls/routers are left in place while other clusters still use this VPC)")
 		var sharedPlan []string
 		for _, dp := range []intent.DataplaneSpec{cl.Network.External, cl.Network.Internal} {
 			sharedPlan = append(sharedPlan, fmt.Sprintf("  • delete  subnet    %s", dp.Subnet))
