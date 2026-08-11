@@ -153,7 +153,7 @@ func TestRunPhasedDown_DryRun_PrintsPlanAndNeverDeletesSharedVPCs(t *testing.T) 
 	withCWD(t, dir)
 
 	stderr := captureStderr(t, func() {
-		if err := runPhasedDown(context.Background(), path, false, true); err != nil {
+		if err := runPhasedDown(context.Background(), path, false, true, false); err != nil {
 			t.Fatalf("runPhasedDown(dryRun=true): unexpected error: %v", err)
 		}
 	})
