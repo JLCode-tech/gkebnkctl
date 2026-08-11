@@ -52,7 +52,7 @@ func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 // references network.external / network.internal — the shared dataplane
 // VPCs may be used by other clusters and must never be touched by teardown,
 // per docs/SPEC-go-tracer.md §3 "Down phases".
-func PhaseDownNetworks(ctx context.Context, cl *intent.Cluster, _ *state.State, clients *gcp.Clients) error {
+func PhaseDownNetworks(ctx context.Context, cl *intent.Cluster, _ *state.State, clients *gcp.Clients, keepDataplane bool) error {
 	project := cl.Metadata.Project
 	region := cl.Region
 	main := cl.Network.Main
@@ -112,7 +112,132 @@ func PhaseDownNetworks(ctx context.Context, cl *intent.Cluster, _ *state.State, 
 		}
 	}
 
+	if !keepDataplane {
+		if err := teardownDataplaneResources(ctx, project, region, cl.Network.External.VPC, cl.Metadata.Name, clients); err != nil {
+			return fmt.Errorf("down: external-vpc: %w", err)
+		}
+		if err := teardownDataplaneResources(ctx, project, region, cl.Network.Internal.VPC, cl.Metadata.Name, clients); err != nil {
+			return fmt.Errorf("down: internal-vpc: %w", err)
+		}
+	}
+
 	fmt.Fprintf(os.Stderr, "[down] main-vpc done — shared dataplane VPCs %s/%s left untouched\n",
 		cl.Network.External.VPC, cl.Network.Internal.VPC)
+	return nil
+}
+
+func teardownDataplaneResources(ctx context.Context, project, region, vpc, cluster string, clients *gcp.Clients) error {
+	byCluster, err := DiscoverDataplaneResources(ctx, clients, project, region, vpc)
+	if err != nil {
+		return err
+	}
+
+	clusterResources := byCluster[cluster]
+	if clusterResources == nil {
+		clusterResources = &VPCResources{}
+	}
+
+	// Delete subnets
+	for _, sn := range clusterResources.Subnets {
+		name := sn.GetName()
+		fmt.Fprintf(os.Stderr, "[down] shared-vpc %s: deleting subnet %s\n", vpc, name)
+		op, err := clients.Subnetworks.Delete(ctx, &computepb.DeleteSubnetworkRequest{Project: project, Region: region, Subnetwork: name})
+		if err != nil && !isNotFound(err) {
+			return fmt.Errorf("deleting subnet %s: %w", name, err)
+		}
+		if op != nil {
+			if err := insertAndWait(ctx, op); err != nil {
+				return fmt.Errorf("waiting for subnet delete: %w", err)
+			}
+		}
+	}
+
+	// Determine if other clusters are still using this shared VPC.
+	// Subnets are per-cluster, so their presence indicates an active cluster.
+	otherClustersExist := false
+	for c, res := range byCluster {
+		if c != cluster && c != "unmarked" && len(res.Subnets) > 0 {
+			otherClustersExist = true
+			break
+		}
+	}
+
+	// Delete firewalls (last-one-out shared resource)
+	var sweepFirewalls []*computepb.Firewall
+	if otherClustersExist {
+		sweepFirewalls = clusterResources.Firewalls
+	} else {
+		for c, res := range byCluster {
+			if c != "unmarked" {
+				sweepFirewalls = append(sweepFirewalls, res.Firewalls...)
+			}
+		}
+	}
+
+	for _, fw := range sweepFirewalls {
+		name := fw.GetName()
+		if otherClustersExist {
+			// We knowingly accept the stale marker naming this departed cluster. The firewall
+			// remains functional for the surviving clusters, and the last one out (which sweeps ALL marked
+			// resources regardless of their specific cluster label) will delete it.
+			fmt.Fprintf(os.Stderr, "[down] shared-vpc %s: skipping firewall %s because other clusters still have subnets in this VPC (leaving stale ownership marker)\n", vpc, name)
+		} else {
+			fmt.Fprintf(os.Stderr, "[down] shared-vpc %s: deleting firewall %s\n", vpc, name)
+			op, err := clients.Firewalls.Delete(ctx, &computepb.DeleteFirewallRequest{Project: project, Firewall: name})
+			if err != nil && !isNotFound(err) {
+				return fmt.Errorf("deleting firewall %s: %w", name, err)
+			}
+			if op != nil {
+				if err := insertAndWait(ctx, op); err != nil {
+					return fmt.Errorf("waiting for firewall delete: %w", err)
+				}
+			}
+		}
+	}
+
+	// Skip and log unmarked resources
+	if unmarked, ok := byCluster["unmarked"]; ok {
+		for _, sn := range unmarked.Subnets {
+			fmt.Fprintf(os.Stderr, "[down] shared-vpc %s: skipping subnet %s (no gkebnkctl ownership marker). Run `gcloud compute networks subnets delete %s --region=%s --project=%s` to delete manually.\n", vpc, sn.GetName(), sn.GetName(), region, project)
+		}
+		for _, fw := range unmarked.Firewalls {
+			fmt.Fprintf(os.Stderr, "[down] shared-vpc %s: skipping firewall %s (no gkebnkctl ownership marker). Run `gcloud compute firewalls delete %s --project=%s` to delete manually.\n", vpc, fw.GetName(), fw.GetName(), project)
+		}
+		for _, rt := range unmarked.Routers {
+			fmt.Fprintf(os.Stderr, "[down] shared-vpc %s: skipping router %s (no gkebnkctl ownership marker). Run `gcloud compute routers delete %s --region=%s --project=%s` to delete manually.\n", vpc, rt.GetName(), rt.GetName(), region, project)
+		}
+	}
+
+	// Delete routers and NATs (last-one-out shared resource)
+	var sweepRouters []*computepb.Router
+	if otherClustersExist {
+		sweepRouters = clusterResources.Routers
+	} else {
+		for c, res := range byCluster {
+			if c != "unmarked" {
+				sweepRouters = append(sweepRouters, res.Routers...)
+			}
+		}
+	}
+
+	for _, rt := range sweepRouters {
+		name := rt.GetName()
+		if otherClustersExist {
+			// As with the firewall, we knowingly accept the stale marker. The last one out sweeps all.
+			fmt.Fprintf(os.Stderr, "[down] shared-vpc %s: skipping router %s because other clusters still have subnets in this VPC (leaving stale ownership marker)\n", vpc, name)
+		} else {
+			fmt.Fprintf(os.Stderr, "[down] shared-vpc %s: deleting router %s (and its NATs)\n", vpc, name)
+			op, err := clients.Routers.Delete(ctx, &computepb.DeleteRouterRequest{Project: project, Region: region, Router: name})
+			if err != nil && !isNotFound(err) {
+				return fmt.Errorf("deleting router %s: %w", name, err)
+			}
+			if op != nil {
+				if err := insertAndWait(ctx, op); err != nil {
+					return fmt.Errorf("waiting for router delete: %w", err)
+				}
+			}
+		}
+	}
+
 	return nil
 }
