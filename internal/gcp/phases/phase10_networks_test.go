@@ -12,9 +12,9 @@ import (
 )
 
 func testClients10() (*gcp.Clients, *fakeNetworks, *fakeSubnetworks, *fakeFirewalls, *fakeRouters) {
-	networks := &fakeNetworks{existing: map[string]bool{}}
-	subnetworks := &fakeSubnetworks{existing: map[string]bool{}}
-	firewalls := &fakeFirewalls{existing: map[string]bool{}}
+	networks := &fakeNetworks{existing: map[string]string{}}
+	subnetworks := &fakeSubnetworks{existing: map[string]string{}}
+	firewalls := &fakeFirewalls{existing: map[string]string{}}
 	routers := &fakeRouters{existing: map[string]*computepb.Router{}}
 	return &gcp.Clients{
 		Networks:    networks,
@@ -87,19 +87,19 @@ func TestPhase10Networks_SkipsWhenPresent(t *testing.T) {
 	st := testState(t)
 	clients, networks, subnetworks, firewalls, routers := testClients10()
 
-	networks.existing["bnkhd-vpc"] = true
-	networks.existing["bnkhd-ext"] = true
-	networks.existing["bnkhd-int"] = true
-	subnetworks.existing["bnkhd-subnet"] = true
-	subnetworks.existing["bnkhd-ext"] = true
-	subnetworks.existing["bnkhd-int"] = true
-	firewalls.existing["bnkhd-vpc-allow-internal"] = true
-	firewalls.existing["bnkhd-ext-allow-internal"] = true
-	firewalls.existing["bnkhd-int-allow-internal"] = true
+	networks.existing["bnkhd-vpc"] = ""
+	networks.existing["bnkhd-ext"] = ""
+	networks.existing["bnkhd-int"] = ""
+	subnetworks.existing["bnkhd-subnet"] = ""
+	subnetworks.existing["bnkhd-ext"] = ""
+	subnetworks.existing["bnkhd-int"] = ""
+	firewalls.existing["bnkhd-vpc-allow-internal"] = ""
+	firewalls.existing["bnkhd-ext-allow-internal"] = ""
+	firewalls.existing["bnkhd-int-allow-internal"] = ""
 	natName := "bnkhd-ext-nat"
-	routers.existing["bnkhd-ext-router"] = &computepb.Router{Nats: []*computepb.RouterNat{{Name: &natName}}}
+	routers.existing["bnkhd-ext-router"] = &computepb.Router{Description: strPtr("gkebnkctl-managed=true gkebnkctl-cluster=test-cluster"), Nats: []*computepb.RouterNat{{Name: &natName}}}
 	natNameInt := "bnkhd-int-nat"
-	routers.existing["bnkhd-int-router"] = &computepb.Router{Nats: []*computepb.RouterNat{{Name: &natNameInt}}}
+	routers.existing["bnkhd-int-router"] = &computepb.Router{Description: strPtr("gkebnkctl-managed=true gkebnkctl-cluster=test-cluster"), Nats: []*computepb.RouterNat{{Name: &natNameInt}}}
 
 	if err := Phase10Networks(context.Background(), cl, st, clients, false); err != nil {
 		t.Fatalf("Phase10Networks: %v", err)
@@ -147,7 +147,7 @@ func TestEnsureRouterNAT_403Tolerated(t *testing.T) {
 		existing:  map[string]*computepb.Router{},
 		insertErr: map[string]error{"bnkhd-ext-router": errPermissionDenied},
 	}
-	err := ensureRouterNAT(context.Background(), routers, "my-gcp-project", "us-central1", "bnkhd-ext")
+	err := ensureRouterNAT(context.Background(), routers, "my-gcp-project", "us-central1", "bnkhd-ext", "test-cluster")
 	if err != nil {
 		t.Fatalf("ensureRouterNAT: expected 403 to be tolerated (nil error), got: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestEnsureRouterNAT_OtherErrorsPropagate(t *testing.T) {
 		existing:  map[string]*computepb.Router{},
 		insertErr: map[string]error{"bnkhd-ext-router": errNotFound}, // stand-in for an unrelated 500-class error
 	}
-	if err := ensureRouterNAT(context.Background(), routers, "my-gcp-project", "us-central1", "bnkhd-ext"); err == nil {
+	if err := ensureRouterNAT(context.Background(), routers, "my-gcp-project", "us-central1", "bnkhd-ext", "test-cluster"); err == nil {
 		t.Fatal("expected a non-403 Insert error to propagate")
 	}
 }
@@ -178,7 +178,7 @@ func TestEnsureRouterNAT_OtherErrorsPropagate(t *testing.T) {
 // old single combined Insert.
 func TestEnsureRouterNAT_FreshCreateSplitsRouterAndNAT(t *testing.T) {
 	routers := &fakeRouters{existing: map[string]*computepb.Router{}}
-	if err := ensureRouterNAT(context.Background(), routers, "p", "us-central1", "bnkhd-ext"); err != nil {
+	if err := ensureRouterNAT(context.Background(), routers, "p", "us-central1", "bnkhd-ext", "test-cluster"); err != nil {
 		t.Fatalf("ensureRouterNAT: %v", err)
 	}
 	if len(routers.insertCalls) != 1 || routers.insertCalls[0] != "bnkhd-ext-router" {
@@ -191,9 +191,9 @@ func TestEnsureRouterNAT_FreshCreateSplitsRouterAndNAT(t *testing.T) {
 
 func TestEnsureRouterNAT_AddsNATToExistingRouter(t *testing.T) {
 	routers := &fakeRouters{existing: map[string]*computepb.Router{
-		"bnkhd-ext-router": {Nats: nil},
+		"bnkhd-ext-router": {Description: strPtr("gkebnkctl-managed=true gkebnkctl-cluster=test-cluster"), Nats: nil},
 	}}
-	if err := ensureRouterNAT(context.Background(), routers, "p", "us-central1", "bnkhd-ext"); err != nil {
+	if err := ensureRouterNAT(context.Background(), routers, "p", "us-central1", "bnkhd-ext", "test-cluster"); err != nil {
 		t.Fatalf("ensureRouterNAT: %v", err)
 	}
 	if len(routers.patchCalls) != 1 {
@@ -211,10 +211,10 @@ func TestEnsureRouterNAT_AddsNATToExistingRouter(t *testing.T) {
 // unlike the 403-only tolerance on router create.
 func TestEnsureRouterNAT_NATAttachErrorNonFatal(t *testing.T) {
 	routers := &fakeRouters{
-		existing: map[string]*computepb.Router{"bnkhd-ext-router": {Nats: nil}},
+		existing: map[string]*computepb.Router{"bnkhd-ext-router": {Description: strPtr("gkebnkctl-managed=true gkebnkctl-cluster=test-cluster"), Nats: nil}},
 		patchErr: map[string]error{"bnkhd-ext-router": errors.New("transient NAT attach failure")},
 	}
-	if err := ensureRouterNAT(context.Background(), routers, "p", "us-central1", "bnkhd-ext"); err != nil {
+	if err := ensureRouterNAT(context.Background(), routers, "p", "us-central1", "bnkhd-ext", "test-cluster"); err != nil {
 		t.Fatalf("ensureRouterNAT: expected NAT-attach failure to be non-fatal, got: %v", err)
 	}
 	if len(routers.patchCalls) != 1 {
