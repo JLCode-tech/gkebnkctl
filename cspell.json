@@ -118,6 +118,8 @@
     "ldflags",
     "lastexitcode",
     "typeflag",
-    "nosec"
+    "nosec",
+    "lookpath",
+    "LookPath"
   ]
 }
