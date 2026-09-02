@@ -17,7 +17,7 @@ discovered.env
 # Secret material — never commit
 *.jwt
 license.jwt
-kubeconfig
+/kubeconfig
 *.kubeconfig
 dockerconfig.json
 .dockerconfigjson
