@@ -105,7 +105,7 @@ func DownloadAsset(ctx context.Context, rel *Release, destPath string) error {
 		return fmt.Errorf("download error (HTTP %d)", resp.StatusCode)
 	}
 
-	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755) // #nosec G304 G302 -- self-update destination binary requires executable bit
 	if err != nil {
 		return fmt.Errorf("create dest %s: %w", destPath, err)
 	}

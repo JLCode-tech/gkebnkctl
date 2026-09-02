@@ -173,4 +173,3 @@ func updateFloDeploymentImage(objs []*unstructured.Unstructured, registry string
 		}
 	}
 }
-

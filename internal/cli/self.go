@@ -10,8 +10,7 @@ import (
 )
 
 var (
-	flagSelfRepo  string
-	flagSelfApply bool
+	flagSelfRepo string
 )
 
 var selfCmd = &cobra.Command{

@@ -39,11 +39,11 @@ func Append(path string, e Entry) error {
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 G302 -- journal path is workspace-local
 	if err != nil {
 		return fmt.Errorf("open journal %s: %w", path, err)
 	}
@@ -71,7 +71,7 @@ func List(path string) ([]Entry, error) {
 		return nil, nil
 	}
 
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- journal path is workspace-local
 	if err != nil {
 		return nil, fmt.Errorf("open journal %s: %w", path, err)
 	}

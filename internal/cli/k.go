@@ -14,8 +14,8 @@ import (
 )
 
 var kCmd = &cobra.Command{
-	Use:                "k [kubectl arguments...]",
-	Short:              "Scoped kubectl wrapper targeting the workspace cluster",
+	Use:   "k [kubectl arguments...]",
+	Short: "Scoped kubectl wrapper targeting the workspace cluster",
 	Long: `gkebnkctl k runs kubectl commands targeted directly at your GKE BNK cluster
 without modifying your global ~/.kube/config or requiring manual context switching.
 
@@ -67,7 +67,7 @@ func runK(cmd *cobra.Command, args []string) error {
 
 	execArgs = append(execArgs, args...)
 
-	proc := exec.Command(kubectlBin, execArgs...)
+	proc := exec.Command(kubectlBin, execArgs...) // #nosec G204 -- kubectl wrapper forwards operator CLI args
 	proc.Stdin = os.Stdin
 	proc.Stdout = os.Stdout
 	proc.Stderr = os.Stderr

@@ -158,7 +158,7 @@ func versionLine(ctx context.Context, name string) string {
 	defer cancel()
 
 	var stdout, stderr bytes.Buffer
-	c := exec.CommandContext(vctx, name, args...)
+	c := exec.CommandContext(vctx, name, args...) // #nosec G204 -- doctor executes fixed tool binaries to query versions
 	c.Stdout = &stdout
 	c.Stderr = &stderr
 	if err := c.Run(); err != nil {

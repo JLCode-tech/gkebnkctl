@@ -132,9 +132,9 @@ func writeDoc(path, content string, force bool) error {
 	}
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
-		_ = os.MkdirAll(dir, 0o755)
+		_ = os.MkdirAll(dir, 0o750)
 	}
-	return os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0o644)
+	return os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0o600)
 }
 
 func fileExists(p string) bool {

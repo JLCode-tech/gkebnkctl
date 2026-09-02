@@ -126,14 +126,14 @@ func ProbeArchive(path string) (*ReleaseManifest, error) {
 
 	if fi.IsDir() {
 		manifestFile := filepath.Join(path, "manifest.yaml")
-		data, err := os.ReadFile(manifestFile)
+		data, err := os.ReadFile(manifestFile) // #nosec G304 -- path is operator-supplied local directory
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", manifestFile, err)
 		}
 		return ParseReleaseManifest(data)
 	}
 
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is operator-supplied local tarball
 	if err != nil {
 		return nil, err
 	}

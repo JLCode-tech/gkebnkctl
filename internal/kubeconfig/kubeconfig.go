@@ -18,13 +18,13 @@ const BackupSuffix = ".gkebnkctl-bak"
 
 // Config represents a standard Kubernetes kubeconfig structure.
 type Config struct {
-	APIVersion     string          `yaml:"apiVersion"`
-	Kind           string          `yaml:"kind"`
-	CurrentContext string          `yaml:"current-context"`
-	Clusters       []NamedCluster  `yaml:"clusters"`
-	Contexts       []NamedContext  `yaml:"contexts"`
-	Users          []NamedUser     `yaml:"users"`
-	Preferences    map[string]any  `yaml:"preferences,omitempty"`
+	APIVersion     string         `yaml:"apiVersion"`
+	Kind           string         `yaml:"kind"`
+	CurrentContext string         `yaml:"current-context"`
+	Clusters       []NamedCluster `yaml:"clusters"`
+	Contexts       []NamedContext `yaml:"contexts"`
+	Users          []NamedUser    `yaml:"users"`
+	Preferences    map[string]any `yaml:"preferences,omitempty"`
 }
 
 type NamedCluster struct {
@@ -137,7 +137,7 @@ func FetchAndGenerate(ctx context.Context, cl *intent.Cluster) ([]byte, error) {
 // WriteFile writes the kubeconfig bytes to the target path.
 func WriteFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	return os.WriteFile(path, data, 0o600)
@@ -164,11 +164,11 @@ func SyncGlobal(data []byte) (string, error) {
 	// If global kubeconfig exists, create a backup if not already present
 	if _, err := os.Stat(globalPath); err == nil {
 		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
-			orig, err := os.ReadFile(globalPath)
+			orig, err := os.ReadFile(globalPath) // #nosec G304 -- path is standard user home kubeconfig
 			if err != nil {
 				return "", fmt.Errorf("read existing kubeconfig: %w", err)
 			}
-			if err := os.WriteFile(backupPath, orig, 0o600); err != nil {
+			if err := os.WriteFile(backupPath, orig, 0o600); err != nil { // #nosec G304 G703 -- backup path in user home
 				return "", fmt.Errorf("write backup %s: %w", backupPath, err)
 			}
 		}
@@ -193,12 +193,12 @@ func RestoreGlobal() (bool, error) {
 		return false, nil
 	}
 
-	backupData, err := os.ReadFile(backupPath)
+	backupData, err := os.ReadFile(backupPath) // #nosec G304 -- path is standard user home kubeconfig backup
 	if err != nil {
 		return false, fmt.Errorf("read backup: %w", err)
 	}
 
-	if err := os.WriteFile(globalPath, backupData, 0o600); err != nil {
+	if err := os.WriteFile(globalPath, backupData, 0o600); err != nil { // #nosec G304 G703 -- global kubeconfig path in user home
 		return false, fmt.Errorf("restore kubeconfig: %w", err)
 	}
 
