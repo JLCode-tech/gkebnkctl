@@ -390,6 +390,9 @@ bnk:
 	if c.Bnk.TmmMtu != "1460" {
 		t.Errorf("Bnk.TmmMtu = %q, want 1460", c.Bnk.TmmMtu)
 	}
+	if c.Bnk.ImageRegistry != "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga" {
+		t.Errorf("Bnk.ImageRegistry = %q, want default GAR registry", c.Bnk.ImageRegistry)
+	}
 	if c.Bnk.FarSecret.SourceNamespace != "f5-bnk" {
 		t.Errorf("FarSecret.SourceNamespace = %q, want f5-bnk", c.Bnk.FarSecret.SourceNamespace)
 	}

@@ -14,6 +14,7 @@ import (
 	container "cloud.google.com/go/container/apiv1"
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
 	gax "github.com/googleapis/gax-go/v2"
+	"google.golang.org/api/iterator"
 	serviceusage "google.golang.org/api/serviceusage/v1"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -30,6 +31,7 @@ import (
 type NetworksAPI interface {
 	Insert(ctx context.Context, req *computepb.InsertNetworkRequest, opts ...gax.CallOption) (*compute.Operation, error)
 	Get(ctx context.Context, req *computepb.GetNetworkRequest, opts ...gax.CallOption) (*computepb.Network, error)
+	Patch(ctx context.Context, req *computepb.PatchNetworkRequest, opts ...gax.CallOption) (*compute.Operation, error)
 	Delete(ctx context.Context, req *computepb.DeleteNetworkRequest, opts ...gax.CallOption) (*compute.Operation, error)
 }
 
@@ -37,14 +39,18 @@ type NetworksAPI interface {
 type SubnetworksAPI interface {
 	Insert(ctx context.Context, req *computepb.InsertSubnetworkRequest, opts ...gax.CallOption) (*compute.Operation, error)
 	Get(ctx context.Context, req *computepb.GetSubnetworkRequest, opts ...gax.CallOption) (*computepb.Subnetwork, error)
+	Patch(ctx context.Context, req *computepb.PatchSubnetworkRequest, opts ...gax.CallOption) (*compute.Operation, error)
 	Delete(ctx context.Context, req *computepb.DeleteSubnetworkRequest, opts ...gax.CallOption) (*compute.Operation, error)
+	ListAll(ctx context.Context, project, region string) ([]*computepb.Subnetwork, error)
 }
 
 // FirewallsAPI is the subset of compute.FirewallsClient used by Phase10.
 type FirewallsAPI interface {
 	Insert(ctx context.Context, req *computepb.InsertFirewallRequest, opts ...gax.CallOption) (*compute.Operation, error)
 	Get(ctx context.Context, req *computepb.GetFirewallRequest, opts ...gax.CallOption) (*computepb.Firewall, error)
+	Patch(ctx context.Context, req *computepb.PatchFirewallRequest, opts ...gax.CallOption) (*compute.Operation, error)
 	Delete(ctx context.Context, req *computepb.DeleteFirewallRequest, opts ...gax.CallOption) (*compute.Operation, error)
+	ListAll(ctx context.Context, project string) ([]*computepb.Firewall, error)
 }
 
 // RoutersAPI is the subset of compute.RoutersClient used by Phase10 (Cloud
@@ -57,6 +63,7 @@ type RoutersAPI interface {
 	Get(ctx context.Context, req *computepb.GetRouterRequest, opts ...gax.CallOption) (*computepb.Router, error)
 	Patch(ctx context.Context, req *computepb.PatchRouterRequest, opts ...gax.CallOption) (*compute.Operation, error)
 	Delete(ctx context.Context, req *computepb.DeleteRouterRequest, opts ...gax.CallOption) (*compute.Operation, error)
+	ListAll(ctx context.Context, project, region string) ([]*computepb.Router, error)
 }
 
 // InstancesAPI is the subset of compute.InstancesClient used by Phase25
@@ -161,7 +168,7 @@ func NewClients(ctx context.Context, project string) (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gcp: regions client: %w", err)
 	}
-	gke, err := container.NewClusterManagerClient(ctx)
+	gke, err := container.NewClusterManagerRESTClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("gcp: cluster manager client: %w", err)
 	}
@@ -172,9 +179,9 @@ func NewClients(ctx context.Context, project string) (*Clients, error) {
 
 	return &Clients{
 		Networks:     networks,
-		Subnetworks:  subnetworks,
-		Firewalls:    firewalls,
-		Routers:      routers,
+		Subnetworks:  &realSubnetworks{client: subnetworks},
+		Firewalls:    &realFirewalls{client: firewalls},
+		Routers:      &realRouters{client: routers},
 		Instances:    instances,
 		Regions:      regions,
 		GKE:          gke,
@@ -201,9 +208,7 @@ func (c *Clients) AttachK8s(ctx context.Context, clusterName, zone string) error
 		return fmt.Errorf("gcp: AttachK8s(%s, %s): Clients.GKE is nil", clusterName, zone)
 	}
 	cluster, err := c.GKE.GetCluster(ctx, &containerpb.GetClusterRequest{
-		ProjectId: c.Project,
-		Zone:      zone,
-		ClusterId: clusterName,
+		Name: fmt.Sprintf("projects/%s/locations/%s/clusters/%s", c.Project, zone, clusterName),
 	})
 	if err != nil {
 		return fmt.Errorf("gcp: AttachK8s(%s, %s): GetCluster: %w", clusterName, zone, err)
@@ -238,4 +243,112 @@ func attachK8sFromConfig(c *Clients, cfg *rest.Config) error {
 	c.RESTMapper = restmapper.NewDeferredDiscoveryRESTMapper(k8s.NewNoopCachedDiscovery(disc))
 	c.RestConfig = cfg
 	return nil
+}
+
+type realSubnetworks struct {
+	client *compute.SubnetworksClient
+}
+
+func (r *realSubnetworks) Insert(ctx context.Context, req *computepb.InsertSubnetworkRequest, opts ...gax.CallOption) (*compute.Operation, error) {
+	return r.client.Insert(ctx, req, opts...)
+}
+
+func (r *realSubnetworks) Get(ctx context.Context, req *computepb.GetSubnetworkRequest, opts ...gax.CallOption) (*computepb.Subnetwork, error) {
+	return r.client.Get(ctx, req, opts...)
+}
+
+func (r *realSubnetworks) Patch(ctx context.Context, req *computepb.PatchSubnetworkRequest, opts ...gax.CallOption) (*compute.Operation, error) {
+	return r.client.Patch(ctx, req, opts...)
+}
+
+func (r *realSubnetworks) Delete(ctx context.Context, req *computepb.DeleteSubnetworkRequest, opts ...gax.CallOption) (*compute.Operation, error) {
+	return r.client.Delete(ctx, req, opts...)
+}
+
+func (r *realSubnetworks) ListAll(ctx context.Context, project, region string) ([]*computepb.Subnetwork, error) {
+	it := r.client.List(ctx, &computepb.ListSubnetworksRequest{Project: project, Region: region})
+	var res []*computepb.Subnetwork
+	for {
+		s, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, s)
+	}
+	return res, nil
+}
+
+type realFirewalls struct {
+	client *compute.FirewallsClient
+}
+
+func (r *realFirewalls) Insert(ctx context.Context, req *computepb.InsertFirewallRequest, opts ...gax.CallOption) (*compute.Operation, error) {
+	return r.client.Insert(ctx, req, opts...)
+}
+
+func (r *realFirewalls) Get(ctx context.Context, req *computepb.GetFirewallRequest, opts ...gax.CallOption) (*computepb.Firewall, error) {
+	return r.client.Get(ctx, req, opts...)
+}
+
+func (r *realFirewalls) Patch(ctx context.Context, req *computepb.PatchFirewallRequest, opts ...gax.CallOption) (*compute.Operation, error) {
+	return r.client.Patch(ctx, req, opts...)
+}
+
+func (r *realFirewalls) Delete(ctx context.Context, req *computepb.DeleteFirewallRequest, opts ...gax.CallOption) (*compute.Operation, error) {
+	return r.client.Delete(ctx, req, opts...)
+}
+
+func (r *realFirewalls) ListAll(ctx context.Context, project string) ([]*computepb.Firewall, error) {
+	it := r.client.List(ctx, &computepb.ListFirewallsRequest{Project: project})
+	var res []*computepb.Firewall
+	for {
+		f, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, f)
+	}
+	return res, nil
+}
+
+type realRouters struct {
+	client *compute.RoutersClient
+}
+
+func (r *realRouters) Insert(ctx context.Context, req *computepb.InsertRouterRequest, opts ...gax.CallOption) (*compute.Operation, error) {
+	return r.client.Insert(ctx, req, opts...)
+}
+
+func (r *realRouters) Get(ctx context.Context, req *computepb.GetRouterRequest, opts ...gax.CallOption) (*computepb.Router, error) {
+	return r.client.Get(ctx, req, opts...)
+}
+
+func (r *realRouters) Patch(ctx context.Context, req *computepb.PatchRouterRequest, opts ...gax.CallOption) (*compute.Operation, error) {
+	return r.client.Patch(ctx, req, opts...)
+}
+
+func (r *realRouters) Delete(ctx context.Context, req *computepb.DeleteRouterRequest, opts ...gax.CallOption) (*compute.Operation, error) {
+	return r.client.Delete(ctx, req, opts...)
+}
+
+func (r *realRouters) ListAll(ctx context.Context, project, region string) ([]*computepb.Router, error) {
+	it := r.client.List(ctx, &computepb.ListRoutersRequest{Project: project, Region: region})
+	var res []*computepb.Router
+	for {
+		router, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, router)
+	}
+	return res, nil
 }

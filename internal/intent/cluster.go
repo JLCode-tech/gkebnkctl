@@ -195,6 +195,9 @@ type BnkSpec struct {
 	JwtPath string `yaml:"jwtPath"`
 	// FarSecret configures how the far-secret pull credential is sourced.
 	FarSecret FarSecretSpec `yaml:"farSecret,omitempty"`
+	// ImageRegistry is the container registry prefix where BNK/FLO images are pulled from.
+	// Default "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga".
+	ImageRegistry string `yaml:"imageRegistry,omitempty"`
 }
 
 // FarSecretSpec configures the far-secret pull-credential source.
@@ -321,6 +324,9 @@ func applyDefaults(c *Cluster, baseDir string) {
 
 	if c.Bnk.TmmMtu == "" {
 		c.Bnk.TmmMtu = "1460"
+	}
+	if c.Bnk.ImageRegistry == "" {
+		c.Bnk.ImageRegistry = "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga"
 	}
 	if c.Bnk.JwtPath != "" && !filepath.IsAbs(c.Bnk.JwtPath) {
 		c.Bnk.JwtPath = filepath.Join(baseDir, c.Bnk.JwtPath)

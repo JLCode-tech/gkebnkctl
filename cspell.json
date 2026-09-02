@@ -50,6 +50,10 @@
     "handletmmconfig",
     "finalizer",
     "GENEVE",
-    "renderable"
+    "renderable",
+    "openpgp",
+    "GOPATH",
+    "argjson",
+    "offenders"
   ]
 }

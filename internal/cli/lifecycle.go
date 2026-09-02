@@ -29,6 +29,9 @@ var (
 	// flagYes skips the interactive "type 'destroy' to proceed" prompt in
 	// `gkebnkctl down`.
 	flagYes bool
+
+	// flagKeepDataplane retains per-cluster resources in shared dataplane VPCs
+	flagKeepDataplane bool
 )
 
 var upCmd = &cobra.Command{
@@ -77,6 +80,7 @@ func init() {
 	downCmd.Flags().StringVarP(&flagConfig, "config", "f", "", "path to cluster.yaml (required)")
 	downCmd.Flags().BoolVar(&flagDownDryRun, "dry-run", false, "print the destroy plan and exit 0 with no GCP mutations")
 	downCmd.Flags().BoolVar(&flagYes, "yes", false, "skip the interactive destroy confirmation")
+	downCmd.Flags().BoolVar(&flagKeepDataplane, "keep-dataplane", false, "retain per-cluster resources in shared dataplane VPCs")
 
 	rootCmd.AddCommand(upCmd, downCmd)
 }
@@ -92,7 +96,7 @@ func runDown(cmd *cobra.Command, _ []string) error {
 	if flagConfig == "" {
 		return errors.New("gkebnkctl down requires -f <cluster.yaml>")
 	}
-	return runPhasedDown(cmd.Context(), flagConfig, flagYes, flagDownDryRun)
+	return runPhasedDown(cmd.Context(), flagConfig, flagYes, flagDownDryRun, flagKeepDataplane)
 }
 
 // upPhase describes one entry in the up phase graph. Every phase (00-51)
@@ -262,7 +266,7 @@ func confirmDestroy(in io.Reader, out io.Writer, name, project, zone string) boo
 //
 // When dryRun is true, printDownPlan runs and the function returns WITHOUT
 // invoking any teardown step or prompting — guaranteeing zero GCP mutations.
-func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) error {
+func runPhasedDown(ctx context.Context, configPath string, yes, dryRun, keepDataplane bool) error {
 	cl, err := intent.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("down: %w", err)
@@ -274,7 +278,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) err
 	}
 
 	if dryRun {
-		printDownPlan(os.Stderr, cl)
+		printDownPlan(os.Stderr, cl, keepDataplane)
 		return nil
 	}
 
@@ -293,7 +297,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) err
 	if err := phases.PhaseDownCluster(ctx, cl, st, gcl); err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
-	if err := phases.PhaseDownNetworks(ctx, cl, st, gcl); err != nil {
+	if err := phases.PhaseDownNetworks(ctx, cl, st, gcl, keepDataplane); err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "→ shared dataplane VPCs %s/%s are NEVER deleted by teardown.\n",
@@ -315,27 +319,44 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) err
 }
 
 // printDownPlan renders the destroy plan for `gkebnkctl down --dry-run`. It
-// makes NO GCP calls and NO state writes — the read-only half of the down
-// flow. Unlike awsbnkctl's printDownPlan (which enumerates resources
-// recorded in state), gkebnkctl's plan is derived directly from cluster.yaml
-// naming (docs/SPEC-go-tracer.md §4: idempotency here is deterministic
-// naming, not label-discovery) — every resource down would touch has a name
-// that's a pure function of the intent, so the plan is accurate even before
-// Phase25/state ever runs.
-func printDownPlan(w io.Writer, cl *intent.Cluster) {
+// ignores missing state and prints the maximal plan based on cluster.yaml.
+func printDownPlan(w io.Writer, cl *intent.Cluster, keepDataplane bool) {
 	fmt.Fprintf(w, "→ dry-run: destroy plan for cluster %q (project=%s zone=%s) — no GCP mutations\n",
 		cl.Metadata.Name, cl.Metadata.Project, cl.Metadata.Zone)
-	fmt.Fprintf(w, "  • delete  GKE cluster                %s\n", cl.Metadata.Name)
-	count := 4
+
+	var plan []string
+	plan = append(plan, fmt.Sprintf("  • delete  GKE cluster                %s", cl.Metadata.Name))
 	if cl.Testing.Jumphost.Enabled {
-		count += 2
-		fmt.Fprintf(w, "  • delete  jumphost VM                %s-jumphost\n", cl.Metadata.Name)
-		fmt.Fprintf(w, "  • delete  IAP firewall               %s-allow-iap-ssh\n", cl.Metadata.Name)
+		plan = append(plan, fmt.Sprintf("  • delete  jumphost VM                %s-jumphost", cl.Metadata.Name))
+		plan = append(plan, fmt.Sprintf("  • delete  IAP firewall               %s-allow-iap-ssh", cl.Metadata.Name))
 	}
-	fmt.Fprintf(w, "  • delete  main VPC firewall          %s-allow-internal\n", cl.Network.Main.VPC)
-	fmt.Fprintf(w, "  • delete  main VPC subnet            %s\n", cl.Network.Main.Subnet)
-	fmt.Fprintf(w, "  • delete  main VPC                   %s\n", cl.Network.Main.VPC)
+	plan = append(plan, fmt.Sprintf("  • delete  main VPC firewall          %s-allow-internal", cl.Network.Main.VPC))
+	plan = append(plan, fmt.Sprintf("  • delete  main VPC subnet            %s", cl.Network.Main.Subnet))
+	plan = append(plan, fmt.Sprintf("  • delete  main VPC                   %s", cl.Network.Main.VPC))
+
+	for _, line := range plan {
+		fmt.Fprintln(w, line)
+	}
+
+	if !keepDataplane {
+		fmt.Fprintln(w, "→ in SHARED dataplane VPCs (cluster-owned resources only):")
+		fmt.Fprintln(w, "  (firewalls/routers are left in place while other clusters still use this VPC)")
+		var sharedPlan []string
+		for _, dp := range []intent.DataplaneSpec{cl.Network.External, cl.Network.Internal} {
+			sharedPlan = append(sharedPlan, fmt.Sprintf("  • delete  subnet    %s", dp.Subnet))
+			sharedPlan = append(sharedPlan, fmt.Sprintf("  • delete  firewall  %s-allow-internal", dp.VPC))
+			if cl.Network.NatGatewaysEnabled() {
+				sharedPlan = append(sharedPlan, fmt.Sprintf("  • delete  Cloud NAT %s-nat  (BILLABLE while it exists)", dp.VPC))
+			}
+			sharedPlan = append(sharedPlan, fmt.Sprintf("  • delete  Router    %s-router", dp.VPC))
+		}
+		for _, line := range sharedPlan {
+			fmt.Fprintln(w, line)
+		}
+		plan = append(plan, sharedPlan...)
+	}
+
 	fmt.Fprintf(w, "→ shared dataplane VPCs %s/%s are NEVER deleted by teardown.\n",
 		cl.Network.External.VPC, cl.Network.Internal.VPC)
-	fmt.Fprintf(w, "→ dry-run complete: %d resource(s) would be destroyed, 0 GCP mutations made\n", count)
+	fmt.Fprintf(w, "→ dry-run complete: %d resource(s) would be destroyed, 0 GCP mutations made\n", len(plan))
 }
