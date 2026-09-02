@@ -1,13 +1,3 @@
-# goreleaser config for gkebnkctl.
-# Run with: goreleaser release --clean (after tagging a release)
-# Cross-compile sweep: linux/darwin/windows × amd64/arm64.
-#
-# Notes:
-#  - Cosign / sigstore signing: deferred (no signing infra wired in the
-#    release workflow yet; shipping a half-working signs: block would
-#    just produce bad attestations).
-#  - Homebrew tap: deferred (no tap repo yet; the brews: block is left
-#    commented out below as a marker for when a tap lands).
 version: 2
 
 project_name: gkebnkctl
@@ -29,32 +19,34 @@ builds:
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
     ldflags:
       - -s -w
       - -X github.com/JLCode-tech/gkebnkctl/internal/cli.Version={{.Version}}
-      - -X github.com/JLCode-tech/gkebnkctl/internal/cli.Commit={{.ShortCommit}}
+      - -X github.com/JLCode-tech/gkebnkctl/internal/cli.Commit={{.Commit}}
       - -X github.com/JLCode-tech/gkebnkctl/internal/cli.BuildDate={{.Date}}
 
 archives:
-  # The name_template here is load-bearing: `internal/cli/self.go`
-  # rebuilds the same template to find the asset for the host's
-  # OS/arch when `gkebnkctl self update` runs. Keep these aligned.
-  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    # goreleaser v2 renamed `format` (singular) to `formats` (list).
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        formats: [zip]
+        formats:
+          - zip
     files:
-      - LICENSE
       - README.md
+      - LICENSE
       - CHANGELOG.md
 
 checksum:
   name_template: "checksums.txt"
 
 snapshot:
-  # goreleaser v2 renamed name_template → version_template here.
-  version_template: "{{ incpatch .Version }}-snapshot"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
@@ -63,36 +55,6 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^chore:"
-
-release:
-  # The header / footer wrap goreleaser's auto-generated changelog body
-  # on the GitHub Release page. Keeping it short — the canonical
-  # documentation lives in the README, the per-version detail in
-  # CHANGELOG.md.
-  header: |
-    ## gkebnkctl {{ .Tag }}
-
-    Single-binary CLI for deploying F5 BIG-IP Next for Kubernetes on GCP GKE.
-  footer: |
-    ---
-    See [`CHANGELOG.md`](https://github.com/JLCode-tech/gkebnkctl/blob/main/CHANGELOG.md) for the full per-version change log.
-
-    Verify the downloaded archive against `checksums.txt`:
-    ```
-    sha256sum -c checksums.txt --ignore-missing
-    ```
-
-# Homebrew tap — wire when an `homebrew-tap` repo exists under the org.
-# Until then, leaving this block commented out so goreleaser doesn't
-# half-publish a formula pointing at a nonexistent tap.
-#
-# brews:
-#   - name: gkebnkctl
-#     repository:
-#       owner: JLCode-tech
-#       name: homebrew-tap
-#     homepage: "https://github.com/JLCode-tech/gkebnkctl"
-#     description: "Single-binary CLI for deploying F5 BIG-IP Next for Kubernetes on GCP GKE."
-#     license: "MIT"
-#     test: |
-#       system "#{bin}/gkebnkctl", "version"
+      - "merge conflict"
+      - Merge pull request
+      - Merge remote-tracking branch
