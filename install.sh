@@ -30,11 +30,26 @@ case "$arch" in
   *) echo "gkebnkctl: unsupported architecture '$arch'" >&2; exit 1 ;;
 esac
 
+# ---- resolve auth token if available ---------------------------------------
+token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+if [ -z "$token" ] && command -v gh >/dev/null 2>&1; then
+  token=$(gh auth token 2>/dev/null || true)
+fi
+auth_header=""
+if [ -n "$token" ]; then
+  auth_header="Authorization: Bearer $token"
+fi
+
 # ---- resolve the release version -------------------------------------------
 ver="${1:-${VERSION:-}}"
 if [ -z "$ver" ]; then
-  ver=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-    | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/')
+  if [ -n "$auth_header" ]; then
+    ver=$(curl -fsSL -H "$auth_header" "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+      | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/' || true)
+  else
+    ver=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+      | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/' || true)
+  fi
 fi
 [ -n "$ver" ] || { echo "gkebnkctl: could not resolve a release version" >&2; exit 1; }
 verNoV="${ver#v}"
@@ -49,10 +64,42 @@ tmp=$(mktemp -d 2>/dev/null || mktemp -d -t gkebnkctl)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
 echo "Downloading gkebnkctl ${ver} (${os}/${arch})..."
-curl -fsSL "${base}/${asset}" -o "$tmp/$asset"
+downloaded=0
+if command -v gh >/dev/null 2>&1; then
+  if gh release download "$ver" --repo "$REPO" --pattern "$asset" --dir "$tmp" >/dev/null 2>&1; then
+    downloaded=1
+  fi
+fi
+
+if [ "$downloaded" -eq 0 ] && [ -n "$auth_header" ]; then
+  asset_id=$(curl -fsSL -H "$auth_header" "https://api.github.com/repos/$REPO/releases/tags/$ver" 2>/dev/null \
+    | grep -B 2 "\"name\": *\"$asset\"" | grep '"id":' | head -1 | sed -E 's/.*"id" *: *([0-9]+).*/\1/' || true)
+  if [ -n "$asset_id" ]; then
+    if curl -fsSL -H "$auth_header" -H "Accept: application/octet-stream" "https://api.github.com/repos/$REPO/releases/assets/$asset_id" -o "$tmp/$asset" 2>/dev/null; then
+      downloaded=1
+    fi
+  fi
+fi
+
+if [ "$downloaded" -eq 0 ]; then
+  curl -fsSL "${base}/${asset}" -o "$tmp/$asset"
+fi
 
 # ---- verify checksum (best-effort; skipped if checksums.txt is absent) -----
-if curl -fsSL "${base}/checksums.txt" -o "$tmp/checksums.txt" 2>/dev/null; then
+if command -v gh >/dev/null 2>&1; then
+  gh release download "$ver" --repo "$REPO" --pattern "checksums.txt" --dir "$tmp" >/dev/null 2>&1 || true
+fi
+if [ ! -f "$tmp/checksums.txt" ] && [ -n "$auth_header" ]; then
+  chk_id=$(curl -fsSL -H "$auth_header" "https://api.github.com/repos/$REPO/releases/tags/$ver" 2>/dev/null \
+    | grep -B 2 '"name": *"checksums.txt"' | grep '"id":' | head -1 | sed -E 's/.*"id" *: *([0-9]+).*/\1/' || true)
+  if [ -n "$chk_id" ]; then
+    curl -fsSL -H "$auth_header" -H "Accept: application/octet-stream" "https://api.github.com/repos/$REPO/releases/assets/$chk_id" -o "$tmp/checksums.txt" 2>/dev/null || true
+  fi
+fi
+if [ ! -f "$tmp/checksums.txt" ]; then
+  curl -fsSL "${base}/checksums.txt" -o "$tmp/checksums.txt" 2>/dev/null || true
+fi
+if [ -f "$tmp/checksums.txt" ]; then
   want=$(grep " ${asset}\$" "$tmp/checksums.txt" 2>/dev/null | awk '{print $1}' | head -1)
   if [ -n "$want" ]; then
     if command -v sha256sum >/dev/null 2>&1; then

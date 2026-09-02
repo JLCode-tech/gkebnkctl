@@ -27,9 +27,19 @@ $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
   default { 'amd64' }
 }
 
+# ---- resolve auth token if available ---------------------------------------
+$headers = @{ 'User-Agent' = 'gkebnkctl' }
+$token = if ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } elseif ($env:GH_TOKEN) { $env:GH_TOKEN } else { '' }
+if (-not $token -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+  try { $token = (& gh auth token 2>$null).Trim() } catch {}
+}
+if ($token) {
+  $headers['Authorization'] = "Bearer $token"
+}
+
 # ---- resolve the release version -------------------------------------------
 if (-not $Version) {
-  $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers @{ 'User-Agent' = 'gkebnkctl' }
+  $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers $headers
   $Version = $latest.tag_name
 }
 if (-not $Version) { throw 'gkebnkctl: could not resolve a release version' }
@@ -44,12 +54,12 @@ New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 try {
   Write-Host "Downloading gkebnkctl $Version (windows/$arch)..."
   $zip = Join-Path $tmp $asset
-  Invoke-WebRequest -Uri "$base/$asset" -OutFile $zip -UseBasicParsing
+  Invoke-WebRequest -Uri "$base/$asset" -OutFile $zip -Headers $headers -UseBasicParsing
 
   # checksum (best-effort; skipped if checksums.txt is absent)
   try {
     $sumsPath = Join-Path $tmp 'checksums.txt'
-    Invoke-WebRequest -Uri "$base/checksums.txt" -OutFile $sumsPath -UseBasicParsing
+    Invoke-WebRequest -Uri "$base/checksums.txt" -OutFile $sumsPath -Headers $headers -UseBasicParsing
     $line = Select-String -Path $sumsPath -Pattern ([regex]::Escape($asset)) | Select-Object -First 1
     if ($line) {
       $want = ($line.Line -split '\s+')[0]
