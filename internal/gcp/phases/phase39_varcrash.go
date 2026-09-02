@@ -17,14 +17,20 @@ import (
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 )
 
-// varCrashNamespace is the namespace both patched Deployments live in.
-const varCrashNamespace = "f5-bnk"
+// varCrashTarget identifies a Deployment that requires the /var/crash emptyDir patch.
+type varCrashTarget struct {
+	Namespace  string
+	Deployment string
+}
 
-// varCrashDeployments are the two Deployments Phase39 patches with a
+// varCrashTargets are the Deployments Phase39 patches with a
 // /var/crash emptyDir — freshly-pulled f5-cne-controller/f5-crdconversion
 // image digests carry a crashagent that hard-dies without /var/crash and
 // s6-tears-down the main service (reference/TRIAL-NOTES.md item 5).
-var varCrashDeployments = []string{"f5-cne-controller", "f5-crdconversion"}
+var varCrashTargets = []varCrashTarget{
+	{Namespace: "f5-bnk", Deployment: "f5-cne-controller"},
+	{Namespace: "f5-utils", Deployment: "f5-crdconversion"},
+}
 
 // varCrashVolumeName is the emptyDir volume name added to both Deployments.
 const varCrashVolumeName = "var-crash"
@@ -38,7 +44,7 @@ const varCrashVolumeName = "var-crash"
 // bnk-scratch).
 const varCrashDeployWait = 3 * time.Minute
 
-// Phase39VarCrashPatches strategic-merge-patches both varCrashDeployments
+// Phase39VarCrashPatches strategic-merge-patches both varCrashTargets
 // with a /var/crash emptyDir volume + mount, looking up the container name
 // dynamically (it isn't guaranteed to match the Deployment name) — matching
 // reference/bash-seed/bin/30-bnk-install.sh's bnk::patch_var_crash.
@@ -51,8 +57,8 @@ func Phase39VarCrashPatches(ctx context.Context, cl *intent.Cluster, _ *state.St
 	fmt.Fprintf(os.Stderr, "[phase 39] var-crash patches: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
-		fmt.Fprintf(os.Stderr, "[phase 39] would patch /var/crash emptyDir onto %v in %s (if present, if not already patched)\n",
-			varCrashDeployments, varCrashNamespace)
+		fmt.Fprintf(os.Stderr, "[phase 39] would patch /var/crash emptyDir onto %+v (if present, if not already patched)\n",
+			varCrashTargets)
 		return nil
 	}
 
@@ -60,14 +66,14 @@ func Phase39VarCrashPatches(ctx context.Context, cl *intent.Cluster, _ *state.St
 		return fmt.Errorf("phase39: Clients.K8s is nil — Phase20 must attach the k8s client first")
 	}
 
-	for _, deploy := range varCrashDeployments {
-		if err := waitForDeploymentExists(ctx, clients.K8s, varCrashNamespace, deploy, varCrashDeployWait); err != nil {
+	for _, target := range varCrashTargets {
+		if err := waitForDeploymentExists(ctx, clients.K8s, target.Namespace, target.Deployment, varCrashDeployWait); err != nil {
 			fmt.Fprintf(os.Stderr, "[phase 39] warn: %s did not appear in %s within %s (%v) — skipping its /var/crash patch; re-run up once FLO has created it\n",
-				deploy, varCrashNamespace, varCrashDeployWait, err)
+				target.Deployment, target.Namespace, varCrashDeployWait, err)
 			continue
 		}
-		if err := patchVarCrash(ctx, clients.K8s, deploy); err != nil {
-			return fmt.Errorf("phase39: %s: %w", deploy, err)
+		if err := patchVarCrash(ctx, clients.K8s, target.Namespace, target.Deployment); err != nil {
+			return fmt.Errorf("phase39: %s/%s: %w", target.Namespace, target.Deployment, err)
 		}
 	}
 
@@ -77,36 +83,36 @@ func Phase39VarCrashPatches(ctx context.Context, cl *intent.Cluster, _ *state.St
 
 // patchVarCrash implements the per-Deployment patch logic. Never returns an
 // error for "deployment not found yet" — only for a real API error.
-func patchVarCrash(ctx context.Context, client kubernetes.Interface, deploy string) error {
-	d, err := client.AppsV1().Deployments(varCrashNamespace).Get(ctx, deploy, metav1.GetOptions{})
+func patchVarCrash(ctx context.Context, client kubernetes.Interface, ns, deploy string) error {
+	d, err := client.AppsV1().Deployments(ns).Get(ctx, deploy, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			fmt.Fprintf(os.Stderr, "[phase 39] %s not found in %s yet — skipping /var/crash patch (FLO may still be reconciling); re-run up once it exists\n",
-				deploy, varCrashNamespace)
+				deploy, ns)
 			return nil
 		}
-		return fmt.Errorf("getting deployment %s: %w", deploy, err)
+		return fmt.Errorf("getting deployment %s/%s: %w", ns, deploy, err)
 	}
 
 	for _, v := range d.Spec.Template.Spec.Volumes {
 		if v.Name == varCrashVolumeName {
-			fmt.Fprintf(os.Stderr, "[phase 39] %s already has /var/crash volume — skipping\n", deploy)
+			fmt.Fprintf(os.Stderr, "[phase 39] %s/%s already has /var/crash volume — skipping\n", ns, deploy)
 			return nil
 		}
 	}
 	if len(d.Spec.Template.Spec.Containers) == 0 {
-		return fmt.Errorf("deployment %s has no containers to mount /var/crash into", deploy)
+		return fmt.Errorf("deployment %s/%s has no containers to mount /var/crash into", ns, deploy)
 	}
 	container := d.Spec.Template.Spec.Containers[0].Name
 
-	fmt.Fprintf(os.Stderr, "[phase 39] patching %s (container=%s) with /var/crash emptyDir\n", deploy, container)
+	fmt.Fprintf(os.Stderr, "[phase 39] patching %s/%s (container=%s) with /var/crash emptyDir\n", ns, deploy, container)
 	patch := fmt.Sprintf(`{"spec":{"template":{"spec":{
   "volumes":[{"name":%q,"emptyDir":{}}],
   "containers":[{"name":%q,"volumeMounts":[{"name":%q,"mountPath":"/var/crash"}]}]
 }}}}`, varCrashVolumeName, container, varCrashVolumeName)
 
-	if _, err := client.AppsV1().Deployments(varCrashNamespace).Patch(ctx, deploy, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{}); err != nil {
-		return fmt.Errorf("patching deployment %s: %w", deploy, err)
+	if _, err := client.AppsV1().Deployments(ns).Patch(ctx, deploy, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("patching deployment %s/%s: %w", ns, deploy, err)
 	}
 	return nil
 }

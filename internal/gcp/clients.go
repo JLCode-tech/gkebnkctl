@@ -168,7 +168,7 @@ func NewClients(ctx context.Context, project string) (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gcp: regions client: %w", err)
 	}
-	gke, err := container.NewClusterManagerClient(ctx)
+	gke, err := container.NewClusterManagerRESTClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("gcp: cluster manager client: %w", err)
 	}
@@ -208,9 +208,7 @@ func (c *Clients) AttachK8s(ctx context.Context, clusterName, zone string) error
 		return fmt.Errorf("gcp: AttachK8s(%s, %s): Clients.GKE is nil", clusterName, zone)
 	}
 	cluster, err := c.GKE.GetCluster(ctx, &containerpb.GetClusterRequest{
-		ProjectId: c.Project,
-		Zone:      zone,
-		ClusterId: clusterName,
+		Name: fmt.Sprintf("projects/%s/locations/%s/clusters/%s", c.Project, zone, clusterName),
 	})
 	if err != nil {
 		return fmt.Errorf("gcp: AttachK8s(%s, %s): GetCluster: %w", clusterName, zone, err)

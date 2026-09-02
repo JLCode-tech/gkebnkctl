@@ -77,6 +77,7 @@ func Phase36FLO(ctx context.Context, cl *intent.Cluster, _ *state.State, clients
 		return fmt.Errorf("phase36: parsing FLO manifest: %w", err)
 	}
 	objs = dropRedactedSecrets(objs)
+	updateFloDeploymentImage(objs, cl.Bnk.ImageRegistry)
 	if err := applyObjects(ctx, clients, objs, true); err != nil {
 		return fmt.Errorf("phase36: applying %s: %w", floManifestPath, err)
 	}
@@ -148,3 +149,28 @@ func secretHasRedactedData(obj *unstructured.Unstructured) bool {
 	}
 	return false
 }
+
+func updateFloDeploymentImage(objs []*unstructured.Unstructured, registry string) {
+	if registry == "" {
+		return
+	}
+	for _, obj := range objs {
+		if obj.GetKind() == "Deployment" && obj.GetName() == "flo-f5-lifecycle-operator" {
+			containers, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+			if err == nil && found {
+				for _, c := range containers {
+					if cMap, ok := c.(map[string]interface{}); ok {
+						if img, ok := cMap["image"].(string); ok {
+							parts := strings.Split(img, "/images/")
+							if len(parts) == 2 {
+								cMap["image"] = fmt.Sprintf("%s/images/%s", registry, parts[1])
+							}
+						}
+					}
+				}
+				_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
+			}
+		}
+	}
+}
+
