@@ -177,7 +177,7 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           go version
-          govulncheck ./...
+          scripts/govulncheck-gate.sh
 
       - name: gitleaks (secret scan)
         run: |
