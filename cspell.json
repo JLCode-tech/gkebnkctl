@@ -115,6 +115,9 @@
     "daemonset",
     "goarch",
     "incpatch",
-    "ldflags"
+    "ldflags",
+    "lastexitcode",
+    "typeflag",
+    "nosec"
   ]
 }
