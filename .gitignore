@@ -41,6 +41,7 @@ dockerconfig.json
 .DS_Store
 *.swp
 .*-pr-body.md
+/workspaces/
 
 # --- Internal dev tooling (not for public repo) ---
 # AI-assisted dev framework (MAF / OpenCode / Claude Code); lives on local disk only.
