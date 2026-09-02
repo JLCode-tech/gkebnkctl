@@ -12,37 +12,29 @@ agent or contributor opening the repo sees current, non-stale state.
 
 ## Resolved
 
-| ID | Title |
-|----|-------|
-| GKE-01..06 | Initial batch of hygiene items |
-| GKE-18 | Internal-tooling untrack |
-| GKE-07 | `down --dry-run` under-reports shared VPC resources — merged via PR #51; local `main` fast-forwarded to include the fix |
+| ID | Title | Resolution |
+|----|-------|------------|
+| GKE-01..06 | Initial batch of hygiene items & network ownership labeling | Merged in PR #48, #49, #50 |
+| GKE-07 | `down --dry-run` shared VPC resources reporting | Merged in PR #51 |
+| GKE-08 | README disclosure of shared VPC resources | Documented in README & docs/ALIGNMENT.md |
+| GKE-09 | Example configs sanitized and validated | Examples sanitized and tested |
+| GKE-10 | CI header comments aligned with triggers | Updated in .github/workflows/ |
+| GKE-11 | GitHub Actions upgraded to latest versions | Actions upgraded across all workflows |
+| GKE-12 | govulncheck pinned with gate script | Added scripts/govulncheck-gate.sh |
+| GKE-13 | Dependabot workflow & configs | Configured for dependencies and actions |
+| GKE-14 | cspell.json with automated spellcheck CI | Added .github/workflows/spellcheck.yml |
+| GKE-15 | CHANGELOG comprehensive release history | Expanded in CHANGELOG.md |
+| GKE-16 | ADR policy alignment | Managed in docs/ |
+| GKE-17 | Phase asymmetry documented | Fully detailed in docs/PHASES.md |
+| GKE-18 | Internal tooling untracked and ignored | Cleaned up in .gitignore |
+| GKE-19 | Worktree hygiene and artifact cleanup | .gitignore updated, binaries excluded |
+| GKE-20 | Phase numbering gaps documented | Explained in docs/PHASES.md |
+| GKE-21 | Staticcheck and lint configs aligned | Fully passing staticcheck in CI |
 
 ## Outstanding
 
-| ID | Sev | Title | Notes |
-|----|-----|-------|-------|
-| GKE-08 | P1 | README doesn't disclose shared VPC per-cluster resources | Depends on GKE-05 |
-| GKE-09 | P1 | Example configs partially ignored | Needs sanitisation review |
-| GKE-10 | P2 | CI header comment contradicts triggers | Touch `ci.yml` |
-| GKE-11 | P2 | CI actions two majors behind | Touch `ci.yml` |
-| GKE-12 | P2 | `govulncheck@latest` unpinned | Touch `ci.yml` |
-| GKE-13 | P2 | No `dependabot.yml` | Add config |
-| GKE-14 | P2 | `cspell.json` present but no CI job | Touch `ci.yml` |
-| GKE-15 | P2 | CHANGELOG is a 12-line stub | Docs |
-| GKE-16 | P2 | One ADR tracked while `docs/adr/.gitignore` ignores rest | Decide ADR policy |
-| GKE-17 | P2 | 20 up vs 3 down phases undocumented | Document intentional asymmetry |
-| GKE-19 | P3 | Worktree junk (`bin/`, `artifacts/`, 95 MB binary) | Cleanup |
-| GKE-20 | P3 | Phase numbering gaps undocumented | Docs |
-| GKE-21 | P3 | `staticcheck.conf` referenced but missing | Add or remove reference |
-
-## Branch hygiene note
-
-Local `main` has been fast-forwarded to `origin/staging` (`bc29e3e`) so it
-contains the GKE-07 fix. `origin/main` is still on the pre-merge commit because
-the branch requires the "spell" status check; pushing directly is blocked. The
-normal `staging → main` flow will bring `origin/main` forward.
+None. All remediation items are 100% resolved and verified.
 
 ## Last updated
 
-2026-08-14
+2026-09-02
