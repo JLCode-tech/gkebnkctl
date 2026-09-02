@@ -14,6 +14,9 @@ LDFLAGS := -s -w \
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/gkebnkctl
 
+install: build
+	$(BIN) install $(INSTALL_ARGS)
+
 test:
 	go test ./...
 
