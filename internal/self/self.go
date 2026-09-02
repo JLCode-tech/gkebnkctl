@@ -48,7 +48,7 @@ func getGitHubToken() string {
 	}
 	// Fallback to gh auth token if available
 	if path, err := exec.LookPath("gh"); err == nil {
-		out, err := exec.Command(path, "auth", "token").Output()
+		out, err := exec.Command(path, "auth", "token").Output() // #nosec G204 -- lookpath resolved gh binary
 		if err == nil {
 			return strings.TrimSpace(string(out))
 		}
@@ -144,6 +144,7 @@ func DownloadAsset(ctx context.Context, rel *Release, destPath string) error {
 		return fmt.Errorf("download error (HTTP %d)", resp.StatusCode)
 	}
 
+	const maxBinarySize = 500 * 1024 * 1024 // 500MB max limit to guard against decompression bombs
 	targetName := "gkebnkctl"
 	if runtime.GOOS == "windows" {
 		targetName = "gkebnkctl.exe"
@@ -171,7 +172,7 @@ func DownloadAsset(ctx context.Context, rel *Release, destPath string) error {
 				if err != nil {
 					return fmt.Errorf("create dest %s: %w", destPath, err)
 				}
-				if _, err := io.Copy(out, tr); err != nil {
+				if _, err := io.Copy(out, io.LimitReader(tr, maxBinarySize)); err != nil { // #nosec G110
 					_ = out.Close()
 					return fmt.Errorf("extract binary from tar: %w", err)
 				}
@@ -187,7 +188,7 @@ func DownloadAsset(ctx context.Context, rel *Release, destPath string) error {
 	}
 
 	if strings.HasSuffix(targetAsset.Name, ".zip") {
-		bodyBytes, err := io.ReadAll(resp.Body)
+		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxBinarySize))
 		if err != nil {
 			return fmt.Errorf("read zip content: %w", err)
 		}
@@ -207,7 +208,7 @@ func DownloadAsset(ctx context.Context, rel *Release, destPath string) error {
 					_ = rc.Close()
 					return fmt.Errorf("create dest %s: %w", destPath, err)
 				}
-				_, copyErr := io.Copy(out, rc)
+				_, copyErr := io.Copy(out, io.LimitReader(rc, maxBinarySize)) // #nosec G110
 				_ = rc.Close()
 				_ = out.Close()
 				if copyErr != nil {
@@ -229,8 +230,8 @@ func DownloadAsset(ctx context.Context, rel *Release, destPath string) error {
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, resp.Body); err != nil {
-		return fmt.Errorf("write binary: %w", err)
+	if _, err := io.Copy(out, io.LimitReader(resp.Body, maxBinarySize)); err != nil { // #nosec G110
+		return fmt.Errorf("write binary to %s: %w", destPath, err)
 	}
 
 	return nil
