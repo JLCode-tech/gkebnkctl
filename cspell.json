@@ -112,6 +112,9 @@
     "sanitise",
     "excludesfile",
     "untracks",
-    "daemonset"
+    "daemonset",
+    "goarch",
+    "incpatch",
+    "ldflags"
   ]
 }
