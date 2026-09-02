@@ -77,6 +77,16 @@ func Phase50Egress(ctx context.Context, cl *intent.Cluster, st *state.State, cli
 }
 
 // applyEgress renders templates/egress.yaml.tmpl (F5SPKEgress +
+func getAgentExtIface(st *state.State) string {
+	if st != nil {
+		if iface := st.Get("AGENT_EXT_IFACE"); iface != "" {
+			return iface
+		}
+	}
+	return "eth1"
+}
+
+// applyEgress renders templates/egress.yaml.tmpl (F5SPKEgress +
 // egress-client pod) against cluster.yaml + Phase25-discovered
 // AGENT_EXT_IFACE, then applies it.
 func applyEgress(ctx context.Context, clients *gcp.Clients, cl *intent.Cluster, st *state.State) error {
@@ -88,14 +98,14 @@ func applyEgress(ctx context.Context, clients *gcp.Clients, cl *intent.Cluster, 
 		TestNamespace: cl.Egress.TestNamespace,
 		VxlanKey:      cl.Egress.VxlanKey,
 		VxlanMtu:      cl.Egress.VxlanMtu,
-		AgentExtIface: st.Get("AGENT_EXT_IFACE"),
+		AgentExtIface: getAgentExtIface(st),
 		VxlanPort:     cl.Egress.VxlanPort,
 		AgentPoolName: cl.ClusterSpec.AgentPool.Name,
 	})
 	if err != nil {
 		return fmt.Errorf("phase50: rendering egress: %w", err)
 	}
-	if err := applyManifestBytes(ctx, clients, rendered, false); err != nil {
+	if err := applyManifestBytes(ctx, clients, rendered, true); err != nil {
 		return fmt.Errorf("phase50: applying F5SPKEgress/egress-client: %w", err)
 	}
 	return nil
@@ -113,12 +123,12 @@ func applyAgentRouteSetter(ctx context.Context, clients *gcp.Clients, cl *intent
 		AgentPoolName: cl.ClusterSpec.AgentPool.Name,
 		ExtPodsCidr:   cl.Network.External.PodsCIDR,
 		ExtGwIP:       cl.ExtGwIP,
-		AgentExtIface: st.Get("AGENT_EXT_IFACE"),
+		AgentExtIface: getAgentExtIface(st),
 	})
 	if err != nil {
 		return fmt.Errorf("phase50: rendering agent-route-setter: %w", err)
 	}
-	if err := applyManifestBytes(ctx, clients, rendered, false); err != nil {
+	if err := applyManifestBytes(ctx, clients, rendered, true); err != nil {
 		return fmt.Errorf("phase50: applying bnk-agent-route-setter: %w", err)
 	}
 	return nil
@@ -188,15 +198,21 @@ func verifyEgress(ctx context.Context, k8sClient kubernetes.Interface, testNames
 	}
 	tmmPod := pods.Items[0].Name
 
-	beforeOut, _ := exec(ctx, tmmSettleNamespace, tmmPod, "tmm", []string{"tmctl", "-a", "clientside.pkts_in"})
-	before := sumLastFields(beforeOut)
+	readPktsIn := func() int64 {
+		out, err := exec(ctx, tmmSettleNamespace, tmmPod, "debug", []string{"tmctl", "-f", "/var/tmstat/blade/tmm0", "-a", "clientside.pkts_in"})
+		if err != nil || len(out) == 0 {
+			out, _ = exec(ctx, tmmSettleNamespace, tmmPod, "tmm", []string{"tmctl", "-a", "clientside.pkts_in"})
+		}
+		return sumLastFields(out)
+	}
+
+	before := readPktsIn()
 
 	traceOut, _ := exec(ctx, testNamespace, egressClientPodName, "", []string{
 		"curl", "-sk", "--max-time", strconv.Itoa(int(egressVerifyCurlTimeout.Seconds())), egressTraceURL,
 	})
 
-	afterOut, _ := exec(ctx, tmmSettleNamespace, tmmPod, "tmm", []string{"tmctl", "-a", "clientside.pkts_in"})
-	after := sumLastFields(afterOut)
+	after := readPktsIn()
 
 	egressIP := parseEgressIP(traceOut)
 

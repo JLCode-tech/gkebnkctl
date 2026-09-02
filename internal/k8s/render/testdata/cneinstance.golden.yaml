@@ -82,7 +82,7 @@ spec:
     imagePullPolicy: Always
     imagePullSecrets:
     - name: far-secret
-    uri: repo.f5.com
+    uri: us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga
   telemetry:
     loggingSubsystem:
       enabled: false

@@ -49373,7 +49373,7 @@ spec:
         runAsGroup: 7053
       containers:
         - name: f5-lifecycle-operator
-          image: "repo.f5.com/images/f5-lifecycle-operator:v2.25.4"
+          image: "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga/images/f5-lifecycle-operator:v2.25.4"
           imagePullPolicy: IfNotPresent
           env:
             - name: "GOMAXPROCS"
