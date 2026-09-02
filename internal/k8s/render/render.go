@@ -54,6 +54,7 @@ type CNEInstanceVars struct {
 	ManifestVersion string
 	ExtPCI          string
 	IntPCI          string
+	ImageRegistry   string
 }
 
 // RenderCNEInstance renders templates/cneinstance.yaml.tmpl (Phase38). The

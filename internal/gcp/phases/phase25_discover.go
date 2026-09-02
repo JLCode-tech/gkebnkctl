@@ -147,8 +147,19 @@ func Phase25Discover(ctx context.Context, cl *intent.Cluster, st *state.State, c
 	intIface := fieldForMAC(dump, intMAC, "IFACE")
 	intPCI := fieldForMAC(dump, intMAC, "PCI")
 	if extIface == "" || intIface == "" {
-		return fmt.Errorf("phase25: MAC match failed on tmm node %s — expected ext MAC=%s (ip=%s), int MAC=%s (ip=%s); raw dump:\n%s",
-			tmmNode, extMAC, extIP, intMAC, intIP, dump)
+		// If TMM is already running, Multus host-device CNI has moved eth1/eth2 out
+		// of the root host network namespace into the TMM pod. If we already
+		// discovered them on this node in an earlier run, preserve them.
+		if st.Get("TMM_NODE_NAME") == tmmNode && st.Get("TMM_EXT_IFACE") != "" && st.Get("TMM_INT_IFACE") != "" {
+			fmt.Fprintf(os.Stderr, "[phase 25] note: NICs already bound into TMM pod on %s; reusing previously discovered ifaces/PCIs\n", tmmNode)
+			extIface = st.Get("TMM_EXT_IFACE")
+			extPCI = st.Get("TMM_EXT_PCI")
+			intIface = st.Get("TMM_INT_IFACE")
+			intPCI = st.Get("TMM_INT_PCI")
+		} else {
+			return fmt.Errorf("phase25: MAC match failed on tmm node %s — expected ext MAC=%s (ip=%s), int MAC=%s (ip=%s); raw dump:\n%s",
+				tmmNode, extMAC, extIP, intMAC, intIP, dump)
+		}
 	}
 	fmt.Fprintf(os.Stderr, "[phase 25] tmm ext: iface=%s pci=%s  |  tmm int: iface=%s pci=%s\n", extIface, extPCI, intIface, intPCI)
 
@@ -204,7 +215,12 @@ func Phase25Discover(ctx context.Context, cl *intent.Cluster, st *state.State, c
 	}
 	agentExtIface := fieldForMAC(agentDump, agentExtMAC, "IFACE")
 	if agentExtIface == "" {
-		return fmt.Errorf("phase25: MAC match failed on agent node %s — expected MAC=%s; raw dump:\n%s", agentNode, agentExtMAC, agentDump)
+		if st.Get("AGENT_NODE_NAME") == agentNode && st.Get("AGENT_EXT_IFACE") != "" {
+			fmt.Fprintf(os.Stderr, "[phase 25] note: agent NIC on %s already discovered; reusing %s\n", agentNode, st.Get("AGENT_EXT_IFACE"))
+			agentExtIface = st.Get("AGENT_EXT_IFACE")
+		} else {
+			return fmt.Errorf("phase25: MAC match failed on agent node %s — expected MAC=%s; raw dump:\n%s", agentNode, agentExtMAC, agentDump)
+		}
 	}
 	fmt.Fprintf(os.Stderr, "[phase 25] agent ext: iface=%s\n", agentExtIface)
 

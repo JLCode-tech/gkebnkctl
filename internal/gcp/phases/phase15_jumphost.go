@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
+	"github.com/JLCode-tech/gkebnkctl/internal/gcp/labels"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 )
@@ -41,13 +42,13 @@ func Phase15Jumphost(ctx context.Context, cl *intent.Cluster, st *state.State, c
 	}
 
 	// 1. Create IAP Firewall rule
-	if err := ensureIAPFirewall(ctx, clients.Firewalls, cl.Metadata.Project, cl.Network.External.VPC, fwName); err != nil {
+	if err := ensureIAPFirewall(ctx, clients.Firewalls, cl.Metadata.Project, cl.Network.External.VPC, fwName, cl.Metadata.Name); err != nil {
 		return fmt.Errorf("phase15: firewall: %w", err)
 	}
 	st.Set("JUMPHOST_FIREWALL_NAME", fwName)
 
 	// 2. Create Instance
-	if err := ensureJumphostInstance(ctx, clients.Instances, cl.Metadata.Project, cl.Metadata.Zone, cl.Network.External.VPC, cl.Network.External.Subnet, name, instanceType); err != nil {
+	if err := ensureJumphostInstance(ctx, clients.Instances, cl.Metadata.Project, cl.Metadata.Zone, cl.Network.External.VPC, cl.Network.External.Subnet, name, instanceType, cl); err != nil {
 		return fmt.Errorf("phase15: instance: %w", err)
 	}
 	st.Set("JUMPHOST_INSTANCE_NAME", name)
@@ -55,7 +56,7 @@ func Phase15Jumphost(ctx context.Context, cl *intent.Cluster, st *state.State, c
 	return st.Save()
 }
 
-func ensureIAPFirewall(ctx context.Context, firewalls gcp.FirewallsAPI, project, vpc, fwName string) error {
+func ensureIAPFirewall(ctx context.Context, firewalls gcp.FirewallsAPI, project, vpc, fwName, clName string) error {
 	_, err := firewalls.Get(ctx, &computepb.GetFirewallRequest{Project: project, Firewall: fwName})
 	if err == nil {
 		fmt.Fprintf(os.Stderr, "[phase 15] firewall %s already exists, skipping\n", fwName)
@@ -66,10 +67,12 @@ func ensureIAPFirewall(ctx context.Context, firewalls gcp.FirewallsAPI, project,
 	}
 
 	fmt.Fprintf(os.Stderr, "[phase 15] creating firewall %s (allow IAP SSH)\n", fwName)
+	// Note: GCP Firewalls do not support labels, so we use the description marker.
 	op, err := firewalls.Insert(ctx, &computepb.InsertFirewallRequest{
 		Project: project,
 		FirewallResource: &computepb.Firewall{
 			Name:         proto.String(fwName),
+			Description:  proto.String(labels.OwnerMarker(clName)),
 			Network:      proto.String(networkSelfLink(project, vpc)),
 			Direction:    proto.String("INGRESS"),
 			SourceRanges: []string{"35.235.240.0/20"}, // IAP range
@@ -87,7 +90,7 @@ func ensureIAPFirewall(ctx context.Context, firewalls gcp.FirewallsAPI, project,
 	return insertAndWait(ctx, op)
 }
 
-func ensureJumphostInstance(ctx context.Context, instances gcp.InstancesAPI, project, zone, vpc, subnet, name, machineType string) error {
+func ensureJumphostInstance(ctx context.Context, instances gcp.InstancesAPI, project, zone, vpc, subnet, name, machineType string, cl *intent.Cluster) error {
 	_, err := instances.Get(ctx, &computepb.GetInstanceRequest{Project: project, Zone: zone, Instance: name})
 	if err == nil {
 		fmt.Fprintf(os.Stderr, "[phase 15] instance %s already exists, skipping\n", name)
@@ -98,12 +101,15 @@ func ensureJumphostInstance(ctx context.Context, instances gcp.InstancesAPI, pro
 	}
 
 	fmt.Fprintf(os.Stderr, "[phase 15] creating jumphost instance %s\n", name)
+	// Note: GCP Instances DO support labels, so we apply standard gkebnkctl labels here.
+	// This creates an asymmetry with the firewall above; it is a GCP API limitation.
 	op, err := instances.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project: project,
 		Zone:    zone,
 		InstanceResource: &computepb.Instance{
 			Name:        proto.String(name),
 			MachineType: proto.String(fmt.Sprintf("zones/%s/machineTypes/%s", zone, machineType)),
+			Labels:      labels.Merge(labels.Required(cl.Metadata.Name), cl.Metadata.Labels),
 			NetworkInterfaces: []*computepb.NetworkInterface{
 				{
 					Network:    proto.String(networkSelfLink(project, vpc)),

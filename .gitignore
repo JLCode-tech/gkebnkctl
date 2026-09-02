@@ -17,7 +17,7 @@ discovered.env
 # Secret material — never commit
 *.jwt
 license.jwt
-kubeconfig
+/kubeconfig
 *.kubeconfig
 dockerconfig.json
 .dockerconfigjson
@@ -41,4 +41,18 @@ dockerconfig.json
 .DS_Store
 *.swp
 .*-pr-body.md
+/workspaces/
 
+# --- Internal dev tooling (not for public repo) ---
+# AI-assisted dev framework (MAF / OpenCode / Claude Code); lives on local disk only.
+.agent/
+.agent-local/
+.claude/
+.opencode/
+opencode.json
+opencode.jsonc
+CLAUDE.md
+CLAUDE.local.md
+
+# --- MAF framework operational artifacts (installer-managed) ---
+*.maf.new

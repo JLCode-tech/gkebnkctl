@@ -25,15 +25,20 @@ var (
 // --- compute.NetworksAPI ---
 
 type fakeNetworks struct {
-	existing    map[string]bool
+	existing    map[string]string
 	insertCalls []string
 	insertErr   map[string]error
+	patchCalls  []string
 	deleteCalls []string
 }
 
 func (f *fakeNetworks) Get(_ context.Context, req *computepb.GetNetworkRequest, _ ...gax.CallOption) (*computepb.Network, error) {
-	if f.existing[req.GetNetwork()] {
-		return &computepb.Network{Name: strPtr(req.GetNetwork())}, nil
+	if desc, ok := f.existing[req.GetNetwork()]; ok {
+		net := &computepb.Network{Name: strPtr(req.GetNetwork())}
+		if desc != "" {
+			net.Description = strPtr(desc)
+		}
+		return net, nil
 	}
 	return nil, errNotFound
 }
@@ -49,6 +54,11 @@ func (f *fakeNetworks) Insert(_ context.Context, req *computepb.InsertNetworkReq
 	return nil, nil
 }
 
+func (f *fakeNetworks) Patch(_ context.Context, req *computepb.PatchNetworkRequest, _ ...gax.CallOption) (*compute.Operation, error) {
+	f.patchCalls = append(f.patchCalls, req.GetNetwork())
+	return nil, nil
+}
+
 func (f *fakeNetworks) Delete(_ context.Context, req *computepb.DeleteNetworkRequest, _ ...gax.CallOption) (*compute.Operation, error) {
 	f.deleteCalls = append(f.deleteCalls, req.GetNetwork())
 	return nil, nil
@@ -57,14 +67,19 @@ func (f *fakeNetworks) Delete(_ context.Context, req *computepb.DeleteNetworkReq
 // --- compute.SubnetworksAPI ---
 
 type fakeSubnetworks struct {
-	existing    map[string]bool
+	existing    map[string]string
 	insertCalls []string
+	patchCalls  []string
 	deleteCalls []string
 }
 
 func (f *fakeSubnetworks) Get(_ context.Context, req *computepb.GetSubnetworkRequest, _ ...gax.CallOption) (*computepb.Subnetwork, error) {
-	if f.existing[req.GetSubnetwork()] {
-		return &computepb.Subnetwork{Name: strPtr(req.GetSubnetwork())}, nil
+	if desc, ok := f.existing[req.GetSubnetwork()]; ok {
+		sub := &computepb.Subnetwork{Name: strPtr(req.GetSubnetwork())}
+		if desc != "" {
+			sub.Description = strPtr(desc)
+		}
+		return sub, nil
 	}
 	return nil, errNotFound
 }
@@ -72,6 +87,23 @@ func (f *fakeSubnetworks) Get(_ context.Context, req *computepb.GetSubnetworkReq
 func (f *fakeSubnetworks) Insert(_ context.Context, req *computepb.InsertSubnetworkRequest, _ ...gax.CallOption) (*compute.Operation, error) {
 	f.insertCalls = append(f.insertCalls, req.GetSubnetworkResource().GetName())
 	return nil, nil
+}
+
+func (f *fakeSubnetworks) Patch(_ context.Context, req *computepb.PatchSubnetworkRequest, _ ...gax.CallOption) (*compute.Operation, error) {
+	f.patchCalls = append(f.patchCalls, req.GetSubnetwork())
+	return nil, nil
+}
+
+func (f *fakeSubnetworks) ListAll(_ context.Context, project, region string) ([]*computepb.Subnetwork, error) {
+	var res []*computepb.Subnetwork
+	for name, desc := range f.existing {
+		sub := &computepb.Subnetwork{Name: strPtr(name), Network: strPtr(networkSelfLink(project, "vpc1"))}
+		if desc != "" {
+			sub.Description = strPtr(desc)
+		}
+		res = append(res, sub)
+	}
+	return res, nil
 }
 
 func (f *fakeSubnetworks) Delete(_ context.Context, req *computepb.DeleteSubnetworkRequest, _ ...gax.CallOption) (*compute.Operation, error) {
@@ -82,14 +114,19 @@ func (f *fakeSubnetworks) Delete(_ context.Context, req *computepb.DeleteSubnetw
 // --- compute.FirewallsAPI ---
 
 type fakeFirewalls struct {
-	existing    map[string]bool
+	existing    map[string]string
 	insertCalls []string
+	patchCalls  []string
 	deleteCalls []string
 }
 
 func (f *fakeFirewalls) Get(_ context.Context, req *computepb.GetFirewallRequest, _ ...gax.CallOption) (*computepb.Firewall, error) {
-	if f.existing[req.GetFirewall()] {
-		return &computepb.Firewall{Name: strPtr(req.GetFirewall())}, nil
+	if desc, ok := f.existing[req.GetFirewall()]; ok {
+		fw := &computepb.Firewall{Name: strPtr(req.GetFirewall())}
+		if desc != "" {
+			fw.Description = strPtr(desc)
+		}
+		return fw, nil
 	}
 	return nil, errNotFound
 }
@@ -97,6 +134,23 @@ func (f *fakeFirewalls) Get(_ context.Context, req *computepb.GetFirewallRequest
 func (f *fakeFirewalls) Insert(_ context.Context, req *computepb.InsertFirewallRequest, _ ...gax.CallOption) (*compute.Operation, error) {
 	f.insertCalls = append(f.insertCalls, req.GetFirewallResource().GetName())
 	return nil, nil
+}
+
+func (f *fakeFirewalls) Patch(_ context.Context, req *computepb.PatchFirewallRequest, _ ...gax.CallOption) (*compute.Operation, error) {
+	f.patchCalls = append(f.patchCalls, req.GetFirewall())
+	return nil, nil
+}
+
+func (f *fakeFirewalls) ListAll(_ context.Context, project string) ([]*computepb.Firewall, error) {
+	var res []*computepb.Firewall
+	for name, desc := range f.existing {
+		fw := &computepb.Firewall{Name: strPtr(name), Network: strPtr(networkSelfLink(project, "vpc1"))}
+		if desc != "" {
+			fw.Description = strPtr(desc)
+		}
+		res = append(res, fw)
+	}
+	return res, nil
 }
 
 func (f *fakeFirewalls) Delete(_ context.Context, req *computepb.DeleteFirewallRequest, _ ...gax.CallOption) (*compute.Operation, error) {
@@ -146,6 +200,14 @@ func (f *fakeRouters) Patch(_ context.Context, req *computepb.PatchRouterRequest
 		}
 	}
 	return nil, nil
+}
+
+func (f *fakeRouters) ListAll(_ context.Context, project, region string) ([]*computepb.Router, error) {
+	var res []*computepb.Router
+	for _, r := range f.existing {
+		res = append(res, r)
+	}
+	return res, nil
 }
 
 func (f *fakeRouters) Delete(_ context.Context, req *computepb.DeleteRouterRequest, _ ...gax.CallOption) (*compute.Operation, error) {

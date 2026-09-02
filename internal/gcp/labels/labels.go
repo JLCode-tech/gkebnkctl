@@ -11,6 +11,11 @@
 // inventory purposes only, never as a rebuild key.
 package labels
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Key constants for the mandatory gkebnkctl labels. GCP label keys/values
 // must be lowercase alphanumerics, dashes, and underscores (RFC1035-ish) —
 // callers are responsible for ensuring cluster/component names conform.
@@ -18,6 +23,25 @@ const (
 	KeyCluster = "gkebnkctl-cluster"
 	KeyManaged = "gkebnkctl-managed"
 )
+
+// OwnerMarker returns the description string stamped onto GCP resources that
+// cannot carry labels. Parseable, stable, and safe to substring-match.
+func OwnerMarker(cluster string) string {
+	return fmt.Sprintf("%s=true %s=%s", KeyManaged, KeyCluster, cluster)
+}
+
+// ParseOwner extracts the cluster name and managed status from a description string.
+func ParseOwner(description string) (cluster string, managed bool) {
+	parts := strings.Fields(description)
+	for _, p := range parts {
+		if p == KeyManaged+"=true" {
+			managed = true
+		} else if strings.HasPrefix(p, KeyCluster+"=") {
+			cluster = strings.TrimPrefix(p, KeyCluster+"=")
+		}
+	}
+	return
+}
 
 // Required returns the mandatory gkebnkctl labels for a resource.
 // clusterName is the value of metadata.name from cluster.yaml.

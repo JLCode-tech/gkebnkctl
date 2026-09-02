@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,7 +154,7 @@ func TestRunPhasedDown_DryRun_PrintsPlanAndNeverDeletesSharedVPCs(t *testing.T) 
 	withCWD(t, dir)
 
 	stderr := captureStderr(t, func() {
-		if err := runPhasedDown(context.Background(), path, false, true); err != nil {
+		if err := runPhasedDown(context.Background(), path, false, true, false); err != nil {
 			t.Fatalf("runPhasedDown(dryRun=true): unexpected error: %v", err)
 		}
 	})
@@ -170,6 +171,19 @@ func TestRunPhasedDown_DryRun_PrintsPlanAndNeverDeletesSharedVPCs(t *testing.T) 
 	if !strings.Contains(stderr, "bnkhd-vpc") {
 		t.Errorf("stderr missing main VPC in destroy plan:\n%s", stderr)
 	}
+
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	deleteCount := 0
+	for _, l := range lines {
+		if strings.HasPrefix(l, "  • delete ") {
+			deleteCount++
+		}
+	}
+	wantCountStr := fmt.Sprintf("→ dry-run complete: %d resource(s) would be destroyed", deleteCount)
+	if !strings.Contains(stderr, wantCountStr) {
+		t.Errorf("expected plan count %q, but stderr was:\n%s", wantCountStr, stderr)
+	}
+
 	if _, err := os.Stat(filepath.Join(dir, ".gkebnkctl")); !os.IsNotExist(err) {
 		t.Errorf("down --dry-run created .gkebnkctl state dir (stat err = %v); expected none", err)
 	}
