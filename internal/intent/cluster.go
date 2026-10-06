@@ -51,6 +51,8 @@ type Cluster struct {
 	Bnk         BnkSpec           `yaml:"bnk"`
 	Egress      EgressSpec        `yaml:"egress,omitempty"`
 	Testing     TestingSpec       `yaml:"testing,omitempty"`
+	Forge       *ForgeSpec        `yaml:"forge,omitempty"`
+	AI          *AISpec           `yaml:"ai,omitempty"`
 	Tags        map[string]string `yaml:"tags,omitempty"`
 
 	// --- Derived fields. Never operator-set; computed after validate()
@@ -583,4 +585,184 @@ func requireNonEmpty(fields map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// ForgeSpec captures the operator-declared forge integration.
+type ForgeSpec struct {
+	// Enabled is the master switch. Default false (omitted block = disabled).
+	Enabled bool `yaml:"enabled"`
+	// URL is the forge REST base. Default http://localhost:8000.
+	// Override via GKEBNKCTL_FORGE_URL or AWSBNKCTL_FORGE_URL env.
+	URL string `yaml:"url,omitempty"`
+	// MCPURL is the forge MCP endpoint. Default http://localhost:8081/mcp/.
+	MCPURL string `yaml:"mcpUrl,omitempty"`
+	// Username is the forge REST login username. Default "admin".
+	Username string `yaml:"username,omitempty"`
+	// Password is the forge REST login password. Default "changeme".
+	Password string `yaml:"password,omitempty"`
+	// Environment is the forge project environment tag. Default "dev".
+	Environment string `yaml:"environment,omitempty"`
+	// ProjectType is the forge project type. Default "cloud-gcp".
+	ProjectType string `yaml:"projectType,omitempty"`
+	// AgentToken is the Forge benchmark agent JWT token (role 'agent').
+	// Resolution order: CLI flag > GKEBNKCTL_FORGE_AGENT_TOKEN / AWSBNKCTL_FORGE_AGENT_TOKEN env > this field.
+	AgentToken string `yaml:"agent_token,omitempty"`
+	// AgentTokenCamel is a fallback alias for camelCase YAML configs (agentToken).
+	AgentTokenCamel string `yaml:"agentToken,omitempty"`
+}
+
+// DefaultForgeRESTURL is the fallback REST base when forge.url is not set.
+const DefaultForgeRESTURL = "http://localhost:8000"
+
+// ResolveURL returns the forge REST URL to use, in priority order:
+//  1. GKEBNKCTL_FORGE_URL or AWSBNKCTL_FORGE_URL environment variable
+//  2. f.URL (cluster.yaml forge.url)
+//  3. DefaultForgeRESTURL ("http://localhost:8000")
+func (f *ForgeSpec) ResolveURL() string {
+	if v := os.Getenv("GKEBNKCTL_FORGE_URL"); v != "" {
+		return v
+	}
+	if v := os.Getenv("AWSBNKCTL_FORGE_URL"); v != "" {
+		return v
+	}
+	if f != nil && f.URL != "" {
+		return f.URL
+	}
+	return DefaultForgeRESTURL
+}
+
+// ResolveUsername returns the forge REST login username, in priority order:
+//  1. GKEBNKCTL_FORGE_USERNAME / AWSBNKCTL_FORGE_USERNAME env
+//  2. f.Username (cluster.yaml forge.username)
+//  3. default "admin"
+func (f *ForgeSpec) ResolveUsername() string {
+	if v := os.Getenv("GKEBNKCTL_FORGE_USERNAME"); v != "" {
+		return v
+	}
+	if v := os.Getenv("AWSBNKCTL_FORGE_USERNAME"); v != "" {
+		return v
+	}
+	if f != nil && f.Username != "" {
+		return f.Username
+	}
+	return "admin"
+}
+
+// ResolvePassword returns the forge REST login password and whether the default was used.
+func (f *ForgeSpec) ResolvePassword() (password string, usingDefault bool) {
+	if v := os.Getenv("GKEBNKCTL_FORGE_PASSWORD"); v != "" {
+		return v, false
+	}
+	if v := os.Getenv("AWSBNKCTL_FORGE_PASSWORD"); v != "" {
+		return v, false
+	}
+	if f != nil && f.Password != "" {
+		return f.Password, false
+	}
+	return "changeme", true
+}
+
+// ResolveAgentToken returns the benchmark agent JWT token in priority order:
+//  1. GKEBNKCTL_FORGE_AGENT_TOKEN environment variable
+//  2. AWSBNKCTL_FORGE_AGENT_TOKEN environment variable (cross-family fallback)
+//  3. f.AgentToken (cluster.yaml forge.agent_token)
+//  4. f.AgentTokenCamel (cluster.yaml forge.agentToken)
+//
+// Returns empty string if unset.
+func (f *ForgeSpec) ResolveAgentToken() string {
+	if v := os.Getenv("GKEBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
+		return v
+	}
+	if v := os.Getenv("AWSBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
+		return v
+	}
+	if f != nil {
+		if f.AgentToken != "" {
+			return f.AgentToken
+		}
+		if f.AgentTokenCamel != "" {
+			return f.AgentTokenCamel
+		}
+	}
+	return ""
+}
+
+// ResolveEnvironment returns the forge project environment.
+func (f *ForgeSpec) ResolveEnvironment() string {
+	if v := os.Getenv("GKEBNKCTL_FORGE_ENVIRONMENT"); v != "" {
+		return v
+	}
+	if v := os.Getenv("AWSBNKCTL_FORGE_ENVIRONMENT"); v != "" {
+		return v
+	}
+	if f != nil && f.Environment != "" {
+		return f.Environment
+	}
+	return "dev"
+}
+
+// ResolveProjectType returns the forge project type.
+func (f *ForgeSpec) ResolveProjectType() string {
+	if f != nil && f.ProjectType != "" {
+		return f.ProjectType
+	}
+	return "cloud-gcp"
+}
+
+// AISpec captures optional AI / LLM configuration.
+type AISpec struct {
+	Synthetic *SyntheticSpec `yaml:"synthetic,omitempty"`
+}
+
+// SyntheticSpec configures synthetic inference simulation.
+type SyntheticSpec struct {
+	Enabled         bool   `yaml:"enabled"`
+	ServedModelName string `yaml:"servedModelName,omitempty"`
+	Image           string `yaml:"image,omitempty"`
+}
+
+// SyntheticAIEnabled reports whether synthetic AI inference simulation is enabled.
+func (c *Cluster) SyntheticAIEnabled() bool {
+	return c != nil && c.AI != nil && c.AI.Synthetic != nil && c.AI.Synthetic.Enabled
+}
+
+// UsesSyntheticAI reports whether the AI scenario runs the simulator.
+func (c *Cluster) UsesSyntheticAI() bool {
+	return c != nil && c.SyntheticAIEnabled()
+}
+
+// SimulatorTags labels benchmark results with what the simulator stands in for.
+func (c *Cluster) SimulatorTags() map[string]string {
+	if !c.UsesSyntheticAI() {
+		return nil
+	}
+	m := "meta-llama/Meta-Llama-3-8B-Instruct"
+	if c.AI.Synthetic.ServedModelName != "" {
+		m = c.AI.Synthetic.ServedModelName
+	}
+	return map[string]string{"model_server": "llm-d-inference-sim", "sim_model": m}
+}
+
+// DefaultVIP derives the default BNK Gateway VIP from the external network CIDR.
+// Convention: <network.external.cidr network>.100 — e.g. 10.31.0.0/24 → 10.31.0.100.
+// Returns an error when network.external.cidr is not set.
+func (c *Cluster) DefaultVIP() (string, error) {
+	if c.Network.External.CIDR == "" {
+		return "", errors.New("network.external.cidr not set; pass --vip explicitly")
+	}
+	cidr := c.Network.External.CIDR
+	slash := strings.IndexByte(cidr, '/')
+	if slash < 0 {
+		return "", fmt.Errorf("invalid external CIDR %q: missing '/'", cidr)
+	}
+	ip := net.ParseIP(cidr[:slash])
+	if ip == nil {
+		return "", fmt.Errorf("invalid external CIDR %q: bad IP", cidr)
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return "", fmt.Errorf("external CIDR %q is not IPv4", cidr)
+	}
+	vip := net.IPv4(ip4[0], ip4[1], ip4[2], 100)
+	return vip.String(), nil
 }

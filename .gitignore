@@ -21,6 +21,8 @@ license.jwt
 *.kubeconfig
 dockerconfig.json
 .dockerconfigjson
+forge_agent_token.json
+*.forge_agent_token.*.json.tmp
 # Exception: an obvious, committed placeholder so `gkebnkctl validate` /
 # `up --dry-run` have something to point bnk.jwtPath at without a real
 # secret. Never put real subscription JWT content here.
