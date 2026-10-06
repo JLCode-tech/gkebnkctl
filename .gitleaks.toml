@@ -1,0 +1,7 @@
+# gitleaks configuration for gkebnkctl.
+# CI runs gitleaks via the security-audit job in .github/workflows/ci.yml.
+# This file extends the default ruleset and allowlists known false positives.
+title = "gkebnkctl gitleaks config"
+
+[extend]
+useDefault = true

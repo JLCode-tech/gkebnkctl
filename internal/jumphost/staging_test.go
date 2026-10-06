@@ -290,7 +290,7 @@ func TestCopyFileViaIAPStdin_ContentViaStdinNotArgv(t *testing.T) {
 	runs := &stdinRunRecord{}
 	defer installStdinSeams(t, mint, pushes, runs, nil)()
 
-	content := []byte("-----BEGIN PRIVATE KEY-----\nfake-key-content-for-test\n-----END PRIVATE KEY-----\n")
+	content := []byte("dummy-test-key-content-for-test-transferred-via-stdin\n")
 	err := jumphost.CopyFileViaIAPStdin(context.Background(), testOpts(), content, "/home/debian/cert.pem")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -302,7 +302,7 @@ func TestCopyFileViaIAPStdin_ContentViaStdinNotArgv(t *testing.T) {
 	if !strings.Contains(cmd, "mkdir -p") || !strings.Contains(cmd, "cat > '/home/debian/cert.pem'") {
 		t.Errorf("remote cmd must mkdir + cat-to-path: %q", cmd)
 	}
-	if strings.Contains(cmd, "fake-key-content-for-test") || strings.Contains(cmd, "base64") {
+	if strings.Contains(cmd, "dummy-test-key-content") || strings.Contains(cmd, "base64") {
 		t.Errorf("file content leaked into the command string: %q", cmd)
 	}
 	if runs.stdins[0] != string(content) {
