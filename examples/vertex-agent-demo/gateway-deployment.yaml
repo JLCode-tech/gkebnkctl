@@ -1,0 +1,91 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: bnk-sydney-gatewayclass
+spec:
+  controllerName: f5.com/f5-bnk-f5-cne-controller
+  description: F5 BIG-IP Kubernetes Gateway
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-tls
+  namespace: default
+spec:
+  secretName: mcp-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: bnk-ingress.bnk-demo.internal
+  dnsNames:
+  - bnk-ingress.bnk-demo.internal
+  issuerRef:
+    name: ext-ca-cluster-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: bnk-sydney-gateway
+  namespace: default
+spec:
+  gatewayClassName: bnk-sydney-gatewayclass
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: All
+      kinds:
+      - kind: HTTPRoute
+  - name: https
+    protocol: HTTPS
+    port: 443
+    tls:
+      certificateRefs:
+      - kind: Secret
+        group: ""
+        name: mcp-tls
+        namespace: default
+    allowedRoutes:
+      namespaces:
+        from: All
+      kinds:
+      - kind: HTTPRoute
+  addresses:
+  - type: IPAddress
+    value: 10.31.0.100
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-tool-route
+  namespace: default
+spec:
+  parentRefs:
+  - name: bnk-sydney-gateway
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /v1/mcp/forecast
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplaceFullPath
+          replaceFullPath: /
+    backendRefs:
+    - name: vertex-finance-mcp
+      namespace: bnk-demo
+      port: 8080
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /.well-known/agent-card.json
+    backendRefs:
+    - name: vertex-finance-mcp
+      namespace: bnk-demo
+      port: 8080
+EOF && kubectl apply -f /Users/j.lucia/Code/github/gkebnkctl/examples/vertex-agent-demo/gateway-deployment.yaml

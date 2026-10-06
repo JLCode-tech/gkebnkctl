@@ -90,3 +90,13 @@ func NewDynamicFromConfig(cfg *rest.Config) (dynamic.Interface, error) {
 	}
 	return dc, nil
 }
+
+// BuildClientset returns a typed client for core + apps + batch + etc.
+// kubeconfigPath: empty string → DefaultKubeconfigPath().
+func BuildClientset(kubeconfigPath string) (kubernetes.Interface, error) {
+	cfg, err := BuildRESTConfigFromKubeconfig(kubeconfigPath, "")
+	if err != nil {
+		return nil, err
+	}
+	return NewClientsetFromConfig(cfg)
+}

@@ -1,0 +1,4 @@
+# gitleaks ignore list — reviewed false positives (fingerprint = commit:file:rule:line).
+# CI's security-audit scans full git history, so a finding persists in the commit
+# that introduced it even after the working tree is fixed; ignore by fingerprint.
+9ea92ab47ec343140e2caa58f5f757cb220a80e7:internal/jumphost/staging_test.go:private-key:293
