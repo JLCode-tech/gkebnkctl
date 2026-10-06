@@ -469,3 +469,80 @@ func quoteIfEmpty(s string) string {
 	}
 	return s
 }
+
+func TestDefaultVIP(t *testing.T) {
+	cases := []struct {
+		cidr    string
+		want    string
+		wantErr bool
+	}{
+		{"10.31.0.0/24", "10.31.0.100", false},
+		{"192.168.1.0/24", "192.168.1.100", false},
+		{"", "", true},
+		{"bad-cidr", "", true},
+	}
+	for _, tc := range cases {
+		c := &Cluster{Network: Network{External: DataplaneSpec{CIDR: tc.cidr}}}
+		got, err := c.DefaultVIP()
+		if (err != nil) != tc.wantErr {
+			t.Errorf("DefaultVIP(%q) err = %v, wantErr = %v", tc.cidr, err, tc.wantErr)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("DefaultVIP(%q) = %q, want %q", tc.cidr, got, tc.want)
+		}
+	}
+}
+
+func TestForgeSpecResolvers(t *testing.T) {
+	var f *ForgeSpec
+	if got := f.ResolveURL(); got != DefaultForgeRESTURL {
+		t.Errorf("nil ForgeSpec ResolveURL() = %q, want %q", got, DefaultForgeRESTURL)
+	}
+	if got := f.ResolveUsername(); got != "admin" {
+		t.Errorf("nil ForgeSpec ResolveUsername() = %q, want admin", got)
+	}
+	if got, def := f.ResolvePassword(); got != "changeme" || !def {
+		t.Errorf("nil ForgeSpec ResolvePassword() = %q, %v, want changeme, true", got, def)
+	}
+	if got := f.ResolveEnvironment(); got != "dev" {
+		t.Errorf("nil ForgeSpec ResolveEnvironment() = %q, want dev", got)
+	}
+	if got := f.ResolveProjectType(); got != "cloud-gcp" {
+		t.Errorf("nil ForgeSpec ResolveProjectType() = %q, want cloud-gcp", got)
+	}
+
+	f = &ForgeSpec{
+		URL:         "http://forge.example.com:8000",
+		Username:    "custom-user",
+		Password:    "secret",
+		Environment: "prod",
+		ProjectType: "cloud-gcp-custom",
+	}
+	if got := f.ResolveURL(); got != "http://forge.example.com:8000" {
+		t.Errorf("ResolveURL() = %q", got)
+	}
+	if got := f.ResolveUsername(); got != "custom-user" {
+		t.Errorf("ResolveUsername() = %q", got)
+	}
+	if got, def := f.ResolvePassword(); got != "secret" || def {
+		t.Errorf("ResolvePassword() = %q, %v", got, def)
+	}
+	if got := f.ResolveEnvironment(); got != "prod" {
+		t.Errorf("ResolveEnvironment() = %q", got)
+	}
+	if got := f.ResolveProjectType(); got != "cloud-gcp-custom" {
+		t.Errorf("ResolveProjectType() = %q", got)
+	}
+}
+
+func TestSyntheticAIEnabled(t *testing.T) {
+	var c Cluster
+	if c.SyntheticAIEnabled() {
+		t.Error("empty cluster SyntheticAIEnabled() = true, want false")
+	}
+	c.AI = &AISpec{Synthetic: &SyntheticSpec{Enabled: true, ServedModelName: "llama3"}}
+	if !c.SyntheticAIEnabled() {
+		t.Error("SyntheticAIEnabled() = false, want true")
+	}
+}

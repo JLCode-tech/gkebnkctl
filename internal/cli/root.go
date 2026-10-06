@@ -23,9 +23,11 @@ var (
 
 // Persistent flag values, bound on the root command.
 var (
-	flagVerbose bool
-	flagQuiet   bool
-	flagNoColor bool
+	flagVerbose   bool
+	flagQuiet     bool
+	flagNoColor   bool
+	flagWorkspace string
+	flagOutput    string
 )
 
 var rootCmd = &cobra.Command{
@@ -82,6 +84,8 @@ func init() {
 	pf.BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 	pf.BoolVarP(&flagQuiet, "quiet", "q", false, "suppress all but errors")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable colored output")
+	pf.StringVarP(&flagWorkspace, "workspace", "w", "", "workspace name (default: active workspace)")
+	pf.StringVarP(&flagOutput, "output", "o", "text", "output format: text or json")
 }
 
 // RootCommand returns the wired-up root cobra command for tooling that needs

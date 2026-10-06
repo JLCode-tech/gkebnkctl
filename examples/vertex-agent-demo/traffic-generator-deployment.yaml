@@ -1,0 +1,143 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: traffic-generator-script
+  namespace: bnk-demo
+data:
+  traffic_gen.py: |
+    import json
+    import os
+    import random
+    import time
+    import urllib.request
+    import urllib.error
+
+    SYMBOLS = ["GOOGL", "AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA"]
+    MCP_URL = os.environ.get("MCP_URL", "http://vertex-finance-mcp.bnk-demo.svc.cluster.local:8080/v1/mcp/forecast")
+    DISC_URL = os.environ.get("DISC_URL", "http://vertex-finance-mcp.bnk-demo.svc.cluster.local:8080/.well-known/agent-card.json")
+    SHIPPER_URL = os.environ.get("SHIPPER_URL", "http://vertex-token-shipper.llm-egress.svc.cluster.local:9090")
+    AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "demo-agent-token-a7f3c1")
+    EXTERNAL_TOKEN = os.environ.get("EXTERNAL_TOKEN", "demo-external-token-4b9e2d")
+
+    def post_json(url, data, headers=None, timeout=5):
+        h = {"Content-Type": "application/json"}
+        if headers:
+            h.update(headers)
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(data).encode("utf-8"),
+            headers=h
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status
+        except urllib.error.HTTPError as e:
+            return e.code
+        except Exception as e:
+            return 0
+
+    def get(url, timeout=5):
+        req = urllib.request.Request(url)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status
+        except urllib.error.HTTPError as e:
+            return e.code
+        except Exception:
+            return 0
+
+    print("Starting continuous dual-leg traffic generator (pure python)...", flush=True)
+    while True:
+        sym = random.choice(SYMBOLS)
+        ptk = random.randint(180, 260)
+        ctk = random.randint(110, 180)
+        lat = random.randint(320, 670)
+
+        # Leg A: Model reasoning token shipment
+        model_rec = {
+            "job": "llm-gateway",
+            "model": "gemini-2.5-pro",
+            "status": "200",
+            "prompt_tk": ptk,
+            "comp_tk": ctk,
+            "latency_ms": lat,
+            "userq": "Forecast " + sym + " trajectory and enterprise risk",
+            "caller": "vertex-reasoning-engine",
+            "client": "10.0.1.50",
+            "action": "allow",
+            "req_body": "{\"prompt\":\"Evaluate financial market telemetry and 30-day volatility model for " + sym + ".\"}",
+            "resp_body": "{\"forecast\":\"" + sym + " 30-day projection: positive drift 2.8%, confidence HIGH, governed by F5 BNK.\"}"
+        }
+        s_res = post_json(SHIPPER_URL, model_rec)
+
+        # Leg B1: Trusted forecast (200 OK)
+        fc_body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "forecast", "arguments": {"symbol": sym, "days": 30}}
+        }
+        f_res = post_json(
+            MCP_URL,
+            fc_body,
+            {"Authorization": "Bearer " + AGENT_TOKEN}
+        )
+
+        # Leg B2: Unauthorized balance (403 Forbidden)
+        bal_body = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "get_account_balance", "arguments": {"account_id": "ACC-1001"}}
+        }
+        b_res = post_json(
+            MCP_URL,
+            bal_body,
+            {"Authorization": "Bearer " + EXTERNAL_TOKEN}
+        )
+
+        # Leg B3: Discovery (200 OK)
+        d_res = get(DISC_URL)
+
+        # Leg B4: Unauthenticated (401 Unauthorized)
+        u_res = post_json(MCP_URL, fc_body)
+
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        print("[" + ts + "] Wave sent -> Model:" + sym + " (Loki:" + str(s_res) + ", " + str(ptk+ctk) + " tk) | MCP forecast:" + str(f_res) + " bal:" + str(b_res) + " disc:" + str(d_res) + " unauth:" + str(u_res), flush=True)
+        time.sleep(15)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vertex-traffic-generator
+  namespace: bnk-demo
+  labels:
+    app: vertex-traffic-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vertex-traffic-generator
+  template:
+    metadata:
+      labels:
+        app: vertex-traffic-generator
+    spec:
+      containers:
+      - name: traffic-gen
+        image: python:3.11-slim
+        command: ["python3", "-u", "/app/traffic_gen.py"]
+        volumeMounts:
+        - name: code
+          mountPath: /app
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 150m
+            memory: 128Mi
+      volumes:
+      - name: code
+        configMap:
+          name: traffic-generator-script
