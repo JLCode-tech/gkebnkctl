@@ -1,6 +1,8 @@
 module github.com/JLCode-tech/gkebnkctl
 
-go 1.26.9
+go 1.26.0
+
+toolchain go1.26.9
 
 require (
 	cloud.google.com/go/compute v1.64.0
