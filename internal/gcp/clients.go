@@ -234,6 +234,9 @@ func attachK8sFromConfig(c *Clients, cfg *rest.Config) error {
 	if err != nil {
 		return fmt.Errorf("gcp: AttachK8s: build dynamic client: %w", err)
 	}
+	if dyn == nil {
+		return fmt.Errorf("gcp: AttachK8s: dynamic client is nil")
+	}
 	disc, err := discovery.NewDiscoveryClientForConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("gcp: AttachK8s: build discovery client: %w", err)

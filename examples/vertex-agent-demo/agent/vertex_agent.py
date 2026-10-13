@@ -20,27 +20,31 @@ import urllib.request
 import urllib.error
 from typing import Any, Dict
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger("vertex-agent-runner")
 
 # Target tool URL: defaults to BNK Ingress VIP or local cluster endpoint
-DEFAULT_TOOL_URL = os.environ.get(
-    "MCP_TOOL_URL", "http://bnk-ingress.bnk-demo.internal/v1/mcp/forecast"
-)
-AGENT_TOKEN = os.environ.get("MCP_AGENT_TOKEN", "vertex-agent-demo-secret-key-1")
+DEFAULT_TOOL_URL = os.environ.get("MCP_TOOL_URL", "http://10.10.1.10/v1/mcp/forecast")
+AGENT_TOKEN = os.environ.get("MCP_AGENT_TOKEN", "demo-agent-token-a7f3c1")
 
 
 class VertexAgentRunner:
     def __init__(self, tool_url: str = DEFAULT_TOOL_URL, token: str = AGENT_TOKEN):
         self.tool_url = tool_url
         self.token = token
-        self.project_id = os.environ.get("GCP_PROJECT", "qwiklabs-gcp-02-407f9a345ead")
+        self.project_id = os.environ.get("GCP_PROJECT", "demo-vertex-project")
         self.location = os.environ.get("GCP_LOCATION", "australia-southeast1")
         self.model_name = os.environ.get("VERTEX_MODEL", "gemini-2.5-pro")
 
-    def call_governed_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def call_governed_tool(
+        self, tool_name: str, arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Invoke MCP tool via F5 BNK Ingress on GKE."""
-        logger.info(f"Steering tool call '{tool_name}' through F5 BIG-IP Next on GKE...")
+        logger.info(
+            f"Steering tool call '{tool_name}' through F5 BIG-IP Next on GKE..."
+        )
         logger.info(f"Destination Gateway: {self.tool_url}")
 
         payload = {
@@ -67,14 +71,21 @@ class VertexAgentRunner:
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 resp_data = json.loads(resp.read().decode("utf-8"))
-                result_content = resp_data.get("result", {}).get("content", [{}])[0].get("text", "{}")
+                result_content = (
+                    resp_data.get("result", {})
+                    .get("content", [{}])[0]
+                    .get("text", "{}")
+                )
                 return json.loads(result_content)
         except Exception as e:
             # If ingress VIP is not direct routed locally, simulate live response from tool contract
             logger.info(f"Direct Ingress routing ({self.tool_url}) returned: {e}")
             logger.info("Engaging governed fallback via cluster service contract...")
             import random
-            base_price = {"GOOGL": 190.50, "AAPL": 225.00, "MSFT": 440.00}.get(arguments.get("symbol", "GOOGL").upper(), 100.0)
+
+            base_price = {"GOOGL": 190.50, "AAPL": 225.00, "MSFT": 440.00}.get(
+                arguments.get("symbol", "GOOGL").upper(), 100.0
+            )
             drift = random.uniform(0.01, 0.04)
             days = int(arguments.get("days", 30))
             projected = round(base_price * ((1 + drift) ** (days / 30)), 2)
@@ -83,7 +94,9 @@ class VertexAgentRunner:
                 "horizon_days": days,
                 "current_price": base_price,
                 "projected_price": projected,
-                "expected_return_pct": round(((projected - base_price) / base_price) * 100, 2),
+                "expected_return_pct": round(
+                    ((projected - base_price) / base_price) * 100, 2
+                ),
                 "volatility": 0.18,
                 "confidence": "HIGH",
                 "governed_by": "F5 BIG-IP Next on GKE (Host-Device Dataplane)",
@@ -97,18 +110,24 @@ class VertexAgentRunner:
         print(f"• Reasoning Engine:  Vertex AI ({self.model_name})")
         print(f"• Project / Region:  {self.project_id} / {self.location}")
         print(f"• Action Gateway:    F5 BIG-IP Next on GKE ({self.tool_url})")
-        print(f"• User Request:      'Forecast stock performance for {symbol} over {days} days'")
+        print(
+            f"• User Request:      'Forecast stock performance for {symbol} over {days} days'"
+        )
         print("-" * 70)
 
         # 1. Reasoning & Tool Selection
         print("[1] Reasoning (Gemini 2.5 Pro):")
         print(f"    - Need predictive analytics for symbol {symbol}.")
-        print(f"    - Selecting tool: 'forecast' with arguments: {{'symbol': '{symbol}', 'days': {days}}}")
+        print(
+            f"    - Selecting tool: 'forecast' with arguments: {{'symbol': '{symbol}', 'days': {days}}}"
+        )
         time.sleep(0.5)
 
         # 2. Governed Tool Execution
         print("\n[2] Executing Governed Action:")
-        tool_result = self.call_governed_tool("forecast", {"symbol": symbol, "days": days})
+        tool_result = self.call_governed_tool(
+            "forecast", {"symbol": symbol, "days": days}
+        )
         print(f"    - Result Received: {json.dumps(tool_result, indent=6)}")
         time.sleep(0.5)
 
@@ -126,7 +145,9 @@ class VertexAgentRunner:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Vertex AI Agent Runner on GKE with F5 BNK")
+    parser = argparse.ArgumentParser(
+        description="Vertex AI Agent Runner on GKE with F5 BNK"
+    )
     parser.add_argument("--symbol", default="GOOGL", help="Stock ticker symbol")
     parser.add_argument("--days", type=int, default=30, help="Forecast horizon in days")
     parser.add_argument("--url", default=DEFAULT_TOOL_URL, help="F5 BNK Ingress URL")

@@ -343,6 +343,10 @@ func buildDiscoveryPod(nodeName string) *corev1.Pod {
 func runHostNsenterScript(ctx context.Context, k8sClient kubernetes.Interface, ns, podName, nodeName, script string, timeout time.Duration) (string, error) {
 	pods := k8sClient.CoreV1().Pods(ns)
 	_ = pods.Delete(ctx, podName, metav1.DeleteOptions{})
+	_ = gcp.PollUntil(ctx, 500*time.Millisecond, 30*time.Second, func(ctx context.Context) (bool, error) {
+		_, err := pods.Get(ctx, podName, metav1.GetOptions{})
+		return err != nil, nil
+	})
 
 	if _, err := pods.Create(ctx, buildNsenterPod(ns, podName, nodeName, script), metav1.CreateOptions{}); err != nil {
 		return "", fmt.Errorf("creating discovery pod %s/%s on %s: %w", ns, podName, nodeName, err)

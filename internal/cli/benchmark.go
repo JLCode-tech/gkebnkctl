@@ -436,13 +436,26 @@ func hasNonBNKProxy(csv string) bool {
 	return false
 }
 
-// nlbOptInTags returns the opt-in internal-NLB tags required by forge's
+// proxyExposeTag returns the proxy exposure tag for load balancer provisioning.
+// Defaults to "internal-nlb" for Forge backend contract parity, but allows overriding
+// via GKEBNKCTL_PROXY_EXPOSE or FORGE_PROXY_EXPOSE (e.g. "internal-ilb" for GCP ILB).
+func proxyExposeTag() string {
+	if v := os.Getenv("GKEBNKCTL_PROXY_EXPOSE"); v != "" {
+		return v
+	}
+	if v := os.Getenv("FORGE_PROXY_EXPOSE"); v != "" {
+		return v
+	}
+	return "internal-nlb"
+}
+
+// nlbOptInTags returns the opt-in proxy exposure tags required by forge's
 // BenchmarkTarget contract when the run is a non-BNK proxy shootout; nil otherwise.
 func nlbOptInTags(proxiesCSV, upstreamService, upstreamPort, upstreamNamespace string) map[string]string {
 	var tags map[string]string
 	if hasNonBNKProxy(proxiesCSV) {
 		tags = map[string]string{
-			"proxy_expose":     "internal-nlb",
+			"proxy_expose":     proxyExposeTag(),
 			"upstream_service": upstreamService,
 			"upstream_port":    upstreamPort,
 		}
@@ -547,6 +560,8 @@ func resolveBenchmarkContext(cmd *cobra.Command) error {
 	if flagBenchAgentToken == "" {
 		if v := os.Getenv("GKEBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
 			flagBenchAgentToken = v
+		} else if v := os.Getenv("FORGE_AGENT_TOKEN"); v != "" {
+			flagBenchAgentToken = v
 		} else if v := os.Getenv("AWSBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
 			flagBenchAgentToken = v
 		}
@@ -583,9 +598,13 @@ func resolveBenchmarkContext(cmd *cobra.Command) error {
 				}
 			}
 			if flagBenchVIP == "" {
-				if v := st.Get("DEMO_VIP_HTTPROUTE"); v != "" {
+				if v := st.Get("VIP"); v != "" {
+					flagBenchVIP = v
+				} else if v := st.Get("GATEWAY_VIP"); v != "" {
 					flagBenchVIP = v
 				} else if v := st.Get("VIP_STATIC_IP"); v != "" {
+					flagBenchVIP = v
+				} else if v := st.Get("DEMO_VIP_HTTPROUTE"); v != "" {
 					flagBenchVIP = v
 				} else if v := st.Get("TMM_EXT_SELFIP"); v != "" {
 					flagBenchVIP = v
@@ -638,6 +657,9 @@ func effectiveAgentToken(agentName string) string {
 	if v := os.Getenv("GKEBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
 		return v
 	}
+	if v := os.Getenv("FORGE_AGENT_TOKEN"); v != "" {
+		return v
+	}
 	if v := os.Getenv("AWSBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
 		return v
 	}
@@ -654,14 +676,20 @@ func effectiveForgeCreds() forge.RestCreds {
 	if u == "" {
 		u = os.Getenv("GKEBNKCTL_FORGE_USERNAME")
 		if u == "" {
-			u = os.Getenv("AWSBNKCTL_FORGE_USERNAME")
+			u = os.Getenv("FORGE_USERNAME")
+			if u == "" {
+				u = os.Getenv("AWSBNKCTL_FORGE_USERNAME")
+			}
 		}
 	}
 	p := flagBenchForgePass
 	if p == "" {
 		p = os.Getenv("GKEBNKCTL_FORGE_PASSWORD")
 		if p == "" {
-			p = os.Getenv("AWSBNKCTL_FORGE_PASSWORD")
+			p = os.Getenv("FORGE_PASSWORD")
+			if p == "" {
+				p = os.Getenv("AWSBNKCTL_FORGE_PASSWORD")
+			}
 		}
 	}
 	return forge.RestCreds{

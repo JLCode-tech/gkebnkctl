@@ -14,6 +14,7 @@ package cli
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/forge"
@@ -281,5 +282,30 @@ func TestResolveForgeGraph_TargetTags_NonBNK_CustomServicePortNamespace(t *testi
 	}
 	if captured.Tags["upstream_namespace"] != "ai" {
 		t.Errorf("Tags[upstream_namespace] = %q, want \"ai\"", captured.Tags["upstream_namespace"])
+	}
+}
+
+func TestProxyExposeTag_Override(t *testing.T) {
+	origGKE := os.Getenv("GKEBNKCTL_PROXY_EXPOSE")
+	origForge := os.Getenv("FORGE_PROXY_EXPOSE")
+	defer func() {
+		os.Setenv("GKEBNKCTL_PROXY_EXPOSE", origGKE)
+		os.Setenv("FORGE_PROXY_EXPOSE", origForge)
+	}()
+
+	os.Unsetenv("GKEBNKCTL_PROXY_EXPOSE")
+	os.Unsetenv("FORGE_PROXY_EXPOSE")
+	if got := proxyExposeTag(); got != "internal-nlb" {
+		t.Errorf("proxyExposeTag() default = %q, want \"internal-nlb\"", got)
+	}
+
+	os.Setenv("FORGE_PROXY_EXPOSE", "internal-ilb")
+	if got := proxyExposeTag(); got != "internal-ilb" {
+		t.Errorf("proxyExposeTag() with FORGE_PROXY_EXPOSE = %q, want \"internal-ilb\"", got)
+	}
+
+	os.Setenv("GKEBNKCTL_PROXY_EXPOSE", "custom-lb")
+	if got := proxyExposeTag(); got != "custom-lb" {
+		t.Errorf("proxyExposeTag() with GKEBNKCTL_PROXY_EXPOSE = %q, want \"custom-lb\"", got)
 	}
 }

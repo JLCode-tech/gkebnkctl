@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 mcp-server.py — Governed FastMCP Server for Google Cloud Vertex AI & GKE.
+Pure standard-library implementation (no pip install required).
 
 Exposes financial tools over Streamable-HTTP / JSON-RPC:
 - forecast: calculate market projection for a symbol
@@ -11,22 +12,21 @@ import json
 import logging
 import os
 import random
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict
 
-from starlette.applications import Starlette
-from starlette.middleware import Middleware
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
-from starlette.routing import Route
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger("vertex-mcp-tool")
 
 LISTEN_PORT = int(os.environ.get("MCP_PORT", "8080"))
 AGENT_TOKEN = os.environ.get("MCP_AGENT_TOKEN", "demo-agent-token-a7f3c1")
 EXTERNAL_TOKEN = os.environ.get("MCP_EXTERNAL_TOKEN", "demo-external-token-4b9e2d")
-PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://bnk-ingress.bnk-demo.internal/v1/mcp/forecast")
+PUBLIC_URL = os.environ.get(
+    "PUBLIC_URL", "http://bnk-ingress.bnk-demo.internal/v1/mcp/forecast"
+)
 
 
 def calculate_forecast(symbol: str, days: int = 30) -> Dict[str, Any]:
@@ -67,144 +67,207 @@ def get_balance(account_id: str) -> Dict[str, Any]:
     }
 
 
-class BearerAuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # Allow healthz and agent-card unauthenticated
-        if request.url.path in ("/healthz", "/.well-known/agent-card.json"):
-            return await call_next(request)
+class MCPHandler(BaseHTTPRequestHandler):
+    def send_json(self, status_code: int, data: Any):
+        body = json.dumps(data).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-        auth_header = request.headers.get("authorization", "")
+    def check_auth(self) -> bool:
+        auth_header = self.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
-            logger.warning(f"Rejected unauthenticated request from {request.client.host}")
-            return JSONResponse(
-                {"error": "Unauthorized. Bearer token required across F5 BNK action gateway."},
-                status_code=401,
+            self.send_json(
+                401,
+                {
+                    "error": "Unauthorized. Bearer token required across F5 BNK action gateway."
+                },
             )
+            return False
 
         token = auth_header[7:].strip()
         if token not in (AGENT_TOKEN, EXTERNAL_TOKEN):
-            logger.warning(f"Rejected invalid token request from {request.client.host}")
-            return JSONResponse(
-                {"error": "Forbidden. Invalid token supplied."},
-                status_code=403,
+            self.send_json(403, {"error": "Forbidden. Invalid token supplied."})
+            return False
+
+        return True
+
+    def do_GET(self):
+        path = self.path.split("?")[0]
+        if path == "/healthz":
+            self.send_json(
+                200, {"status": "healthy", "service": "gke-vertex-finance-tool"}
             )
+            return
 
-        return await call_next(request)
+        if path == "/.well-known/agent-card.json":
+            self.send_json(
+                200,
+                {
+                    "name": "gke-vertex-finance-tool",
+                    "description": "Financial forecasting and portfolio service governed by F5 BNK on GKE",
+                    "version": "1.0.0",
+                    "url": PUBLIC_URL,
+                    "capabilities": ["tools"],
+                    "governance": {
+                        "gateway": "F5 BIG-IP Next for Kubernetes",
+                        "cloud": "Google Cloud GKE",
+                        "agent_framework": "Google Cloud Vertex AI Reasoning Engine",
+                    },
+                },
+            )
+            return
 
+        if path in ("/", "/v1/mcp/forecast"):
+            if not self.check_auth():
+                return
+            res = calculate_forecast("GOOGL", 30)
+            self.send_json(200, res)
+            return
 
-async def handle_rpc(request: Request) -> Response:
-    """Handle JSON-RPC and REST tool execution."""
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+        self.send_json(404, {"error": f"Path '{path}' not found"})
 
-    method = body.get("method")
-    params = body.get("params", {})
-    req_id = body.get("id", 1)
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        if path in ("/", "/v1/mcp/forecast"):
+            if not self.check_auth():
+                return
 
-    # Tool listing
-    if method == "tools/list":
-        return JSONResponse({
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {
-                "tools": [
+            clen = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(clen) if clen > 0 else b"{}"
+            try:
+                body = json.loads(body_bytes.decode("utf-8"))
+            except Exception:
+                body = {}
+
+            method = body.get("method")
+            params = body.get("params", {})
+            req_id = body.get("id", 1)
+
+            # Tool listing
+            if method == "tools/list":
+                self.send_json(
+                    200,
                     {
-                        "name": "forecast",
-                        "description": "Forecast symbol price and trend over horizon days",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "symbol": {"type": "string"},
-                                "days": {"type": "integer", "default": 30},
-                            },
-                            "required": ["symbol"],
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "result": {
+                            "tools": [
+                                {
+                                    "name": "forecast",
+                                    "description": "Forecast symbol price and trend over horizon days",
+                                    "inputSchema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "symbol": {"type": "string"},
+                                            "days": {"type": "integer", "default": 30},
+                                        },
+                                        "required": ["symbol"],
+                                    },
+                                },
+                                {
+                                    "name": "get_account_balance",
+                                    "description": "Sensitive tool returning confidential balance",
+                                    "inputSchema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "account_id": {"type": "string"},
+                                        },
+                                        "required": ["account_id"],
+                                    },
+                                },
+                            ]
                         },
                     },
-                    {
-                        "name": "get_account_balance",
-                        "description": "Sensitive tool returning confidential balance",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "account_id": {"type": "string"},
+                )
+                return
+
+            # Tool invocation
+            if method == "tools/call":
+                tool_name = params.get("name")
+                args = params.get("arguments", {})
+
+                if tool_name == "forecast":
+                    res = calculate_forecast(
+                        args.get("symbol", "GOOGL"), int(args.get("days", 30))
+                    )
+                    self.send_json(
+                        200,
+                        {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": {
+                                "content": [{"type": "text", "text": json.dumps(res)}]
                             },
-                            "required": ["account_id"],
+                        },
+                    )
+                    return
+
+                if tool_name == "get_account_balance":
+                    res = get_balance(args.get("account_id", "ACC-7890"))
+                    self.send_json(
+                        200,
+                        {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": {
+                                "content": [{"type": "text", "text": json.dumps(res)}]
+                            },
+                        },
+                    )
+                    return
+
+                self.send_json(
+                    404,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {
+                            "code": -32601,
+                            "message": f"Tool '{tool_name}' not found",
                         },
                     },
-                ]
-            },
-        })
+                )
+                return
 
-    # Tool invocation
-    if method == "tools/call":
-        tool_name = params.get("name")
-        args = params.get("arguments", {})
+            if "symbol" in body:
+                res = calculate_forecast(
+                    body.get("symbol", "GOOGL"), int(body.get("days", 30))
+                )
+                self.send_json(200, res)
+                return
 
-        if tool_name == "forecast":
-            res = calculate_forecast(args.get("symbol", "GOOGL"), int(args.get("days", 30)))
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(res)}]},
-            })
+            self.send_json(
+                200,
+                {
+                    "status": "ready",
+                    "service": "gke-vertex-finance-mcp",
+                    "hint": "Use JSON-RPC method tools/call or tools/list",
+                },
+            )
+            return
 
-        if tool_name == "get_account_balance":
-            res = get_balance(args.get("account_id", "ACC-7890"))
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(res)}]},
-            })
+        self.send_json(404, {"error": f"Path '{path}' not found"})
 
-        return JSONResponse(
-            {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": f"Tool '{tool_name}' not found"}},
-            status_code=404,
+    def log_message(self, format, *args):
+        logger.info(
+            "%s - - [%s] %s"
+            % (self.client_address[0], self.log_date_time_string(), format % args)
         )
 
-    # Direct REST fallback (e.g. POST /forecast)
-    if "symbol" in body:
-        res = calculate_forecast(body.get("symbol", "GOOGL"), int(body.get("days", 30)))
-        return JSONResponse(res)
 
-    return JSONResponse({
-        "status": "ready",
-        "service": "gke-vertex-finance-mcp",
-        "hint": "Use JSON-RPC method tools/call or tools/list",
-    })
+def run_server():
+    server = ThreadingHTTPServer(("0.0.0.0", LISTEN_PORT), MCPHandler)
+    logger.info(f"Starting Governed MCP Server on port {LISTEN_PORT}...")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
 
-
-async def healthz(request: Request) -> Response:
-    return JSONResponse({"status": "healthy", "service": "gke-vertex-finance-tool"})
-
-
-async def agent_card(request: Request) -> Response:
-    card = {
-        "name": "gke-vertex-finance-tool",
-        "description": "Financial forecasting and portfolio service governed by F5 BNK on GKE",
-        "version": "1.0.0",
-        "url": PUBLIC_URL,
-        "capabilities": ["tools"],
-        "governance": {
-            "gateway": "F5 BIG-IP Next for Kubernetes",
-            "cloud": "Google Cloud GKE",
-            "agent_framework": "Google Cloud Vertex AI Reasoning Engine",
-        },
-    }
-    return JSONResponse(card)
-
-
-app = Starlette(
-    routes=[
-        Route("/healthz", healthz, methods=["GET"]),
-        Route("/.well-known/agent-card.json", agent_card, methods=["GET"]),
-        Route("/", handle_rpc, methods=["GET", "POST"]),
-        Route("/v1/mcp/forecast", handle_rpc, methods=["GET", "POST"]),
-    ],
-    middleware=[Middleware(BearerAuthMiddleware)],
-)
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=LISTEN_PORT)
+    run_server()

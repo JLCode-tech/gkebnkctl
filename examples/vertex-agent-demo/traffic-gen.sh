@@ -16,7 +16,7 @@
 set -uo pipefail
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VIP="${VIP:-10.31.0.100}"
+VIP="${VIP:-10.10.1.10}"
 INGRESS_HOST="${INGRESS_HOST:-bnk-ingress.bnk-demo.internal}"
 INTERVAL="${INTERVAL:-15}"
 AGENT_TOKEN="${AGENT_TOKEN:-demo-agent-token-a7f3c1}"
@@ -108,4 +108,3 @@ while true; do
   echo "Sleeping ${INTERVAL}s..."
   sleep "$INTERVAL"
 done
-EOF && chmod +x /Users/j.lucia/Code/github/gkebnkctl/examples/vertex-agent-demo/traffic-gen.sh
