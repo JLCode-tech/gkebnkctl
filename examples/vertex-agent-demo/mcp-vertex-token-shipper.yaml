@@ -17,7 +17,7 @@ data:
     import time
     import urllib.error
     import urllib.request
-    from http.server import HTTPServer, BaseHTTPRequestHandler
+    from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
     import threading
 
     LOKI_URL = os.environ.get("LOKI_URL", "http://loki:3100/loki/api/v1/push")
@@ -88,7 +88,7 @@ data:
                 self.end_headers()
 
     def run_server():
-        server = HTTPServer(("0.0.0.0", PORT), MetricsHandler)
+        server = ThreadingHTTPServer(("0.0.0.0", PORT), MetricsHandler)
         print(f"Vertex Token Shipper listening on :{PORT}")
         server.serve_forever()
 

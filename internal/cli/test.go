@@ -35,7 +35,7 @@ var (
 
 var testCmd = &cobra.Command{
 	Use:   "test",
-	Short: "Run validation tests (DNS probe, network connectivity, egress verification)",
+	Short: "Run validation tests (DNS probe, network connectivity, egress verification, data-plane traffic)",
 }
 
 var testDNSCmd = &cobra.Command{

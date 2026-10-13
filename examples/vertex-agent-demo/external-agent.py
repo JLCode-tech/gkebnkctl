@@ -19,11 +19,12 @@ import sys
 import urllib.error
 import urllib.request
 
-DEFAULT_URL = os.environ.get("BNK_MCP_URL", "http://10.31.0.100/v1/mcp/forecast")
+DEFAULT_URL = os.environ.get("BNK_MCP_URL", "http://10.10.1.10/v1/mcp/forecast")
 DEFAULT_HOST = os.environ.get("BNK_INGRESS_HOST", "bnk-ingress.bnk-demo.internal")
 DEFAULT_TOKEN = os.environ.get("BNK_MCP_TOKEN", "demo-external-token-4b9e2d")
 
 TICKER_RE = re.compile(r"\b([A-Z]{1,5})\b")
+
 
 def extract_symbol(prompt: str, fallback: str = "GOOGL") -> str:
     stopwords = {"I", "A", "THE", "FOR", "GET", "ME", "AND", "OF", "IS", "TO"}
@@ -31,6 +32,7 @@ def extract_symbol(prompt: str, fallback: str = "GOOGL") -> str:
         if candidate not in stopwords:
             return candidate
     return fallback
+
 
 def build_payload(args: argparse.Namespace) -> dict:
     if args.tool == "get_account_balance":
@@ -44,10 +46,13 @@ def build_payload(args: argparse.Namespace) -> dict:
         "params": {"name": args.tool, "arguments": arguments},
     }
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--prompt", default="forecast GOOGL", help="free-text prompt")
-    parser.add_argument("--tool", default="forecast", choices=["forecast", "get_account_balance"])
+    parser.add_argument(
+        "--tool", default="forecast", choices=["forecast", "get_account_balance"]
+    )
     parser.add_argument("--account", default="ACC-1001")
     parser.add_argument("--days", type=int, default=30)
     parser.add_argument("--url", default=DEFAULT_URL)
@@ -89,6 +94,6 @@ def main() -> int:
         print(f"  no response: {exc.reason}")
         return 2
 
+
 if __name__ == "__main__":
     sys.exit(main())
-EOF && chmod +x /Users/j.lucia/Code/github/gkebnkctl/examples/vertex-agent-demo/external-agent.py

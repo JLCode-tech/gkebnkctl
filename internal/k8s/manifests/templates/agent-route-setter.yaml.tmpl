@@ -62,5 +62,7 @@ spec:
                 nsenter -t 1 -m -u -n -i -- ip route replace "$want_cidr" via "$want_gw" dev "$want_dev"
                 ;;
             esac
+            nsenter -t 1 -m -u -n -i -- iptables -t nat -C POSTROUTING -o "$want_dev" -j MASQUERADE 2>/dev/null || \
+              nsenter -t 1 -m -u -n -i -- iptables -t nat -I POSTROUTING 1 -o "$want_dev" -j MASQUERADE
             sleep 60
           done

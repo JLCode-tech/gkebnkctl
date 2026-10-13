@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: traffic-generator-script
-  namespace: bnk-demo
+  namespace: default
 data:
   traffic_gen.py: |
     import json
@@ -13,8 +13,10 @@ data:
     import urllib.error
 
     SYMBOLS = ["GOOGL", "AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA"]
-    MCP_URL = os.environ.get("MCP_URL", "http://vertex-finance-mcp.bnk-demo.svc.cluster.local:8080/v1/mcp/forecast")
-    DISC_URL = os.environ.get("DISC_URL", "http://vertex-finance-mcp.bnk-demo.svc.cluster.local:8080/.well-known/agent-card.json")
+    VIP = os.environ.get("BNK_VIP", "10.10.1.10")
+    INGRESS_HOST = os.environ.get("INGRESS_HOST", "bnk-ingress.bnk-demo.internal")
+    MCP_URL = os.environ.get("MCP_URL", f"http://{VIP}/v1/mcp/forecast")
+    DISC_URL = os.environ.get("DISC_URL", f"http://{VIP}/.well-known/agent-card.json")
     SHIPPER_URL = os.environ.get("SHIPPER_URL", "http://vertex-token-shipper.llm-egress.svc.cluster.local:9090")
     AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "demo-agent-token-a7f3c1")
     EXTERNAL_TOKEN = os.environ.get("EXTERNAL_TOKEN", "demo-external-token-4b9e2d")
@@ -33,11 +35,14 @@ data:
                 return resp.status
         except urllib.error.HTTPError as e:
             return e.code
-        except Exception as e:
+        except Exception:
             return 0
 
-    def get(url, timeout=5):
-        req = urllib.request.Request(url)
+    def get(url, headers=None, timeout=5):
+        h = {}
+        if headers:
+            h.update(headers)
+        req = urllib.request.Request(url, headers=h)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.status
@@ -80,7 +85,7 @@ data:
         f_res = post_json(
             MCP_URL,
             fc_body,
-            {"Authorization": "Bearer " + AGENT_TOKEN}
+            {"Authorization": "Bearer " + AGENT_TOKEN, "Host": INGRESS_HOST}
         )
 
         # Leg B2: Unauthorized balance (403 Forbidden)
@@ -93,14 +98,14 @@ data:
         b_res = post_json(
             MCP_URL,
             bal_body,
-            {"Authorization": "Bearer " + EXTERNAL_TOKEN}
+            {"Authorization": "Bearer " + EXTERNAL_TOKEN, "Host": INGRESS_HOST}
         )
 
         # Leg B3: Discovery (200 OK)
-        d_res = get(DISC_URL)
+        d_res = get(DISC_URL, headers={"Host": INGRESS_HOST})
 
         # Leg B4: Unauthenticated (401 Unauthorized)
-        u_res = post_json(MCP_URL, fc_body)
+        u_res = post_json(MCP_URL, fc_body, headers={"Host": INGRESS_HOST})
 
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         print("[" + ts + "] Wave sent -> Model:" + sym + " (Loki:" + str(s_res) + ", " + str(ptk+ctk) + " tk) | MCP forecast:" + str(f_res) + " bal:" + str(b_res) + " disc:" + str(d_res) + " unauth:" + str(u_res), flush=True)
@@ -110,7 +115,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vertex-traffic-generator
-  namespace: bnk-demo
+  namespace: default
   labels:
     app: vertex-traffic-generator
 spec:
