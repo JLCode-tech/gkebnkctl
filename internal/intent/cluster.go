@@ -615,11 +615,14 @@ type ForgeSpec struct {
 const DefaultForgeRESTURL = "http://localhost:8000"
 
 // ResolveURL returns the forge REST URL to use, in priority order:
-//  1. GKEBNKCTL_FORGE_URL or AWSBNKCTL_FORGE_URL environment variable
+//  1. GKEBNKCTL_FORGE_URL, FORGE_URL, or AWSBNKCTL_FORGE_URL environment variable
 //  2. f.URL (cluster.yaml forge.url)
 //  3. DefaultForgeRESTURL ("http://localhost:8000")
 func (f *ForgeSpec) ResolveURL() string {
 	if v := os.Getenv("GKEBNKCTL_FORGE_URL"); v != "" {
+		return v
+	}
+	if v := os.Getenv("FORGE_URL"); v != "" {
 		return v
 	}
 	if v := os.Getenv("AWSBNKCTL_FORGE_URL"); v != "" {
@@ -632,11 +635,14 @@ func (f *ForgeSpec) ResolveURL() string {
 }
 
 // ResolveUsername returns the forge REST login username, in priority order:
-//  1. GKEBNKCTL_FORGE_USERNAME / AWSBNKCTL_FORGE_USERNAME env
+//  1. GKEBNKCTL_FORGE_USERNAME / FORGE_USERNAME / AWSBNKCTL_FORGE_USERNAME env
 //  2. f.Username (cluster.yaml forge.username)
 //  3. default "admin"
 func (f *ForgeSpec) ResolveUsername() string {
 	if v := os.Getenv("GKEBNKCTL_FORGE_USERNAME"); v != "" {
+		return v
+	}
+	if v := os.Getenv("FORGE_USERNAME"); v != "" {
 		return v
 	}
 	if v := os.Getenv("AWSBNKCTL_FORGE_USERNAME"); v != "" {
@@ -653,6 +659,9 @@ func (f *ForgeSpec) ResolvePassword() (password string, usingDefault bool) {
 	if v := os.Getenv("GKEBNKCTL_FORGE_PASSWORD"); v != "" {
 		return v, false
 	}
+	if v := os.Getenv("FORGE_PASSWORD"); v != "" {
+		return v, false
+	}
 	if v := os.Getenv("AWSBNKCTL_FORGE_PASSWORD"); v != "" {
 		return v, false
 	}
@@ -664,13 +673,17 @@ func (f *ForgeSpec) ResolvePassword() (password string, usingDefault bool) {
 
 // ResolveAgentToken returns the benchmark agent JWT token in priority order:
 //  1. GKEBNKCTL_FORGE_AGENT_TOKEN environment variable
-//  2. AWSBNKCTL_FORGE_AGENT_TOKEN environment variable (cross-family fallback)
-//  3. f.AgentToken (cluster.yaml forge.agent_token)
-//  4. f.AgentTokenCamel (cluster.yaml forge.agentToken)
+//  2. FORGE_AGENT_TOKEN environment variable (cloud-agnostic standard)
+//  3. AWSBNKCTL_FORGE_AGENT_TOKEN environment variable (cross-family fallback)
+//  4. f.AgentToken (cluster.yaml forge.agent_token)
+//  5. f.AgentTokenCamel (cluster.yaml forge.agentToken)
 //
 // Returns empty string if unset.
 func (f *ForgeSpec) ResolveAgentToken() string {
 	if v := os.Getenv("GKEBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
+		return v
+	}
+	if v := os.Getenv("FORGE_AGENT_TOKEN"); v != "" {
 		return v
 	}
 	if v := os.Getenv("AWSBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
@@ -690,6 +703,9 @@ func (f *ForgeSpec) ResolveAgentToken() string {
 // ResolveEnvironment returns the forge project environment.
 func (f *ForgeSpec) ResolveEnvironment() string {
 	if v := os.Getenv("GKEBNKCTL_FORGE_ENVIRONMENT"); v != "" {
+		return v
+	}
+	if v := os.Getenv("FORGE_ENVIRONMENT"); v != "" {
 		return v
 	}
 	if v := os.Getenv("AWSBNKCTL_FORGE_ENVIRONMENT"); v != "" {

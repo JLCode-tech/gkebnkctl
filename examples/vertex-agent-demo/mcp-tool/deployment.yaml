@@ -11,7 +11,7 @@ metadata:
   labels:
     app: vertex-finance-mcp
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: vertex-finance-mcp
@@ -20,15 +20,15 @@ spec:
       labels:
         app: vertex-finance-mcp
     spec:
+      nodeSelector:
+        cloud.google.com/gke-nodepool: agent-pool
       containers:
         - name: mcp-tool
           image: python:3.11-slim
           command:
-            - /bin/bash
-            - -c
-            - |
-              pip install --no-cache-dir fastmcp starlette uvicorn
-              python3 /app/mcp-server.py
+            - python3
+            - -u
+            - /app/mcp-server.py
           env:
             - name: MCP_PORT
               value: "8080"
@@ -49,8 +49,8 @@ spec:
             httpGet:
               path: /healthz
               port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 15
+            initialDelaySeconds: 3
+            periodSeconds: 10
           volumeMounts:
             - name: tool-script
               mountPath: /app

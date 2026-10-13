@@ -42,4 +42,3 @@ python3 "$DEMO_DIR/agent/vertex_agent.py" --symbol GOOGL --days 30
 echo "================================================================="
 echo " Demonstration active! Continuous live telemetry flowing to Forge."
 echo "================================================================="
-EOF && chmod +x /Users/j.lucia/Code/github/gkebnkctl/examples/vertex-agent-demo/scripts/demo.sh

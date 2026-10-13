@@ -1,11 +1,7 @@
 {
   "version": "0.2",
   "language": "en",
-  "ignorePaths": [
-    "go.sum",
-    "vendor/**",
-    "workspaces/**"
-  ],
+  "ignorePaths": ["go.sum", "vendor/**", "workspaces/**"],
   "words": [
     "AC",
     "accessmethod",
@@ -386,6 +382,7 @@
     "HTMLURL",
     "httproute",
     "httproutee2e",
+    "httproutes",
     "Hugepages",
     "hugepages",
     "hugepagesz",
@@ -529,6 +526,7 @@
     "multus",
     "Multus",
     "mwiget",
+    "myapp",
     "mypass",
     "myroute",
     "myuser",
@@ -616,6 +614,7 @@
     "pkts",
     "portforward",
     "postflight",
+    "POSTROUTING",
     "preface",
     "Preface",
     "PreferNoSchedule",
@@ -666,6 +665,7 @@
     "renderable",
     "repoint",
     "reqs",
+    "rerr",
     "rerun",
     "resolv",
     "resourcegroupstaggingapi",
@@ -906,6 +906,7 @@
     "vxlan",
     "webhook",
     "Webhook",
+    "werr",
     "whoami",
     "workspace_dispatch",
     "worktree",

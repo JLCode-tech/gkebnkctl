@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -18,8 +17,9 @@ var (
 )
 
 var bnkforgeCmd = &cobra.Command{
-	Use:   "bnkforge",
-	Short: "Integrate with BNK Forge testbed and registration daemon",
+	Use:        "bnkforge",
+	Short:      "Integrate with BNK Forge testbed and registration daemon",
+	Deprecated: "use 'gkebnkctl forge' instead",
 	Long: `gkebnkctl bnkforge registers, queries, and unregisters your GKE BNK deployment
 with the central BNK Forge testbed topology daemon.
 
@@ -73,7 +73,8 @@ func runBNKForgeRegister(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("register with bnkforge: %w", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "✓ Registered cluster %s with BNK Forge (%s)\n", cl.Metadata.Name, flagForgeURL)
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "✓ Registered cluster %s with BNK Forge (%s)\n", cl.Metadata.Name, flagForgeURL)
 	return nil
 }
 
@@ -89,7 +90,8 @@ func runBNKForgeUnregister(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("unregister from bnkforge: %w", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "✓ Unregistered cluster %s from BNK Forge\n", cl.Metadata.Name)
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "✓ Unregistered cluster %s from BNK Forge\n", cl.Metadata.Name)
 	return nil
 }
 
@@ -106,15 +108,16 @@ func runBNKForgeStatus(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("query bnkforge status: %w", err)
 	}
 
+	out := cmd.OutOrStdout()
 	if flagForgeJSON {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(st)
 	}
 
-	fmt.Printf("BNK Forge Status for %s:\n", st.Name)
-	fmt.Printf("  Provider:   %s\n", st.Provider)
-	fmt.Printf("  Status:     %s\n", st.Status)
-	fmt.Printf("  Registered: %s\n", st.RegisteredAt)
+	fmt.Fprintf(out, "BNK Forge Status for %s:\n", st.Name)
+	fmt.Fprintf(out, "  Provider:   %s\n", st.Provider)
+	fmt.Fprintf(out, "  Status:     %s\n", st.Status)
+	fmt.Fprintf(out, "  Registered: %s\n", st.RegisteredAt)
 	return nil
 }

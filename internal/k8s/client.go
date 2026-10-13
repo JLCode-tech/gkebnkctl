@@ -100,3 +100,13 @@ func BuildClientset(kubeconfigPath string) (kubernetes.Interface, error) {
 	}
 	return NewClientsetFromConfig(cfg)
 }
+
+// BuildDynamicClient builds a dynamic.Interface from kubeconfigPath.
+// kubeconfigPath: empty string → DefaultKubeconfigPath().
+func BuildDynamicClient(kubeconfigPath string) (dynamic.Interface, error) {
+	cfg, err := BuildRESTConfigFromKubeconfig(kubeconfigPath, "")
+	if err != nil {
+		return nil, err
+	}
+	return NewDynamicFromConfig(cfg)
+}

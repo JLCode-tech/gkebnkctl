@@ -169,9 +169,9 @@ func PushSSHPublicKey(ctx context.Context, region, instanceID, pubKeyPath string
 	return nil
 }
 
-// buildCurlCmd returns the remote curl command. When host is non-empty it
+// BuildCurlCmd returns the remote curl command. When host is non-empty it
 // adds -H 'Host: <host>' so requests match hostname-scoped HTTPRoutes.
-func buildCurlCmd(sourceIP, vip, host string, timeoutSecs int) string {
+func BuildCurlCmd(sourceIP, vip, host string, timeoutSecs int) string {
 	hostHdr := ""
 	if host != "" {
 		hostHdr = fmt.Sprintf(`-H 'Host: %s' `, host)
@@ -187,7 +187,7 @@ func buildCurlCmd(sourceIP, vip, host string, timeoutSecs int) string {
 // SSHCurlViaIAP opens an IAP tunnel to the jumphost and runs a single curl.
 func SSHCurlViaIAP(ctx context.Context, region, instanceID, keyPath, sourceIP, vip, host string, timeout time.Duration) (int, float64, error) {
 	proxy := fmt.Sprintf(`ProxyCommand=gcloud compute start-iap-tunnel %s 22 --listen-on-stdin`, instanceID)
-	remoteCmd := buildCurlCmd(sourceIP, vip, host, int(timeout.Seconds()))
+	remoteCmd := BuildCurlCmd(sourceIP, vip, host, int(timeout.Seconds()))
 	args := []string{
 		"-o", proxy,
 		"-o", "StrictHostKeyChecking=no",
