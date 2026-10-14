@@ -24,8 +24,8 @@ import (
 	"github.com/JLCode-tech/gkebnkctl/internal/k8s/bnkscan"
 )
 
-// scanClients builds the dynamic + typed clients bnkscan needs. Tests replace it.
-var scanClients = func(kubeconfigPath string) (dynamic.Interface, kubernetes.Interface, error) {
+// ScanClients builds the dynamic + typed clients bnkscan needs. Tests replace it.
+var ScanClients = func(kubeconfigPath string) (dynamic.Interface, kubernetes.Interface, error) {
 	cfg, err := k8s.BuildRESTConfig(kubeconfigPath)
 	if err != nil {
 		return nil, nil, err
@@ -41,12 +41,12 @@ var scanClients = func(kubeconfigPath string) (dynamic.Interface, kubernetes.Int
 	return dyn, cs, nil
 }
 
-// statusScanTimeout bounds the best-effort BNK scan in status and doctor.
-const statusScanTimeout = 20 * time.Second
+// StatusScanTimeout bounds the best-effort BNK scan in status and doctor.
+const StatusScanTimeout = 20 * time.Second
 
-// scanBNK indexes the cluster behind kubeconfigPath within timeout.
-func scanBNK(ctx context.Context, kubeconfigPath, controllerNS string, timeout time.Duration) (*bnkscan.Index, error) {
-	dyn, cs, err := scanClients(kubeconfigPath)
+// ScanBNK indexes the cluster behind kubeconfigPath within timeout.
+func ScanBNK(ctx context.Context, kubeconfigPath, controllerNS string, timeout time.Duration) (*bnkscan.Index, error) {
+	dyn, cs, err := ScanClients(kubeconfigPath)
 	if err != nil {
 		return nil, err
 	}
@@ -55,9 +55,9 @@ func scanBNK(ctx context.Context, kubeconfigPath, controllerNS string, timeout t
 	return bnkscan.Scan(sctx, dyn, cs, bnkscan.Options{ControllerNamespace: controllerNS})
 }
 
-// writeStatusBNK prints the BNK block of status. Best-effort like
+// WriteStatusBNK prints the BNK block of status. Best-effort like
 // every other status section: a scan error is one line, not a failure.
-func writeStatusBNK(w io.Writer, idx *bnkscan.Index, scanErr error) {
+func WriteStatusBNK(w io.Writer, idx *bnkscan.Index, scanErr error) {
 	if scanErr != nil {
 		fmt.Fprintf(w, "BNK API:\t(scan failed: %v)\n", scanErr)
 		return
@@ -94,10 +94,10 @@ func writeStatusBNK(w io.Writer, idx *bnkscan.Index, scanErr error) {
 	}
 }
 
-// bnkDoctorChecks renders the readiness verdict as doctor rows. Readiness
+// BnkDoctorChecks renders the readiness verdict as doctor rows. Readiness
 // failures are errors; a 2.3 or mixed API generation and leftover 2.3 objects
 // are warnings that point at bnk upgrade / bnk migrate-2.4.
-func bnkDoctorChecks(idx *bnkscan.Index, scanErr error) []doctor.Check {
+func BnkDoctorChecks(idx *bnkscan.Index, scanErr error) []doctor.Check {
 	row := func(name string, status doctor.CheckStatus, detail string) doctor.Check {
 		return doctor.Check{Name: name, Status: status, Detail: detail, BackendName: "k8s"}
 	}
@@ -122,7 +122,7 @@ func bnkDoctorChecks(idx *bnkscan.Index, scanErr error) []doctor.Check {
 		st, detail := doctor.StatusOK, rd.Infras.String()+" Programmed=True"
 		if rd.Infras.Total == 0 || rd.Infras.Ready < rd.Infras.Total {
 			st = doctor.StatusError
-			detail += " -- " + strings.Join(filterPrefix(rd.Problems, "Infra", "no Infra"), "; ")
+			detail += " -- " + strings.Join(FilterPrefix(rd.Problems, "Infra", "no Infra"), "; ")
 		}
 		out = append(out, row("bnk infra", st, detail))
 		if rd.Generation == bnkscan.Gen24 && (rd.LegacyCRDs || rd.LegacyCRs > 0) {
@@ -132,7 +132,7 @@ func bnkDoctorChecks(idx *bnkscan.Index, scanErr error) []doctor.Check {
 	gwStatus, gwDetail := doctor.StatusOK, rd.Gateways.String()+" Accepted=True,Programmed=True"
 	if rd.Gateways.Ready < rd.Gateways.Total {
 		gwStatus = doctor.StatusError
-		gwDetail += " -- " + strings.Join(filterPrefix(rd.Problems, "Gateway"), "; ")
+		gwDetail += " -- " + strings.Join(FilterPrefix(rd.Problems, "Gateway"), "; ")
 	}
 	out = append(out, row("bnk gateways", gwStatus, gwDetail))
 	ctrl := rd.Controller
@@ -147,8 +147,8 @@ func bnkDoctorChecks(idx *bnkscan.Index, scanErr error) []doctor.Check {
 	return out
 }
 
-// filterPrefix keeps the lines starting with one of the prefixes.
-func filterPrefix(lines []string, prefixes ...string) []string {
+// FilterPrefix keeps the lines starting with one of the prefixes.
+func FilterPrefix(lines []string, prefixes ...string) []string {
 	var out []string
 	for _, l := range lines {
 		for _, p := range prefixes {
@@ -161,8 +161,8 @@ func filterPrefix(lines []string, prefixes ...string) []string {
 	return out
 }
 
-// warnf prints an operator warning to stderr without emojis.
-func warnf(format string, args ...any) {
+// Warnf prints an operator warning to stderr without emojis.
+func Warnf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "[warn] "+format+"\n", args...)
 }
 

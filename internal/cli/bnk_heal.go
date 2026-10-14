@@ -149,8 +149,8 @@ func runBnkHeal(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// healDoctorChecks renders the registry detections as doctor rows.
-func healDoctorChecks(ctx context.Context, clients *phases.Clients) []doctor.Check {
+// HealDoctorChecks renders the registry detections as doctor rows.
+func HealDoctorChecks(ctx context.Context, clients *phases.Clients) []doctor.Check {
 	var out []doctor.Check
 	for _, s := range phases.DetectAll(ctx, &phases.HealDeps{Clients: clients}) {
 		c := doctor.Check{Name: s.Title, BackendName: "k8s"}

@@ -200,7 +200,7 @@ type ApplyOptions struct {
 // Run resolves Filename to a slice of unstructured objects and SSA-applies each via Applier.
 func (o *ApplyOptions) Run(ctx context.Context) error {
 	if o.Filename == "" {
-		return errors.New("Filename is required (file, directory, or '-' for stdin)")
+		return errors.New("filename is required (file, directory, or '-' for stdin)")
 	}
 	cfg, err := BuildRESTConfig(o.KubeconfigPath)
 	if err != nil {
