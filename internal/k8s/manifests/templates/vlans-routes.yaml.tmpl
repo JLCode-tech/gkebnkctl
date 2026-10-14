@@ -18,9 +18,9 @@ spec:
   category: external
   interfaces:
   - "1.1"
-  internal: true
+  internal: false
   mtu: {{ .TmmMtu }}
-  prefixlen_v4: 16
+  prefixlen_v4: {{ .ExtUnderlayPrefixLen }}
   selfip_v4s:
   - {{ .ExtSelfIP }}
   tag: 0

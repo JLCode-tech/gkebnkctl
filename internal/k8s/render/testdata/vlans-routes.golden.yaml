@@ -18,7 +18,7 @@ spec:
   category: external
   interfaces:
   - "1.1"
-  internal: true
+  internal: false
   mtu: 1460
   prefixlen_v4: 16
   selfip_v4s:

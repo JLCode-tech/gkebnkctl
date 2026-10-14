@@ -65,6 +65,6 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("doctor detected warnings with --strict enabled")
 	}
 
-	fmt.Fprintln(out, "✓ Environment ready for gkebnkctl provisioning.")
+	fmt.Fprintln(out, "[ok] Environment ready for gkebnkctl provisioning.")
 	return nil
 }

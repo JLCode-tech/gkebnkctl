@@ -80,21 +80,6 @@ var remoteMetricsScrapeFn = scrapeRemoteMetrics
 // runStagingCommandsFn is the jumphost seam used by scrapeRemoteMetrics.
 var runStagingCommandsFn = jumphost.RunStagingCommands
 
-// resolveKubeconfigFlags returns explicit if provided, or looks for artifacts/kubeconfig,
-// falling back to DefaultKubeconfigPath.
-func resolveKubeconfigFlags(explicit, configPath string) (string, error) {
-	if explicit != "" {
-		return explicit, nil
-	}
-	if configPath != "" {
-		artPath := filepath.Join("artifacts", "kubeconfig")
-		if _, err := os.Stat(artPath); err == nil {
-			return artPath, nil
-		}
-	}
-	return k8s.DefaultKubeconfigPath(), nil
-}
-
 func genAIScrapeConfigured() bool {
 	return len(flagBenchMetricsPodSelector) > 0 || len(flagBenchMetricsURLs) > 0
 }

@@ -23,9 +23,14 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// InClusterKubeconfigSentinel is the magic value for kubeconfigPath that
+// triggers rest.InClusterConfig() lookup. Used when gkebnkctl runs inside
+// a cluster and gets its credentials from the projected service account.
+const InClusterKubeconfigSentinel = "in-cluster"
+
 // DefaultKubeconfigPath returns the first existing path in $KUBECONFIG
 // (colon-separated, matching kubectl's own resolution), falling back to
-// ~/.kube/config. Empty if neither exists.
+// artifacts/kubeconfig, .gkebnkctl/*/kubeconfig, or ~/.kube/config. Empty if none exist.
 func DefaultKubeconfigPath() string {
 	if v := os.Getenv("KUBECONFIG"); v != "" {
 		for _, p := range filepath.SplitList(v) {
@@ -33,6 +38,12 @@ func DefaultKubeconfigPath() string {
 				return p
 			}
 		}
+	}
+	if _, err := os.Stat("artifacts/kubeconfig"); err == nil {
+		return "artifacts/kubeconfig"
+	}
+	if matches, err := filepath.Glob(".gkebnkctl/*/kubeconfig"); err == nil && len(matches) > 0 {
+		return matches[0]
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -43,6 +54,18 @@ func DefaultKubeconfigPath() string {
 		return def
 	}
 	return ""
+}
+
+// BuildRESTConfig builds a rest.Config from a kubeconfig path or in-cluster sentinel.
+func BuildRESTConfig(kubeconfigPath string) (*rest.Config, error) {
+	if kubeconfigPath == InClusterKubeconfigSentinel {
+		cfg, err := rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("in-cluster config: %w", err)
+		}
+		return cfg, nil
+	}
+	return BuildRESTConfigFromKubeconfig(kubeconfigPath, "")
 }
 
 // BuildRESTConfigFromKubeconfig builds a rest.Config from a local kubeconfig

@@ -29,12 +29,13 @@ const (
 
 // Check is a single diagnostic observation.
 type Check struct {
-	Name     string      `json:"name"`
-	Status   CheckStatus `json:"status"`
-	Detail   string      `json:"detail"`
-	Why      string      `json:"why,omitempty"`
-	Hint     string      `json:"hint,omitempty"`
-	Optional bool        `json:"optional,omitempty"`
+	Name        string      `json:"name"`
+	BackendName string      `json:"backend_name,omitempty"`
+	Status      CheckStatus `json:"status"`
+	Detail      string      `json:"detail"`
+	Why         string      `json:"why,omitempty"`
+	Hint        string      `json:"hint,omitempty"`
+	Optional    bool        `json:"optional,omitempty"`
 }
 
 // Config holds options for running doctor.

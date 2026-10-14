@@ -27,10 +27,11 @@ import (
 // letter and end with a letter or digit.
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,38}[a-z0-9]$`)
 
-// PatternHostDevice is the only pattern this seed supports. Kept as a named
-// constant (rather than a bare literal) for forward-compat with awsbnkctl's
-// pattern: field, which supports several values.
-const PatternHostDevice = "host-device"
+const (
+	PatternHostDevice    = "host-device"
+	PatternExternalOnly  = "external-only"
+	PatternDualInterface = "dual-interface"
+)
 
 // APIVersion and Kind are the only accepted values for their respective
 // cluster.yaml fields.
@@ -80,6 +81,8 @@ type Cluster struct {
 	// cluster-svcs F5SPKStaticRoute template.
 	MainSvcsDest      string `yaml:"-"`
 	MainSvcsPrefixLen int    `yaml:"-"`
+	// SourcePath is the filesystem path the cluster was loaded from.
+	SourcePath string `yaml:"-"`
 }
 
 // Metadata carries the cluster identity fields.
@@ -197,6 +200,10 @@ type BnkSpec struct {
 	JwtPath string `yaml:"jwtPath"`
 	// FarSecret configures how the far-secret pull credential is sourced.
 	FarSecret FarSecretSpec `yaml:"farSecret,omitempty"`
+	// FARArchive is the path to F5's FAR pull credentials JSON or tar.gz file (used by bnk upgrade / Helm OCI).
+	FARArchive string `yaml:"farArchive,omitempty"`
+	// JWT is the path to the F5 subscription JWT. Alias for JwtPath.
+	JWT string `yaml:"jwt,omitempty"`
 	// ImageRegistry is the container registry prefix where BNK/FLO images are pulled from.
 	// Default "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga".
 	ImageRegistry string `yaml:"imageRegistry,omitempty"`
@@ -274,10 +281,9 @@ func Load(path string) (*Cluster, error) {
 		return nil, fmt.Errorf("validating cluster.yaml %s: %w", path, err)
 	}
 	if err := deriveComputed(&c); err != nil {
-		// Should be unreachable — validate() already proved every CIDR
-		// referenced here parses. Surfaced defensively rather than panicking.
 		return nil, fmt.Errorf("deriving cluster.yaml %s: %w", path, err)
 	}
+	c.SourcePath = path
 	return &c, nil
 }
 
@@ -330,8 +336,18 @@ func applyDefaults(c *Cluster, baseDir string) {
 	if c.Bnk.ImageRegistry == "" {
 		c.Bnk.ImageRegistry = "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga"
 	}
+	if c.Bnk.JwtPath == "" && c.Bnk.JWT != "" {
+		c.Bnk.JwtPath = c.Bnk.JWT
+	}
+	if c.Bnk.JWT == "" && c.Bnk.JwtPath != "" {
+		c.Bnk.JWT = c.Bnk.JwtPath
+	}
 	if c.Bnk.JwtPath != "" && !filepath.IsAbs(c.Bnk.JwtPath) {
 		c.Bnk.JwtPath = filepath.Join(baseDir, c.Bnk.JwtPath)
+		c.Bnk.JWT = c.Bnk.JwtPath
+	}
+	if c.Bnk.FARArchive != "" && !filepath.IsAbs(c.Bnk.FARArchive) {
+		c.Bnk.FARArchive = filepath.Join(baseDir, c.Bnk.FARArchive)
 	}
 	if c.Bnk.FarSecret.SourceNamespace == "" {
 		c.Bnk.FarSecret.SourceNamespace = "f5-bnk"
@@ -459,8 +475,20 @@ func validate(c *Cluster) error {
 	if _, err := os.Stat(c.Bnk.JwtPath); err != nil {
 		return fmt.Errorf("bnk.jwtPath %q: %w", c.Bnk.JwtPath, err)
 	}
-	if err := validateFarSecret(c.Bnk.FarSecret); err != nil {
-		return err
+	if c.Bnk.FARArchive != "" {
+		if _, err := os.Stat(c.Bnk.FARArchive); err != nil {
+			return fmt.Errorf("bnk.farArchive %q: %w", c.Bnk.FARArchive, err)
+		}
+	}
+	if c.Bnk.FarSecret.Source != "" || c.Bnk.FARArchive == "" {
+		if err := validateFarSecret(c.Bnk.FarSecret); err != nil {
+			return err
+		}
+	}
+	if c.AI != nil {
+		if err := validateSynthetic(c.AI.Synthetic); err != nil {
+			return err
+		}
 	}
 
 	warnCIDROverlaps(c)
@@ -725,48 +753,31 @@ func (f *ForgeSpec) ResolveProjectType() string {
 	return "cloud-gcp"
 }
 
-// AISpec captures optional AI / LLM configuration.
-type AISpec struct {
-	Synthetic *SyntheticSpec `yaml:"synthetic,omitempty"`
+// HasInternalInterface reports whether the topology provisions a second data plane interface.
+func (c *Cluster) HasInternalInterface() bool {
+	return c != nil && (c.Pattern == PatternDualInterface || c.Network.Internal.CIDR != "")
 }
 
-// SyntheticSpec configures synthetic inference simulation.
-type SyntheticSpec struct {
-	Enabled         bool   `yaml:"enabled"`
-	ServedModelName string `yaml:"servedModelName,omitempty"`
-	Image           string `yaml:"image,omitempty"`
-}
-
-// SyntheticAIEnabled reports whether synthetic AI inference simulation is enabled.
-func (c *Cluster) SyntheticAIEnabled() bool {
-	return c != nil && c.AI != nil && c.AI.Synthetic != nil && c.AI.Synthetic.Enabled
-}
-
-// UsesSyntheticAI reports whether the AI scenario runs the simulator.
-func (c *Cluster) UsesSyntheticAI() bool {
-	return c != nil && c.SyntheticAIEnabled()
-}
-
-// SimulatorTags labels benchmark results with what the simulator stands in for.
-func (c *Cluster) SimulatorTags() map[string]string {
-	if !c.UsesSyntheticAI() {
-		return nil
-	}
-	m := "meta-llama/Meta-Llama-3-8B-Instruct"
-	if c.AI.Synthetic.ServedModelName != "" {
-		m = c.AI.Synthetic.ServedModelName
-	}
-	return map[string]string{"model_server": "llm-d-inference-sim", "sim_model": m}
+// IsReservedGatewayVIPOffset returns true if the host offset falls in the BNK Gateway VIP plan (.100 to .119).
+func IsReservedGatewayVIPOffset(offset int) bool {
+	return offset >= 100 && offset <= 119
 }
 
 // DefaultVIP derives the default BNK Gateway VIP from the external network CIDR.
-// Convention: <network.external.cidr network>.100 — e.g. 10.31.0.0/24 → 10.31.0.100.
-// Returns an error when network.external.cidr is not set.
+// When PodsCIDR is configured (e.g. GKE multi-networking with host-device), VIPs
+// belong to the secondary pod range (defaulting to offset 10, e.g. 10.81.1.10).
+// Otherwise, it derives from External.CIDR (defaulting to offset 100).
+// Returns an error when neither network.external.podsCidr nor network.external.cidr is set.
 func (c *Cluster) DefaultVIP() (string, error) {
-	if c.Network.External.CIDR == "" {
+	cidr := c.Network.External.PodsCIDR
+	offset := byte(10)
+	if cidr == "" {
+		cidr = c.Network.External.CIDR
+		offset = 100
+	}
+	if cidr == "" {
 		return "", errors.New("network.external.cidr not set; pass --vip explicitly")
 	}
-	cidr := c.Network.External.CIDR
 	slash := strings.IndexByte(cidr, '/')
 	if slash < 0 {
 		return "", fmt.Errorf("invalid external CIDR %q: missing '/'", cidr)
@@ -779,6 +790,27 @@ func (c *Cluster) DefaultVIP() (string, error) {
 	if ip4 == nil {
 		return "", fmt.Errorf("external CIDR %q is not IPv4", cidr)
 	}
-	vip := net.IPv4(ip4[0], ip4[1], ip4[2], 100)
+	vip := net.IPv4(ip4[0], ip4[1], ip4[2], offset)
 	return vip.String(), nil
+}
+
+// SelfIPPoolPrefix is the CIDR prefix length for TMM self-IP pools.
+const SelfIPPoolPrefix = 27
+
+const selfIPPoolMask = byte(1<<(32-SelfIPPoolPrefix) - 1)
+
+// SelfIPPoolRange returns the rangeStart/rangeEnd of the self-IP pool for
+// selfIP: the /SelfIPPoolPrefix block that contains it, minus its last address.
+func SelfIPPoolRange(selfIP string) (start, end string, err error) {
+	ip := net.ParseIP(selfIP).To4()
+	if ip == nil {
+		return "", "", fmt.Errorf("self IP %q is not an IPv4 address", selfIP)
+	}
+	first := ip[3] &^ selfIPPoolMask
+	if first == 0 {
+		return "", "", fmt.Errorf("self IP %s falls in the first /%d of its subnet", selfIP, SelfIPPoolPrefix)
+	}
+	start = net.IPv4(ip[0], ip[1], ip[2], first).String()
+	end = net.IPv4(ip[0], ip[1], ip[2], first+selfIPPoolMask-1).String()
+	return start, end, nil
 }

@@ -16,6 +16,8 @@ import (
 	"bytes"
 	"fmt"
 	"text/template"
+
+	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 )
 
 // Render executes a Go text/template given in tmpl with data as the
@@ -177,4 +179,101 @@ type IngressVxlanRoutesVars struct {
 // case rather than SSA-ing zero objects.
 func RenderIngressVxlanRoutes(tmpl []byte, v IngressVxlanRoutesVars) ([]byte, error) {
 	return Render(tmpl, v)
+}
+
+const (
+	InfraName         = "infra"
+	InfraExtNetwork   = "external"
+	InfraIntNetwork   = "internal"
+	InfraListenerPool = "listener-pool"
+	InfraEgressSubnet = "192.168.0.0/16"
+	InfraEgressPort   = 4789
+	InfraRouteVNet    = "vnet"
+	InfraRouteDefault = "default"
+	TMMK8sRoutesEnv   = "TMM_K8S_ROUTES"
+)
+
+// InfraTunnelNetwork is the Infra network the egress tunnel terminates on:
+// int-vlan when the pattern has an internal interface, ext-vlan otherwise.
+func InfraTunnelNetwork(hasInternal bool) string {
+	if hasInternal {
+		return InfraIntNetwork
+	}
+	return InfraExtNetwork
+}
+
+// CNEControllerServiceAccount is the ServiceAccount the F5 cne-controller runs as.
+const CNEControllerServiceAccount = "f5-cne-controller"
+
+// CNEControllerRBACName is the ClusterRole/ClusterRoleBinding gkebnkctl adds
+// so the controller can read EndpointSlices (see templates/cne-controller-rbac.yaml.tmpl).
+func CNEControllerRBACName(cl *intent.Cluster) string {
+	return cl.Metadata.Name + "-cne-controller-endpointslices"
+}
+
+// CNEControllerRBACVars holds the substitution variables for
+// templates/cne-controller-rbac.yaml.tmpl.
+type CNEControllerRBACVars struct {
+	Name           string // <cluster>-cne-controller-endpointslices
+	LabName        string // cl.Metadata.Name
+	InstanceNS     string // f5-bnk
+	ServiceAccount string // f5-cne-controller
+}
+
+// RenderCNEControllerRBAC renders the EndpointSlice + NAD ClusterRole + binding for
+// the cne-controller ServiceAccount.
+func RenderCNEControllerRBAC(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
+	return RenderCNEControllerRBACNamespace(tmpl, cl, "f5-bnk")
+}
+
+// RenderCNEControllerRBACNamespace renders the RBAC with an explicit namespace.
+func RenderCNEControllerRBACNamespace(tmpl []byte, cl *intent.Cluster, ns string) ([]byte, error) {
+	if cl == nil || cl.Metadata.Name == "" {
+		return nil, fmt.Errorf("render cne-controller rbac: cluster name is required")
+	}
+	if ns == "" {
+		ns = "f5-bnk"
+	}
+	return renderTemplateString(string(tmpl), CNEControllerRBACVars{
+		Name:           CNEControllerRBACName(cl),
+		LabName:        cl.Metadata.Name,
+		InstanceNS:     ns,
+		ServiceAccount: CNEControllerServiceAccount,
+	})
+}
+
+func renderTemplateString(tmplStr string, data interface{}) ([]byte, error) {
+	t, err := template.New("tmpl").Parse(tmplStr)
+	if err != nil {
+		return nil, fmt.Errorf("parsing template: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("executing template: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// FLOValuesVars holds the substitution variables for flo-values.yaml.tmpl.
+type FLOValuesVars struct {
+	CAIssuer      string // <cluster>-ca-cluster-issuer
+	FARSecretName string // far-secret
+	JWT           string // raw JWT token contents
+	ClusterName   string // cl.Metadata.Name
+}
+
+// FLOValuesVarsFromCluster derives the FLO values template variables from the cluster intent.
+func FLOValuesVarsFromCluster(cl *intent.Cluster, jwt string) FLOValuesVars {
+	return FLOValuesVars{
+		CAIssuer:      cl.Metadata.Name + "-ca-cluster-issuer",
+		FARSecretName: "far-secret",
+		JWT:           jwt,
+		ClusterName:   cl.Metadata.Name,
+	}
+}
+
+// RenderFLOValues renders the FLO values template with vars derived from the cluster intent.
+func RenderFLOValues(tmpl []byte, cl *intent.Cluster, jwt string) ([]byte, error) {
+	vars := FLOValuesVarsFromCluster(cl, jwt)
+	return renderTemplateString(string(tmpl), vars)
 }

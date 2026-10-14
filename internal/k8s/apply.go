@@ -3,7 +3,12 @@ package k8s
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -182,3 +187,91 @@ type memCacheClient struct{ discovery.DiscoveryInterface }
 
 func (memCacheClient) Fresh() bool { return true }
 func (memCacheClient) Invalidate() {}
+
+// ApplyOptions captures the options for server-side applying a file or directory.
+type ApplyOptions struct {
+	Filename       string
+	Namespace      string
+	Force          bool
+	KubeconfigPath string
+	Out            io.Writer
+}
+
+// Run resolves Filename to a slice of unstructured objects and SSA-applies each via Applier.
+func (o *ApplyOptions) Run(ctx context.Context) error {
+	if o.Filename == "" {
+		return errors.New("Filename is required (file, directory, or '-' for stdin)")
+	}
+	cfg, err := BuildRESTConfig(o.KubeconfigPath)
+	if err != nil {
+		return err
+	}
+	applier, err := NewApplier(cfg)
+	if err != nil {
+		return err
+	}
+	objs, err := o.loadObjects()
+	if err != nil {
+		return err
+	}
+	if len(objs) == 0 {
+		return errors.New("no resources found in input")
+	}
+	for _, obj := range objs {
+		if o.Namespace != "" && obj.GetNamespace() == "" {
+			obj.SetNamespace(o.Namespace)
+		}
+		if _, err := applier.Apply(ctx, obj, o.Force); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (o *ApplyOptions) loadObjects() ([]*unstructured.Unstructured, error) {
+	if o.Filename == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, err
+		}
+		return ParseYAMLStream(data)
+	}
+	st, err := os.Stat(o.Filename)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", o.Filename, err)
+	}
+	if !st.IsDir() {
+		data, err := os.ReadFile(o.Filename)
+		if err != nil {
+			return nil, err
+		}
+		return ParseYAMLStream(data)
+	}
+	var out []*unstructured.Unstructured
+	walkErr := filepath.WalkDir(o.Filename, func(p string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(p))
+		if ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+		data, err := os.ReadFile(p) // #nosec G304
+		if err != nil {
+			return err
+		}
+		objs, err := ParseYAMLStream(data)
+		if err != nil {
+			return fmt.Errorf("%s: %w", p, err)
+		}
+		out = append(out, objs...)
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	return out, nil
+}

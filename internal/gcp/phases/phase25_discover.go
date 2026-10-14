@@ -237,6 +237,11 @@ func Phase25Discover(ctx context.Context, cl *intent.Cluster, st *state.State, c
 	st.Set("TMM_POD_CIDR", podCIDR)
 	st.Set("TMM_POD_GW", podGW)
 	st.Set("AGENT_EXT_IFACE", agentExtIface)
+	st.Set("AGENT_EXT_IP", agentExtNIC.GetNetworkIP())
+	st.Set("JUMPHOST_INSTANCE_NAME", agentNode)
+	st.Set("JUMPHOST_INSTANCE_ID", agentNode)
+	st.Set("JUMPHOST_EXT_IP", agentExtNIC.GetNetworkIP())
+	st.Set("JUMPHOST_BNK_EXT_ENI_IP", agentExtNIC.GetNetworkIP())
 
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("phase25: saving state: %w", err)

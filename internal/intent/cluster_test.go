@@ -472,24 +472,26 @@ func quoteIfEmpty(s string) string {
 
 func TestDefaultVIP(t *testing.T) {
 	cases := []struct {
-		cidr    string
-		want    string
-		wantErr bool
+		cidr     string
+		podsCidr string
+		want     string
+		wantErr  bool
 	}{
-		{"10.31.0.0/24", "10.31.0.100", false},
-		{"192.168.1.0/24", "192.168.1.100", false},
-		{"", "", true},
-		{"bad-cidr", "", true},
+		{"10.31.0.0/24", "", "10.31.0.100", false},
+		{"192.168.1.0/24", "", "192.168.1.100", false},
+		{"10.81.0.0/24", "10.81.1.0/24", "10.81.1.10", false},
+		{"", "", "", true},
+		{"bad-cidr", "", "", true},
 	}
 	for _, tc := range cases {
-		c := &Cluster{Network: Network{External: DataplaneSpec{CIDR: tc.cidr}}}
+		c := &Cluster{Network: Network{External: DataplaneSpec{CIDR: tc.cidr, PodsCIDR: tc.podsCidr}}}
 		got, err := c.DefaultVIP()
 		if (err != nil) != tc.wantErr {
-			t.Errorf("DefaultVIP(%q) err = %v, wantErr = %v", tc.cidr, err, tc.wantErr)
+			t.Errorf("DefaultVIP(%q, %q) err = %v, wantErr = %v", tc.cidr, tc.podsCidr, err, tc.wantErr)
 			continue
 		}
 		if got != tc.want {
-			t.Errorf("DefaultVIP(%q) = %q, want %q", tc.cidr, got, tc.want)
+			t.Errorf("DefaultVIP(%q, %q) = %q, want %q", tc.cidr, tc.podsCidr, got, tc.want)
 		}
 	}
 }

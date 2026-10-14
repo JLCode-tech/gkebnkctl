@@ -201,3 +201,42 @@ func Probe(_ context.Context, version string, archivePath string) (*ReleaseManif
 	}
 	return m, nil
 }
+
+// Release records what gkebnkctl needs to know about one BNK release manifest
+// without pulling it: the F5 Lifecycle Operator chart that ships with it.
+type Release struct {
+	Version  string
+	FLOChart string
+}
+
+// KnownReleases lists every BNK release manifest gkebnkctl has been exercised against.
+var KnownReleases = []Release{
+	{Version: "2.3.0-3.2598.3-0.0.170", FLOChart: "v2.21.13-0.0.28"},
+	{Version: "2.3.1-3.2598.3-0.0.304", FLOChart: "v2.21.13-0.0.53"},
+	{Version: "2.3.2-3.2598.3-0.0.392", FLOChart: "v2.21.13-0.0.58"},
+	{Version: "2.3.3-3.2598.3-0.0.509", FLOChart: "v2.21.13-0.0.64"},
+	{Version: "2.4.0", FLOChart: "v2.30.0-0.5.2"},
+	{Version: "2.4.0-3.2882.0", FLOChart: "v2.30.0-0.5.2"},
+}
+
+// FLOChartFor returns the FLO chart version paired with manifestVersion.
+func FLOChartFor(manifestVersion string) (chart string, ok bool) {
+	for _, r := range KnownReleases {
+		if r.Version == manifestVersion {
+			return r.FLOChart, true
+		}
+	}
+	return "", false
+}
+
+// DefaultFLOChart is the FLO chart paired with DefaultManifestVersion.
+func DefaultFLOChart() string {
+	chart, _ := FLOChartFor(DefaultManifestVersion)
+	return chart
+}
+
+// IsKnownRelease reports whether manifestVersion is a known release.
+func IsKnownRelease(manifestVersion string) bool {
+	_, ok := FLOChartFor(manifestVersion)
+	return ok
+}

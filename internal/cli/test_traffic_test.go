@@ -204,9 +204,9 @@ func TestTestTraffic_SuccessfulProbes_JSON(t *testing.T) {
 	if capturedOpts.SourceIP != "10.30.0.75" {
 		t.Errorf("SourceIP = %q, want 10.30.0.75", capturedOpts.SourceIP)
 	}
-	// Default VIP for 10.30.0.0/24 is 10.30.0.100
-	if capturedOpts.VIP != "10.30.0.100" {
-		t.Errorf("VIP = %q, want 10.30.0.100", capturedOpts.VIP)
+	// Default VIP for 10.31.0.0/24 is 10.31.0.10
+	if capturedOpts.VIP != "10.31.0.10" {
+		t.Errorf("VIP = %q, want 10.31.0.10", capturedOpts.VIP)
 	}
 
 	var res TrafficTestResult
@@ -217,8 +217,8 @@ func TestTestTraffic_SuccessfulProbes_JSON(t *testing.T) {
 	if res.Cluster != "bnk-test" {
 		t.Errorf("Cluster = %q, want bnk-test", res.Cluster)
 	}
-	if res.VIP != "10.30.0.100" {
-		t.Errorf("VIP = %q, want 10.30.0.100", res.VIP)
+	if res.VIP != "10.31.0.10" {
+		t.Errorf("VIP = %q, want 10.31.0.10", res.VIP)
 	}
 	if res.Instance != "custom-jumphost-vm" {
 		t.Errorf("Instance = %q, want custom-jumphost-vm", res.Instance)
@@ -359,13 +359,13 @@ func TestTestTraffic_VIPPrecedence(t *testing.T) {
 	}
 
 	// 2. cl.DefaultVIP() wins over state
-	// Note: In our cluster.yaml, network.external.cidr is 10.30.0.0/24 so DefaultVIP() returns 10.30.0.100
+	// Note: In our cluster.yaml, network.external.podsCidr is 10.31.0.0/24 so DefaultVIP() returns 10.31.0.10
 	resetTrafficFlags()
 	if _, _, err := execTraffic(t, []string{"-f", configPath}); err != nil {
 		t.Fatalf("execute failed: %v", err)
 	}
-	if capturedOpts.VIP != "10.30.0.100" {
-		t.Errorf("VIP with DefaultVIP = %q, want 10.30.0.100", capturedOpts.VIP)
+	if capturedOpts.VIP != "10.31.0.10" {
+		t.Errorf("VIP with DefaultVIP = %q, want 10.31.0.10", capturedOpts.VIP)
 	}
 }
 
@@ -426,8 +426,8 @@ func TestResolveTrafficVIP_Precedence(t *testing.T) {
 
 	// 2. cl.DefaultVIP() wins over state when flag is empty
 	got, err = resolveTrafficVIP(cl, st, "")
-	if err != nil || got != "10.30.0.100" {
-		t.Fatalf("cl.DefaultVIP precedence failed: got %q, err %v, want 10.30.0.100", got, err)
+	if err != nil || got != "10.31.0.10" {
+		t.Fatalf("cl.DefaultVIP precedence failed: got %q, err %v, want 10.31.0.10", got, err)
 	}
 
 	// 3. State hierarchy when cl is nil:
