@@ -2,6 +2,8 @@ package phases
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
@@ -81,6 +83,22 @@ func TestPhase00Preflight_NilClients_SkipsChecks(t *testing.T) {
 	st := testState(t)
 	if err := Phase00Preflight(context.Background(), cl, st, nil, false); err != nil {
 		t.Fatalf("Phase00Preflight(clients=nil): unexpected error: %v", err)
+	}
+}
+
+func TestPhase00Preflight_WithJWT(t *testing.T) {
+	tmpDir := t.TempDir()
+	jwtFile := filepath.Join(tmpDir, "test.jwt")
+	testToken := "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCIsImtpZCI6InYxIiwiamt1IjoiaHR0cHM6Ly9wcm9kdWN0LXRzdC5hcGlzLmY1bmV0d29ya3MubmV0L2VlL3YxL2tleXMvandrcyJ9.eyJzdWIiOiJUU1QtMTIzNDUiLCJpc3MiOiJGNSBJbmMuIiwiZjVfc2F0IjoxODA3ODMzNjAwfQ.sig"
+	if err := os.WriteFile(jwtFile, []byte(testToken), 0o644); err != nil {
+		t.Fatalf("failed writing test jwt: %v", err)
+	}
+
+	cl := testCluster()
+	cl.Bnk.JwtPath = jwtFile
+	st := testState(t)
+	if err := Phase00Preflight(context.Background(), cl, st, nil, false); err != nil {
+		t.Fatalf("Phase00Preflight with JWT failed: %v", err)
 	}
 }
 

@@ -44,6 +44,33 @@ func dynWithCNE(obj *unstructured.Unstructured) *dynamicfake.FakeDynamicClient {
 	return dynamicfake.NewSimpleDynamicClient(scheme, obj)
 }
 
+func fakeLicense(ns, name, state string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "k8s.f5net.com/v1",
+			"kind":       "License",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": ns,
+			},
+			"status": map[string]interface{}{
+				"state": state,
+			},
+		},
+	}
+}
+
+func dynWithResources(objs ...*unstructured.Unstructured) *dynamicfake.FakeDynamicClient {
+	scheme := runtime.NewScheme()
+	var runtimeObjs []runtime.Object
+	for _, obj := range objs {
+		if obj != nil {
+			runtimeObjs = append(runtimeObjs, obj)
+		}
+	}
+	return dynamicfake.NewSimpleDynamicClient(scheme, runtimeObjs...)
+}
+
 func tmmPod(name, node string, terminating bool, phase corev1.PodPhase) *corev1.Pod {
 	p := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -138,5 +165,140 @@ func TestCycleStuckTMMPods_NoOpWhenNoTerminating(t *testing.T) {
 	cycleStuckTMMPods(context.Background(), k8sClient)
 	if _, err := k8sClient.CoreV1().Pods(tmmSettleNamespace).Get(context.Background(), "tmm-1", metav1.GetOptions{}); err != nil {
 		t.Errorf("running pod must be untouched, got: %v", err)
+	}
+}
+
+func TestSettleAndGateTMM_WithActiveLicense(t *testing.T) {
+	k8sClient := fakek8s.NewClientset(tmmPod("tmm-1", "node-a", false, corev1.PodRunning))
+	dyn := dynWithResources(
+		cneInstance("True"),
+		fakeLicense("f5-utils", "bnk-license", "Active"),
+	)
+
+	if err := settleAndGateTMM(context.Background(), k8sClient, dyn, testTMMSettlePollInterval, 5*time.Second); err != nil {
+		t.Fatalf("expected success with active license, got: %v", err)
+	}
+}
+
+func TestSettleAndGateTMM_AlertsOnLicenseFailed(t *testing.T) {
+	k8sClient := fakek8s.NewClientset(tmmPod("tmm-old", "node-a", true, corev1.PodRunning))
+	dyn := dynWithResources(
+		cneInstance("False"),
+		fakeLicense("f5-utils", "bnk-license", "Failed"),
+	)
+
+	err := settleAndGateTMM(context.Background(), k8sClient, dyn, testTMMSettlePollInterval, 20*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected error when license is Failed and TMM never available")
+	}
+	if !strings.Contains(err.Error(), "License: state=Failed") {
+		t.Errorf("expected error to mention License: state=Failed, got: %v", err)
+	}
+}
+
+func TestSettleAndGateTMM_CWCCrashLoop_And_EnrichedTimeoutError(t *testing.T) {
+	cwcPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cwc-test-1",
+			Namespace: "f5-utils",
+			Labels:    map[string]string{"app": "cwc"},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:         "f5-spk-cwc",
+					Ready:        false,
+					RestartCount: 5,
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason:  "CrashLoopBackOff",
+							Message: "Back-off 5m0s restarting failed container",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	stuckTMMPod := tmmPod("tmm-stuck", "node-a", false, corev1.PodPending)
+
+	k8sClient := fakek8s.NewClientset(cwcPod, stuckTMMPod)
+	dyn := dynWithResources(
+		cneInstance("False"),
+		fakeLicense("f5-utils", "bnk-license", "Active"),
+	)
+
+	err := settleAndGateTMM(context.Background(), k8sClient, dyn, testTMMSettlePollInterval, 20*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "License: state=Active") {
+		t.Errorf("expected error to include License: state=Active, got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "Stuck pod diagnostics:") {
+		t.Errorf("expected error to include Stuck pod diagnostics, got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "pod f5-utils/cwc-test-1") {
+		t.Errorf("expected error to include cwc pod diagnostic, got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "pod f5-bnk/tmm-stuck") {
+		t.Errorf("expected error to include stuck TMM pod diagnostic, got: %s", errStr)
+	}
+}
+
+func TestIsLicenseFailed(t *testing.T) {
+	cases := []struct {
+		state string
+		want  bool
+	}{
+		{"Active", false},
+		{"Pending", false},
+		{"NotFound", false},
+		{"Failed", true},
+		{"Invalid", true},
+		{"Error", true},
+		{"failed-quota-exceeded", true},
+	}
+	for _, tc := range cases {
+		if got := isLicenseFailed(tc.state); got != tc.want {
+			t.Errorf("isLicenseFailed(%q) = %v, want %v", tc.state, got, tc.want)
+		}
+	}
+}
+
+func TestCheckCWCCrashLoop(t *testing.T) {
+	podNormal := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "cwc-ok", Namespace: "f5-utils", Labels: map[string]string{"app": "cwc"}},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{Name: "cwc", Ready: true, RestartCount: 0},
+			},
+		},
+	}
+	clientOk := fakek8s.NewClientset(podNormal)
+	crash, _ := checkCWCCrashLoop(context.Background(), clientOk)
+	if crash {
+		t.Error("expected crash=false for healthy pod")
+	}
+
+	podCrash := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "cwc-broken", Namespace: "f5-utils", Labels: map[string]string{"app": "cwc"}},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{Name: "f5-spk-cwc", Ready: false, RestartCount: 4},
+			},
+		},
+	}
+	clientCrash := fakek8s.NewClientset(podCrash)
+	crash, detail := checkCWCCrashLoop(context.Background(), clientCrash)
+	if !crash {
+		t.Error("expected crash=true for restarting pod")
+	}
+	if !strings.Contains(detail, "cwc-broken") {
+		t.Errorf("expected detail to mention cwc-broken, got: %s", detail)
 	}
 }
