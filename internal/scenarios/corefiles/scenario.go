@@ -136,7 +136,7 @@ func cneInstanceRef(ctx *scenarios.Context) (ns, name string) {
 		if reqCtx == nil {
 			reqCtx = context.Background()
 		}
-		for _, candNS := range []string{"f5-bnk", bnkconst.InstanceNamespace, "f5-cne-core", "f5-utils"} {
+		for _, candNS := range []string{bnkconst.InstanceNamespace, "f5-cne-core", "f5-utils"} {
 			list, err := ctx.Dynamic.Resource(cneInstanceGVR).Namespace(candNS).List(reqCtx, metav1.ListOptions{})
 			if err == nil && len(list.Items) > 0 {
 				return candNS, list.Items[0].GetName()
@@ -239,7 +239,7 @@ func checkCoreMond(ctx context.Context, sctx *scenarios.Context) (crOK, dsOK, co
 
 // findCoreMond looks for a CoreMond CR where FLO puts it.
 func findCoreMond(ctx context.Context, sctx *scenarios.Context) (bool, string, string) {
-	for _, ns := range []string{"f5-bnk", bnkconst.InstanceNamespace, "f5-cne-core", "f5-utils"} {
+	for _, ns := range []string{bnkconst.InstanceNamespace, "f5-cne-core", "f5-utils"} {
 		list, err := sctx.Dynamic.Resource(coreMondGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
 		if err != nil || len(list.Items) == 0 {
 			continue
@@ -251,7 +251,7 @@ func findCoreMond(ctx context.Context, sctx *scenarios.Context) (bool, string, s
 		cr := list.Items[0]
 		return true, cr.GetNamespace(), fmt.Sprintf("CoreMond %s/%s present", cr.GetNamespace(), cr.GetName())
 	}
-	return false, "", "no CoreMond CR in f5-bnk, " + bnkconst.InstanceNamespace + ", f5-cne-core, or f5-utils"
+	return false, "", "no CoreMond CR in " + bnkconst.InstanceNamespace + ", f5-cne-core, or f5-utils"
 }
 
 // coreMondDaemonSetReady requires the CoreMond DaemonSet to exist and to have
@@ -313,20 +313,14 @@ func checkTMMVolumes(ctx context.Context, sctx *scenarios.Context) (bool, string
 	if sctx.Clientset == nil {
 		return false, "no Kubernetes client — nothing verified"
 	}
-	ns := "f5-bnk"
+	ns := bnkconst.InstanceNamespace
 	if v := sctx.Options["cne-namespace"]; v != "" {
 		ns = v
 	}
 	return scenarios.PollMarkers(ctx, reconcileTimeout, pollInterval, func() (bool, string) {
 		ds, err := sctx.Clientset.AppsV1().DaemonSets(ns).Get(ctx, "f5-tmm", metav1.GetOptions{})
 		if err != nil {
-			// Fall back to bnkconst.InstanceNamespace if not in ns
-			if dsFallback, err2 := sctx.Clientset.AppsV1().DaemonSets(bnkconst.InstanceNamespace).Get(ctx, "f5-tmm", metav1.GetOptions{}); err2 == nil {
-				ds = dsFallback
-				ns = bnkconst.InstanceNamespace
-			} else {
-				return false, fmt.Sprintf("DaemonSet %s/f5-tmm: %v", ns, err)
-			}
+			return false, fmt.Sprintf("DaemonSet %s/f5-tmm: %v", ns, err)
 		}
 		for _, v := range ds.Spec.Template.Spec.Volumes {
 			name := strings.ToLower(v.Name)

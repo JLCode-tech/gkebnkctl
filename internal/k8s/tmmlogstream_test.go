@@ -72,3 +72,22 @@ func TestEnableTMMLogStream_WaitsForReadyPod(t *testing.T) {
 		t.Fatalf("EnableTMMLogStream = %v, %v; want true, nil", changed, err)
 	}
 }
+
+func TestEnableTMMLogStream_FallbackToF5Bnk(t *testing.T) {
+	cs := fake.NewClientset(
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: TMMLogCustomConfigMap, Namespace: "f5-cne-system"}, Data: map[string]string{TMMLogStdoutKey: shippedStdoutConf}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "f5-toda-fluentd-bnk", Namespace: "f5-cne-system", Labels: map[string]string{"app": "toda-fluentd"}}},
+	)
+	on, err := TMMLogStreamEnabled(context.Background(), cs)
+	if err != nil || on {
+		t.Fatalf("TMMLogStreamEnabled before = %v, %v; want false, nil", on, err)
+	}
+	changed, err := EnableTMMLogStream(context.Background(), cs, 0)
+	if err != nil || !changed {
+		t.Fatalf("EnableTMMLogStream = %v, %v; want true, nil", changed, err)
+	}
+	on, err = TMMLogStreamEnabled(context.Background(), cs)
+	if err != nil || !on {
+		t.Fatalf("TMMLogStreamEnabled after = %v, %v; want true, nil", on, err)
+	}
+}

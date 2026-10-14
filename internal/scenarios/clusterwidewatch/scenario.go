@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"strings"
 	"time"
 
@@ -223,14 +224,16 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 	if deps.RunCurlProbesFn != nil {
 		vip, iterations, timeout, probeErr := scenarios.BuildProbeParams(ctx)
 		vip = scenarios.WithLastOctet(vip, "105")
+		hasProbe := os.Getenv("GKEBNKCTL_FORCE_IAP") != "1" && (os.Getenv("GKEBNKCTL_PROBE_IN_CLUSTER") != "" || jumphost.IsProbePodRunning(ctx.Ctx))
+		hasJumphost := ctx.State != nil && (ctx.State.Get("JUMPHOST_INSTANCE_ID") != "" || ctx.State.Get("JUMPHOST_INSTANCE_NAME") != "") && (ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP") != "" || ctx.State.Get("JUMPHOST_EXT_IP") != "")
 		switch {
 		case probeErr != nil:
 			assertions = append(assertions, scenarios.Assertion{Description: "jumphost probe setup", OK: false, Got: probeErr.Error()})
-		case ctx.State == nil || ctx.State.Get("JUMPHOST_INSTANCE_ID") == "" || ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP") == "":
+		case !hasProbe && !hasJumphost:
 			assertions = append(assertions, scenarios.Assertion{
 				Description: "jumphost state keys present",
 				OK:          false,
-				Got:         "JUMPHOST_INSTANCE_ID / JUMPHOST_BNK_EXT_ENI_IP missing from state.env — run `gkebnkctl up` with testing.jumphost.enabled=true",
+				Got:         "JUMPHOST_INSTANCE_ID / JUMPHOST_BNK_EXT_ENI_IP missing from state.env and probe pod not running — run `gkebnkctl up` with testing.jumphost.enabled=true or deploy in-cluster probe",
 			})
 		default:
 			ok, got := deps.RunCurlProbesFn(ctx.Ctx, ctx, vip, iterations, timeout)

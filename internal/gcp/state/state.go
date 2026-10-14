@@ -185,3 +185,16 @@ func (s *State) KubeconfigPath() string {
 	}
 	return filepath.Join(s.dir, "kubeconfig")
 }
+
+// WriteValues loads state.env from dir (or starts empty if missing), merges kv,
+// and saves atomically.
+func WriteValues(dir string, kv map[string]string) error {
+	st, err := Load(dir)
+	if err != nil {
+		return err
+	}
+	for k, v := range kv {
+		st.Set(k, v)
+	}
+	return st.Save()
+}

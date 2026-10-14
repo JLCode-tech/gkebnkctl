@@ -89,7 +89,7 @@ func Phase36FLO(ctx context.Context, cl *intent.Cluster, _ *state.State, clients
 	for _, crd := range floCRDs {
 		fmt.Fprintf(os.Stderr, "[phase 36] waiting for CRD %s to establish (up to %s)\n", crd, floCRDWait)
 		if err := k8s.WaitForCRDEstablished(ctx, clients.Dynamic, crd, floCRDWait); err != nil {
-			fmt.Fprintf(os.Stderr, "[phase 36] warn: CRD %s did not establish within %s (%v) — check FLO operator pods (kubectl get pods -n f5-bnk); continuing (wait is best-effort)\n",
+			fmt.Fprintf(os.Stderr, "[phase 36] warn: CRD %s did not establish within %s (%v) — check FLO operator pods (kubectl get pods -n f5-cne-core); continuing (wait is best-effort)\n",
 				crd, floCRDWait, err)
 		}
 	}

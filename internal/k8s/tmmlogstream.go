@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -42,7 +43,14 @@ const (
 func TMMLogStreamEnabled(ctx context.Context, cs kubernetes.Interface) (bool, error) {
 	cm, err := cs.CoreV1().ConfigMaps(TMMLogNamespace).Get(ctx, TMMLogCustomConfigMap, metav1.GetOptions{})
 	if err != nil {
-		return false, fmt.Errorf("get configmap %s/%s: %w", TMMLogNamespace, TMMLogCustomConfigMap, err)
+		if apierrors.IsNotFound(err) {
+			cm, err = cs.CoreV1().ConfigMaps("f5-cne-system").Get(ctx, TMMLogCustomConfigMap, metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
+		} else {
+			return false, fmt.Errorf("get configmap %s/%s: %w", TMMLogNamespace, TMMLogCustomConfigMap, err)
+		}
 	}
 	return stdoutStoreOn(cm.Data[TMMLogStdoutKey]), nil
 }
@@ -60,12 +68,40 @@ func stdoutStoreOn(conf string) bool {
 	return false
 }
 
+// listTMMPods lists pods matching selector in primaryNS, falling back to "f5-cne-system"
+// when primaryNS is TMMLogNamespace ("f5-cne-core") and returns no pods.
+func listTMMPods(ctx context.Context, cs kubernetes.Interface, primaryNS, selector string) (*corev1.PodList, string, error) {
+	pods, err := cs.CoreV1().Pods(primaryNS).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return nil, primaryNS, err
+	}
+	if len(pods.Items) == 0 && primaryNS != "f5-cne-system" {
+		fallbackPods, fbErr := cs.CoreV1().Pods("f5-cne-system").List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if fbErr == nil && len(fallbackPods.Items) > 0 {
+			return fallbackPods, "f5-cne-system", nil
+		}
+	}
+	return pods, primaryNS, nil
+}
+
 // EnableTMMLogStream turns the stdout store on and bounces the fluentd pod so
 // the new config is read.
 func EnableTMMLogStream(ctx context.Context, cs kubernetes.Interface, timeout time.Duration) (changed bool, err error) {
 	cm, err := cs.CoreV1().ConfigMaps(TMMLogNamespace).Get(ctx, TMMLogCustomConfigMap, metav1.GetOptions{})
+	ns := TMMLogNamespace
 	if err != nil {
-		return false, fmt.Errorf("get configmap %s/%s: %w", TMMLogNamespace, TMMLogCustomConfigMap, err)
+		if apierrors.IsNotFound(err) {
+			cm, err = cs.CoreV1().ConfigMaps("f5-cne-system").Get(ctx, TMMLogCustomConfigMap, metav1.GetOptions{})
+			ns = "f5-cne-system"
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					return false, nil
+				}
+				return false, fmt.Errorf("get configmap f5-cne-system/%s: %w", TMMLogCustomConfigMap, err)
+			}
+		} else {
+			return false, fmt.Errorf("get configmap %s/%s: %w", TMMLogNamespace, TMMLogCustomConfigMap, err)
+		}
 	}
 	if stdoutStoreOn(cm.Data[TMMLogStdoutKey]) {
 		return false, nil
@@ -74,23 +110,23 @@ func EnableTMMLogStream(ctx context.Context, cs kubernetes.Interface, timeout ti
 		cm.Data = map[string]string{}
 	}
 	cm.Data[TMMLogStdoutKey] = TMMLogStdoutStore
-	if _, err := cs.CoreV1().ConfigMaps(TMMLogNamespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
-		return false, fmt.Errorf("update configmap %s/%s: %w", TMMLogNamespace, TMMLogCustomConfigMap, err)
+	if _, err := cs.CoreV1().ConfigMaps(ns).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
+		return false, fmt.Errorf("update configmap %s/%s: %w", ns, TMMLogCustomConfigMap, err)
 	}
-	pods, err := cs.CoreV1().Pods(TMMLogNamespace).List(ctx, metav1.ListOptions{LabelSelector: TMMLogPodSelector})
+	pods, podNS, err := listTMMPods(ctx, cs, ns, TMMLogPodSelector)
 	if err != nil {
 		return true, fmt.Errorf("list %s pods: %w", TMMLogPodSelector, err)
 	}
 	for i := range pods.Items {
-		if err := cs.CoreV1().Pods(TMMLogNamespace).Delete(ctx, pods.Items[i].Name, metav1.DeleteOptions{}); err != nil {
-			return true, fmt.Errorf("delete pod %s/%s: %w", TMMLogNamespace, pods.Items[i].Name, err)
+		if err := cs.CoreV1().Pods(podNS).Delete(ctx, pods.Items[i].Name, metav1.DeleteOptions{}); err != nil {
+			return true, fmt.Errorf("delete pod %s/%s: %w", podNS, pods.Items[i].Name, err)
 		}
 	}
 	if timeout <= 0 {
 		return true, nil
 	}
 	err = wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		list, err := cs.CoreV1().Pods(TMMLogNamespace).List(ctx, metav1.ListOptions{LabelSelector: TMMLogPodSelector})
+		list, _, err := listTMMPods(ctx, cs, podNS, TMMLogPodSelector)
 		if err != nil {
 			return false, nil
 		}
@@ -102,7 +138,7 @@ func EnableTMMLogStream(ctx context.Context, cs kubernetes.Interface, timeout ti
 		return false, nil
 	})
 	if err != nil {
-		return true, fmt.Errorf("waiting for a Ready %s pod in %s: %w", TMMLogPodSelector, TMMLogNamespace, err)
+		return true, fmt.Errorf("waiting for a Ready %s pod in %s: %w", TMMLogPodSelector, podNS, err)
 	}
 	return true, nil
 }

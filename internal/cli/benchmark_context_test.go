@@ -156,7 +156,7 @@ bnk:
   farSecret:
     source: kubecontext
     sourceContext: some-context
-    namespaces: [f5-bnk, f5-utils]
+    namespaces: [f5-cne-core, f5-cne-system, f5-utils]
 
 ai:
   synthetic:

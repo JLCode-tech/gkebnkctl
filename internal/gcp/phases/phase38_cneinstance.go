@@ -19,7 +19,7 @@ import (
 const cneInstanceTemplatePath = "templates/cneinstance.yaml.tmpl"
 
 // Phase38CNEInstance renders and applies the CNEInstance/instance CR in
-// f5-bnk. Carries the mandatory host-device env
+// f5-cne-system. Carries the mandatory host-device env
 // (reference/TRIAL-NOTES.md contract item 3): TMM_MAPRES_ADDL_VETHS_ON_DP
 // =TRUE + PCIDEVICE_INTEL_COM_EXT/INT from Phase25-discovered PCI addresses.
 // Needs a live cluster — docs/SPEC-go-tracer.md §3 Phase38.
@@ -27,7 +27,7 @@ func Phase38CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 	fmt.Fprintf(os.Stderr, "[phase 38] CNEInstance: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
-		fmt.Fprintln(os.Stderr, "[phase 38] would apply CNEInstance/instance in f5-bnk (needs live cluster)")
+		fmt.Fprintln(os.Stderr, "[phase 38] would apply CNEInstance/instance in f5-cne-system (needs live cluster)")
 		return nil
 	}
 
@@ -67,7 +67,7 @@ func Phase38CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 		for _, crd := range floInstalledCRDs {
 			fmt.Fprintf(os.Stderr, "[phase 38] waiting for FLO-installed CRD %s to establish (up to %s)\n", crd, floCRDWait)
 			if err := k8s.WaitForCRDEstablished(ctx, clients.Dynamic, crd, floCRDWait); err != nil {
-				fmt.Fprintf(os.Stderr, "[phase 38] warn: CRD %s did not establish within %s (%v) — check FLO's crd-installer job (kubectl get jobs -n f5-utils); continuing (wait is best-effort)\n",
+				fmt.Fprintf(os.Stderr, "[phase 38] warn: CRD %s did not establish within %s (%v) — check FLO's crd-installer job (kubectl get jobs -n f5-cne-core); continuing (wait is best-effort)\n",
 					crd, floCRDWait, err)
 			}
 		}

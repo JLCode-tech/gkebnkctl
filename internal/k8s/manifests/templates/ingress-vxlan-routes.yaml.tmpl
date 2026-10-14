@@ -17,7 +17,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: {{ $r.Name }}
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ $r.Destination }}
   prefixLen: {{ $r.PrefixLen }}

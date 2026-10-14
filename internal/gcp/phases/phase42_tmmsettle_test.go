@@ -243,7 +243,7 @@ func TestSettleAndGateTMM_CWCCrashLoop_And_EnrichedTimeoutError(t *testing.T) {
 	if !strings.Contains(errStr, "pod f5-utils/cwc-test-1") {
 		t.Errorf("expected error to include cwc pod diagnostic, got: %s", errStr)
 	}
-	if !strings.Contains(errStr, "pod f5-bnk/tmm-stuck") {
+	if !strings.Contains(errStr, "pod f5-cne-system/tmm-stuck") {
 		t.Errorf("expected error to include stuck TMM pod diagnostic, got: %s", errStr)
 	}
 }

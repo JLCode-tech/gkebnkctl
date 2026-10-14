@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	tmmSettleNamespace    = "f5-bnk"
+	tmmSettleNamespace    = "f5-cne-system"
 	tmmSettleLabelSel     = "app=f5-tmm"
 	tmmSettlePollInterval = 10 * time.Second
 
@@ -43,8 +43,8 @@ const (
 	// meaningful than pod-Ready alone.
 	tmmAvailableCondition = "F5TmmAvailable"
 
-	licenseNamespacePrimary  = "f5-utils"
-	licenseNamespaceFallback = "f5-cne-core"
+	licenseNamespacePrimary  = "f5-cne-core"
+	licenseNamespaceFallback = "f5-utils"
 	licenseName              = "bnk-license"
 )
 
@@ -268,7 +268,7 @@ func checkCWCCrashLoop(ctx context.Context, client kubernetes.Interface) (bool, 
 	if client == nil {
 		return false, ""
 	}
-	for _, ns := range []string{"f5-utils", "f5-bnk", "f5-cne-core"} {
+	for _, ns := range []string{"f5-cne-core", "f5-utils", "f5-cne-system"} {
 		pods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			continue

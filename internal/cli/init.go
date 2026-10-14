@@ -156,7 +156,7 @@ func runInit(_ *cobra.Command, args []string) error {
 			FarSecret: intent.FarSecretSpec{
 				Source:           "dockerconfig",
 				DockerConfigFile: "./keys/dockerconfig.json",
-				Namespaces:       []string{"f5-bnk", "f5-utils"},
+				Namespaces:       []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance", "f5-utils", "default"},
 			},
 		},
 		Egress: intent.EgressSpec{

@@ -97,9 +97,9 @@ bnk:
     # Placeholder kube-context name — replace with a real context that has
     # far-secret in sourceNamespace before running a real `up`.
     sourceContext: some-other-cluster
-    sourceNamespace: f5-bnk
+    sourceNamespace: f5-cne-core
     dockerConfigFile: ""
-    namespaces: [f5-bnk, f5-utils]
+    namespaces: [f5-cne-core, f5-cne-system, f5-bnk-instance, f5-utils, default]
 
 egress:
   testNamespace: egress-test

@@ -108,17 +108,15 @@ func realVerifyDeps() VerifyDeps {
 
 // tmmPodName returns the first Running TMM pod (the scenario runs single-TMM shapes).
 func tmmPodName(sctx *scenarios.Context) (string, error) {
-	for _, ns := range []string{"f5-bnk", tmmNamespace} {
-		pods, err := sctx.Clientset.CoreV1().Pods(ns).List(sctx.Ctx, metav1.ListOptions{LabelSelector: tmmPodSelector})
-		if err == nil {
-			for _, p := range pods.Items {
-				if p.Status.Phase == corev1.PodRunning {
-					return p.Name, nil
-				}
+	pods, err := sctx.Clientset.CoreV1().Pods(tmmNamespace).List(sctx.Ctx, metav1.ListOptions{LabelSelector: tmmPodSelector})
+	if err == nil {
+		for _, p := range pods.Items {
+			if p.Status.Phase == corev1.PodRunning {
+				return p.Name, nil
 			}
 		}
 	}
-	return "", fmt.Errorf("no Running pod with %s in f5-bnk or %s", tmmPodSelector, tmmNamespace)
+	return "", fmt.Errorf("no Running pod with %s in %s", tmmPodSelector, tmmNamespace)
 }
 
 // expectedSNATSource is the address egress must be SNATed to when captured:
@@ -147,11 +145,6 @@ type tmmCounters struct {
 // readTMMCounters pulls both counters with tmctl from the TMM debug sidecar.
 func readTMMCounters(d *VerifyDeps, sctx *scenarios.Context, tmmPod, ns, name, selfIPHex string) (tmmCounters, error) {
 	podNS := tmmNamespace
-	if sctx.Clientset != nil {
-		if _, err := sctx.Clientset.CoreV1().Pods("f5-bnk").Get(sctx.Ctx, tmmPod, metav1.GetOptions{}); err == nil {
-			podNS = "f5-bnk"
-		}
-	}
 	vs, err := d.ExecInPodFn(sctx, podNS, tmmPod, tmmDebugContainer,
 		"tmctl", "-d", "blade", "-w", "400", "virtual_server_stat", "-s", "name,clientside.tot_conns")
 	if err != nil {
@@ -186,7 +179,7 @@ func egressVirtualName(ns, name string) string { return ns + "-" + name + "-egre
 // "" when TMM has no such virtual server.
 func egressVirtualLine(out, ns, name string) string {
 	lines := strings.Split(out, "\n")
-	for _, needle := range []string{egressVirtualName(ns, name), "f5-bnk-egress-agents-egress-ipv4", "egress-agents", name, ns} {
+	for _, needle := range []string{egressVirtualName(ns, name), "f5-cne-system-egress-agents-egress-ipv4", "egress-agents", name, ns} {
 		for _, l := range lines {
 			f := strings.Fields(l)
 			if len(f) < 2 || f[0] == "name" || strings.HasPrefix(f[0], "-") {
@@ -412,7 +405,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 	targetNS := v.Namespace
 	f5EgressExists := false
 	if ctx.Dynamic != nil {
-		if _, err := ctx.Dynamic.Resource(f5SpkEgressGVR).Namespace("f5-bnk").Get(ctx.Ctx, "egress-agents", metav1.GetOptions{}); err == nil {
+		if _, err := ctx.Dynamic.Resource(f5SpkEgressGVR).Namespace(tmmNamespace).Get(ctx.Ctx, "egress-agents", metav1.GetOptions{}); err == nil {
 			f5EgressExists = true
 			if ctx.Clientset != nil {
 				if _, err := ctx.Clientset.CoreV1().Pods("bnk-test-egress").Get(ctx.Ctx, "egress-client", metav1.GetOptions{}); err == nil {
@@ -441,9 +434,9 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 
 	// 3. Egress programmed on TMM (F5SPKEgress on GKE or EgressGateway on AWS).
 	if f5EgressExists {
-		got, err = d.WaitCRConditionsFn(ctx.Ctx, ctx, f5SpkEgressGVR, "f5-bnk", "egress-agents", []string{"Accepted", "Programmed"}, 30*time.Second)
+		got, err = d.WaitCRConditionsFn(ctx.Ctx, ctx, f5SpkEgressGVR, tmmNamespace, "egress-agents", []string{"Accepted", "Programmed"}, 30*time.Second)
 		res.Assertions = append(res.Assertions, scenarios.Assertion{
-			Description: "F5SPKEgress f5-bnk/egress-agents Programmed",
+			Description: "F5SPKEgress f5-cne-system/egress-agents Programmed",
 			OK:          err == nil,
 			Got:         conditionDetail(got, err),
 		})
