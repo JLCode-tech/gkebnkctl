@@ -4,6 +4,8 @@
 # This is the required pre-push gate when GitHub Actions budget is unavailable.
 set -euo pipefail
 
+cd "$(dirname "$0")/.."
+
 # Colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -89,34 +91,52 @@ else
 fi
 echo
 
-# 6. gkebnkctl validate
-echo "-> GKEBNKCTL_SKIP_AUTH=1 gkebnkctl validate examples/host-device/cluster.yaml"
-if GKEBNKCTL_SKIP_AUTH=1 ./bin/gkebnkctl validate examples/host-device/cluster.yaml; then
-	printf "%b[PASS]%b gkebnkctl validate\n" "$GREEN" "$NC"
+# 6. gkebnkctl validate (all 5 example configs)
+echo "-> GKEBNKCTL_SKIP_AUTH=1 gkebnkctl validate (all 5 examples)"
+validate_ok=1
+for cfg in \
+	examples/host-device/cluster.yaml \
+	examples/egress/cluster.yaml \
+	examples/ingress/cluster.yaml \
+	examples/multi-protocol-ingress/cluster.yaml \
+	examples/vertex-agent-demo/cluster.yaml; do
+	if ! GKEBNKCTL_SKIP_AUTH=1 ./bin/gkebnkctl validate "$cfg"; then
+		validate_ok=0
+	fi
+done
+if [ "$validate_ok" -eq 1 ]; then
+	printf "%b[PASS]%b gkebnkctl validate (all 5 examples)\n" "$GREEN" "$NC"
 	((passed_gates++))
 else
-	printf "%b[FAIL]%b gkebnkctl validate\n" "$RED" "$NC"
+	printf "%b[FAIL]%b gkebnkctl validate (all 5 examples)\n" "$RED" "$NC"
 	((failed_gates++))
 fi
 echo
 
-# 7. gkebnkctl up --dry-run (check for phase 50, phase 51, and "dry-run complete")
-echo "-> GKEBNKCTL_SKIP_AUTH=1 gkebnkctl up --dry-run"
+# 7. gkebnkctl up --dry-run across all 5 examples (check for phase 50, phase 51, and "dry-run complete")
+echo "-> GKEBNKCTL_SKIP_AUTH=1 gkebnkctl up --dry-run (all 5 examples)"
 mkdir -p artifacts
-if GKEBNKCTL_SKIP_AUTH=1 ./bin/gkebnkctl up -f examples/host-device/cluster.yaml --dry-run 2>&1 | tee artifacts/up-dryrun.log; then
-	if grep -q '\[phase 50\]' artifacts/up-dryrun.log && grep -q '\[phase 51\]' artifacts/up-dryrun.log && grep -q 'dry-run complete' artifacts/up-dryrun.log; then
-		printf "%b[PASS]%b gkebnkctl up --dry-run (phase 50 + phase 51 + dry-run complete)\n" "$GREEN" "$NC"
-		((passed_gates++))
+up_dryrun_ok=1
+for example in host-device egress ingress multi-protocol-ingress vertex-agent-demo; do
+	cfg="examples/${example}/cluster.yaml"
+	log="artifacts/up-dryrun-${example}.log"
+	if GKEBNKCTL_SKIP_AUTH=1 ./bin/gkebnkctl up -f "$cfg" --dry-run 2>&1 | tee "$log"; then
+		if ! grep -q '\[phase 50\]' "$log" || ! grep -q '\[phase 51\]' "$log" || ! grep -q 'dry-run complete' "$log"; then
+			echo "ERROR: ${example} output missing required strings:"
+			! grep -q '\[phase 50\]' "$log" && echo "  - Missing '[phase 50]'"
+			! grep -q '\[phase 51\]' "$log" && echo "  - Missing '[phase 51]'"
+			! grep -q 'dry-run complete' "$log" && echo "  - Missing 'dry-run complete'"
+			up_dryrun_ok=0
+		fi
 	else
-		echo "ERROR: output missing required strings:"
-		! grep -q '\[phase 50\]' artifacts/up-dryrun.log && echo "  - Missing '[phase 50]'"
-		! grep -q '\[phase 51\]' artifacts/up-dryrun.log && echo "  - Missing '[phase 51]'"
-		! grep -q 'dry-run complete' artifacts/up-dryrun.log && echo "  - Missing 'dry-run complete'"
-		printf "%b[FAIL]%b gkebnkctl up --dry-run assertions\n" "$RED" "$NC"
-		((failed_gates++))
+		up_dryrun_ok=0
 	fi
+done
+if [ "$up_dryrun_ok" -eq 1 ]; then
+	printf "%b[PASS]%b gkebnkctl up --dry-run (all 5 examples: phase 50 + phase 51 + dry-run complete)\n" "$GREEN" "$NC"
+	((passed_gates++))
 else
-	printf "%b[FAIL]%b gkebnkctl up --dry-run (exit code)\n" "$RED" "$NC"
+	printf "%b[FAIL]%b gkebnkctl up --dry-run (all 5 examples)\n" "$RED" "$NC"
 	((failed_gates++))
 fi
 echo
@@ -140,7 +160,20 @@ else
 fi
 echo
 
-# Security gates (advisory: pass on both success and findings, warn on findings)
+# 9. gkebnkctl test {connectivity,dns,egress} --dry-run
+echo "-> gkebnkctl test {connectivity,dns,egress} --dry-run"
+if ./bin/gkebnkctl test connectivity --target 10.30.0.1:443 --dry-run -f examples/host-device/cluster.yaml 2>&1 | tee artifacts/test-connectivity-dryrun.log &&
+	./bin/gkebnkctl test dns --target f5.com --dry-run -f examples/host-device/cluster.yaml 2>&1 | tee artifacts/test-dns-dryrun.log &&
+	./bin/gkebnkctl test egress --dry-run -f examples/host-device/cluster.yaml 2>&1 | tee artifacts/test-egress-dryrun.log; then
+	printf "%b[PASS]%b gkebnkctl test {connectivity,dns,egress} --dry-run\n" "$GREEN" "$NC"
+	((passed_gates++))
+else
+	printf "%b[FAIL]%b gkebnkctl test {connectivity,dns,egress} --dry-run\n" "$RED" "$NC"
+	((failed_gates++))
+fi
+echo
+
+# 10. Security gates (advisory: pass on both success and findings, warn on findings)
 echo "-> Security gates (gosec, govulncheck, gitleaks):"
 echo "-> go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 ./... (advisory)"
 if go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 ./...; then
@@ -158,14 +191,25 @@ else
 	printf "%b[WARN]%b govulncheck found findings (advisory gate - see output above)\n" "$YELLOW" "$NC"
 	((passed_gates++))
 fi
-echo "-> go run github.com/zricethezav/gitleaks/v8@v8.18.2 detect --source . --no-banner (advisory)"
+echo "-> go run github.com/zricethezav/gitleaks/v8@v8.18.2 detect --source . --no-banner --redact (advisory)"
 echo "   Note: local run scans the worktree only; CI covers full history via fetch-depth:0"
-if go run github.com/zricethezav/gitleaks/v8@v8.18.2 detect --source . --no-banner; then
+if go run github.com/zricethezav/gitleaks/v8@v8.18.2 detect --source . --no-banner --redact; then
 	printf "%b[PASS]%b gitleaks\n" "$GREEN" "$NC"
 	((passed_gates++))
 else
 	printf "%b[WARN]%b gitleaks found findings (advisory gate - see output above)\n" "$YELLOW" "$NC"
 	((passed_gates++))
+fi
+echo
+
+# 11. Docs spellcheck (cspell)
+echo "-> npx --yes cspell@8 --no-progress --config cspell.json \"docs/**/*.md\" \"README.md\" \"CONTRIBUTING.md\""
+if npx --yes cspell@8 --no-progress --config cspell.json "docs/**/*.md" "README.md" "CONTRIBUTING.md"; then
+	printf "%b[PASS]%b cspell docs spellcheck\n" "$GREEN" "$NC"
+	((passed_gates++))
+else
+	printf "%b[FAIL]%b cspell docs spellcheck\n" "$RED" "$NC"
+	((failed_gates++))
 fi
 echo
 

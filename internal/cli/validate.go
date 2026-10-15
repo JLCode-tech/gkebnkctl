@@ -9,6 +9,8 @@ import (
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 )
 
+var flagValidateFile string
+
 // validateCmd: cheap, GCP-free check that a cluster.yaml parses and passes
 // the strict schema (unknown-field rejection, name regex, CIDR parsing,
 // jwtPath existence, farSecret enum, ...). Useful in a tight edit loop
@@ -16,7 +18,7 @@ import (
 //
 // Pattern borrowed from awsbnkctl's `validate` command (ADR D-008).
 var validateCmd = &cobra.Command{
-	Use:   "validate <path>",
+	Use:   "validate [<path>]",
 	Short: "Parse and validate a cluster.yaml (no GCP API calls)",
 	Long: `gkebnkctl validate reads the given cluster.yaml, applies the strict
 schema (unknown fields are errors, metadata.name must match the GKE cluster
@@ -30,13 +32,20 @@ cluster.yaml without Application Default Credentials, or as a CI gate for
 cluster.yaml files committed under examples/.
 
 Example:
+  gkebnkctl validate -f examples/host-device/cluster.yaml
   gkebnkctl validate examples/host-device/cluster.yaml`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runValidate,
 }
 
 func runValidate(_ *cobra.Command, args []string) error {
-	path := args[0]
+	path := flagValidateFile
+	if path == "" && len(args) > 0 {
+		path = args[0]
+	}
+	if path == "" {
+		return fmt.Errorf("cluster.yaml path required (pass positional <path> or -f/--file)")
+	}
 	c, err := intent.Load(path)
 	if err != nil {
 		return fmt.Errorf("validation failed: %w", err)
@@ -56,5 +65,6 @@ func runValidate(_ *cobra.Command, args []string) error {
 }
 
 func init() {
+	validateCmd.Flags().StringVarP(&flagValidateFile, "file", "f", "", "path to cluster.yaml")
 	rootCmd.AddCommand(validateCmd)
 }

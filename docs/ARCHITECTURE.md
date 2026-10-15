@@ -47,17 +47,19 @@ Two MTUs are configured independently and must not be conflated:
 
 ## Phase model
 
-`up` runs every phase 00→51 in order; each phase is idempotent and
+`up` runs all 21 phases `00`→`51` in order; each phase is idempotent and
 re-runnable (name-based `Get`-then-skip — see "State & idempotency"
 below).
 
 | # | Phase | What it creates |
 |---|-------|------------------|
 | 00 | preflight | Nothing — ADC check, compute/container API-enabled check, best-effort quota warn |
-| 10 | networks | main VPC (cluster-owned) + shared external/internal dataplane VPCs (created-if-missing) + Cloud Router/NAT |
+| 10 | networks | main VPC (cluster-owned) + shared external/internal dataplane VPCs (created-if-missing) + per-cluster subnets + Cloud Router/NAT |
+| 15 | jumphost | Optional GCE jumphost VM (`<cluster>-jumphost`) + IAP SSH firewall rule (`<cluster>-allow-iap-ssh`) on external VPC when `testing.jumphost.enabled: true` |
 | 20 | cluster | GKE cluster (DPv2 multi-networking) + default/tmm/agent node pools |
-| 25 | discover | tmm/agent node iface/MAC/PCI + alias-CIDR/self-IP discovery, cached into state.env |
-| 30 | namespaces | `f5-bnk`, `f5-utils`, `egress-test` |
+| 25 | discover | tmm/agent node iface/MAC/PCI + alias-CIDR/self-IP discovery, cached into `state.env` |
+| 29 | forge-register | Registers cluster with BNK Forge via MCP/REST when `forge.enabled: true` and writes `.gkebnkctl/<cluster>/forge_link.json` |
+| 30 | namespaces | `cert-manager`, `f5-cne-core`, `f5-cne-system`, `f5-bnk-instance`, `f5-utils`, and `egress.testNamespace` (default `egress-test`), plus `coredns-f5` in `kube-system` and `kube-dns` `stubDomains` patch for `f5-cne-core.svc.cluster.local` |
 | 31 | cert-manager | vendored static install YAML (no helm) |
 | 32 | issuers | self-signed cluster issuer + `ext-ca` Certificate/ClusterIssuer |
 | 33 | far-secret | pull-credential Secret in every `bnk.farSecret.namespaces` entry |
@@ -112,17 +114,14 @@ patch, Phase40's License CR, Phase41's `route-int-gw`).
 
 ### Down phases — deliberately asymmetric
 
-`down` does **not** mirror `up` in reverse. It runs exactly two steps:
+`down` does **not** mirror `up` phase-for-phase. It runs four teardown steps:
 
-1. **`PhaseDownCluster`** — deletes the GKE cluster (node pools die with it).
-2. **`PhaseDownNetworks`** — deletes the **main VPC only**: firewall, then
-   subnet, then VPC, in that order.
+1. **`Phase29ForgeRegisterDown`** — cleans up cluster-scoped benchmark targets in BNK Forge and unregisters the cluster via MCP/REST when registered.
+2. **`PhaseDownJumphost`** — deletes `<cluster>-jumphost` and `<cluster>-allow-iap-ssh` when `testing.jumphost.enabled: true`.
+3. **`PhaseDownCluster`** — best-effort strips F5 BNK CR finalizers, then deletes the GKE cluster (node pools die with it).
+4. **`PhaseDownNetworks`** — deletes the **main VPC** (`firewall` → `subnet` → `VPC`). Unless `--keep-dataplane` is set, it also calls `teardownDataplaneResources` on `network.external.vpc` and `network.internal.vpc` to delete per-cluster dataplane subnets carrying this cluster's `gkebnkctl` ownership marker, and — if no other cluster's marked subnets remain in that shared VPC — deletes the last-cluster-out marked firewall rules and Cloud Routers/NATs. Unmarked resources are never touched.
 
-`network.external`/`network.internal` — the shared dataplane VPCs — are
-**never referenced by `PhaseDownNetworks` at all**, not even as a
-"skip these" list; the function's signature has no path to their names.
-This is enforced by test (`down_test.go` asserts the fake VPC call log
-never contains the ext/int names) and reprinted at runtime:
+The shared dataplane VPCs themselves (`network.external.vpc` / `network.internal.vpc`) are **NEVER deleted by teardown** (enforced by `down_test.go` and printed at runtime):
 
 ```
 → shared dataplane VPCs <ext>/<int> are NEVER deleted by teardown.

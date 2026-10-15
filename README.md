@@ -64,38 +64,87 @@ That's the 4-command lifecycle (`init` → `up` → `test` → `down`). See [doc
 
 ## Command Reference
 
-| Subcommand | Description |
-|---|---|
-| **`gkebnkctl doctor`** | Validates workstation prerequisites, GCP ADC credentials, enabled APIs, and regional quotas |
-| **`gkebnkctl init`** | Interactive wizard scaffolding `cluster.yaml`, `keys/`, `artifacts/`, and AI agent guides |
-| **`gkebnkctl validate`** | Strict static validation of `cluster.yaml` without making cloud API calls |
-| **`gkebnkctl up`** | Provisions VPCs, GKE multi-networking cluster, and installs BNK host-device (Phases 00–51) |
-| **`gkebnkctl down`** | Tears down cluster and cluster-owned VPCs while preserving shared networks |
-| **`gkebnkctl test`** | Built-in diagnostic suite: latency percentiles (P50/P95/P99), ECS DNS, and live Phase 50 egress probes |
-| **`gkebnkctl kubeconfig`** | Exports cluster kubeconfig with automatic backup (`.gkebnkctl-bak`) and `--restore-global` |
-| **`gkebnkctl manifest probe`**| Inspects and validates remote F5 FAR release manifests and CRD Bill-of-Materials |
-| **`gkebnkctl journal`** | Append-only operational audit log and handover manager (`artifacts/journal.jsonl`) |
-| **`gkebnkctl k`** | Cluster-scoped `kubectl` wrapper (`k get`, `k logs`, `k exec`, `k describe`, `k apply`) |
-| **`gkebnkctl agent`** | Generates dual-path AI pair-programming instructions for Gemini, Claude, Cursor, and OpenCode |
-| **`gkebnkctl bnkforge`** | Registers, unregisters, and queries cluster telemetry with central BNK Forge daemon |
-| **`gkebnkctl install`** | Copies running binary into user PATH (`~/.local/bin`, `~/bin`, or `/usr/local/bin`) |
-| **`gkebnkctl self`** | Release updater (`gkebnkctl self update`) and update checker (`gkebnkctl self check`) |
-| **`gkebnkctl version`** | Displays CLI version, Git commit hash, build date, and Go toolchain |
+`gkebnkctl` provides 24 top-level commands (plus Cobra's built-in `help` and `completion`):
+
+| Command | Subcommands & Key Flags | Description |
+|---|---|---|
+| **`gkebnkctl up`** | `-f/--config <cluster.yaml>`, `--dry-run` | Provisions VPCs, optional jumphost, GKE multi-networking cluster, Forge registration, and BNK host-device stack (21 phases: `00`–`51`) |
+| **`gkebnkctl down`** | `-f/--config <cluster.yaml>`, `--yes`, `--dry-run`, `--keep-dataplane` | Unregisters from Forge, deletes jumphost, GKE cluster, main VPC, and cluster-owned dataplane subnets/routers/NATs/firewalls while preserving shared dataplane VPCs |
+| **`gkebnkctl validate`** | `<cluster.yaml>` | Strict offline schema and semantic validation of `cluster.yaml` without making GCP API calls |
+| **`gkebnkctl init`** | `[directory]`, `--project`, `--name`, `--region`, `--zone`, `--pattern`, `-f/--force` | Interactive or flag-driven wizard scaffolding `cluster.yaml`, `keys/` (`license.jwt`, `dockerconfig.json`), and `artifacts/` |
+| **`gkebnkctl doctor`** | `--project`, `--region`, `--zone`, `--json` | Validates workstation prerequisites, GCP ADC credentials, enabled APIs, and regional compute/IP quotas |
+| **`gkebnkctl status`** | `-f/--config <cluster.yaml>` | Summarizes workspace deploy state (`state.env`), cluster reachability, BNK 2.4/2.3 readiness, and Forge link |
+| **`gkebnkctl logs`** | `<flo\|cis\|cert-manager\|cneinstance\|tmm>`, `-f/--follow`, `-n`, `-c`, `--governance`, `--mcp` | Streams component logs or filtered `BNKGOV` / MCP JSON-RPC governance decisions |
+| **`gkebnkctl kubeconfig`** | `-f/--config <cluster.yaml>`, `--write-global`, `--merge`, `--restore-global` | Generates self-contained OAuth2 kubeconfig with automatic `.gkebnkctl-bak` backup and restore |
+| **`gkebnkctl k`** | `<get\|describe\|logs\|exec\|apply\|delete\|top> [args...]` | In-process cluster-scoped `kubectl` replacement (no external `kubectl` binary required) |
+| **`gkebnkctl bnk`** | `heal`, `resync`, `migrate-2.4`, `upgrade`, `mcp-session` | Day-2 BNK operations: 9-check self-healing (`multus-token-watch, tmm-log-stream, pod-manager, cwc, dssm-probe, controller-endpointslices, tmm-k8s-routes, epp-namespaces, test-namespace`), route resync, 2.3→2.4 migration, in-place upgrade, and MCP session affinity demo |
+| **`gkebnkctl scenarios`** | `list`, `run [name] --all --dry-run --vip --synthetic -f`, `clean [name] --all -f` | Deploys, verifies, and cleans up end-to-end BNK traffic scenarios in topological dependency order |
+| **`gkebnkctl test`** | `dns`, `connectivity`, `egress`, `traffic` (`--dry-run`, `-f/--file`, `--json`) | Built-in diagnostic suite: P50/P95/P99 latency percentiles, EDNS0/ECS DNS probes, TCP/HTTP connectivity, and Phase 50 egress verification |
+| **`gkebnkctl forge`** | `register`, `status`, `unregister`, `cleanup`, `benchmark` (`--forge-mcp-url`, `-f/--config`) | Registers and manages the workspace with a BNK Forge instance over MCP (`http://localhost:8081/mcp/`) and REST |
+| **`gkebnkctl benchmark`** | `setup`, `run`, `list`, `status`, `daemon` (`-f/--config`, `--scenario`, `--proxies`, `--synthetic`) | Runs `aiperf` GenAI inference benchmarks from the jumphost, multi-proxy shootouts, and the persistent WebSocket benchmark agent daemon |
+| **`gkebnkctl topology`** | `-f/--config <cluster.yaml>`, `--format ascii\|mermaid\|dot\|json`, `--static` | Renders the 3-VPC, node-pool, TMM VLAN, PCI, VXLAN, and Gateway topology offline or enriched from live Kubernetes |
+| **`gkebnkctl manifest`** | `probe [version]`, `--far`, `--all` | Probes and validates F5 BNK release manifests and image availability against F5 Artifact Registry (FAR) |
+| **`gkebnkctl install`** | `--dir <path>` | Copies the running `gkebnkctl` binary into user `PATH` (`~/.local/bin`, `~/bin`, or `/usr/local/bin`) |
+| **`gkebnkctl self`** | `update [--yes]`, `check` | Verifies SHA-256 checksums against `checksums.txt` and updates `gkebnkctl` in-place from GitHub Releases |
+| **`gkebnkctl agent`** | `[all\|claude\|cursor\|copilot\|gemini\|codex]`, `-f/--file`, `--force` | Generates AI coding-assistant context files grounded in your `cluster.yaml` |
+| **`gkebnkctl journal`** | `add <summary>`, `list` (`--file`, `--action`, `--actor`, `--tags`, `--json`) | Append-only operational audit log and multi-agent handover journal (`artifacts/journal.jsonl`) |
+| **`gkebnkctl version`** | `--json` | Displays CLI release version, Git commit hash, build timestamp, Go toolchain, and pinned BNK/GKE versions |
+| **`gkebnkctl completion`** | `bash`, `zsh`, `fish`, `powershell` | Generates shell autocompletion scripts |
+| **`gkebnkctl help`** | `[command]` | Displays help for any command or subcommand |
+| **`gkebnkctl bnkforge`** | `register`, `status`, `unregister` (`--url`, `-f`) | *Deprecated alias* — use `gkebnkctl forge` instead |
+
+---
+
+## Examples
+
+All 5 committed example configurations under [`examples/`](examples/) are validated and dry-run tested in CI:
+
+- [`examples/host-device/`](examples/host-device/README.md) — Baseline 3-VPC GKE host-device BNK 2.4 cluster with transparent egress and VXLAN return routing.
+- [`examples/egress/`](examples/egress/README.md) — Live operator-driven transparent egress SNAT identity flip and `F5BigFwPolicy` egress firewall ACL demo.
+- [`examples/ingress/`](examples/ingress/README.md) — North-South Gateway API L7 `HTTPRoute` ingress through BNK TMM on GKE.
+- [`examples/multi-protocol-ingress/`](examples/multi-protocol-ingress/README.md) — Multi-protocol ingress (HTTP, HTTPS TLS termination, gRPC, and TCP L4) through a single BNK Gateway VIP.
+- [`examples/vertex-agent-demo/`](examples/vertex-agent-demo/README.md) — AI agent governance demo pairing a Vertex AI (Gemini) tool-calling agent with BNK MCP governance, token counting, semantic cache, and egress controls.
+
+---
+
+## BNK Forge Integration
+
+`gkebnkctl` integrates with **BNK Forge** via the `gkebnkctl forge` command group (talking to Forge's MCP server at `http://localhost:8081/mcp/` by default, configurable via `--forge-mcp-url` or `GKEBNKCTL_FORGE_MCP_URL`, with automatic REST fallback during `up`/`down` when `forge.enabled: true` is set in `cluster.yaml`):
+
+```bash
+# Register the cluster with BNK Forge over MCP (and run post-register scan + health check)
+gkebnkctl forge register -f cluster.yaml --scan
+
+# Inspect registration state and Forge reachability
+gkebnkctl forge status -f cluster.yaml
+
+# Run an aiperf benchmark from the jumphost and push telemetry to Forge
+gkebnkctl forge benchmark -f cluster.yaml --scenario baseline
+
+# Purge gkebnkctl-prefixed benchmark agents/configs for a workspace
+gkebnkctl forge cleanup --workspace bnk-hostdev
+
+# Unregister the cluster from Forge
+gkebnkctl forge unregister -f cluster.yaml
+```
+
+> Note: `gkebnkctl bnkforge` is retained as a deprecated alias; use `gkebnkctl forge` for all new workflows. See [docs/FORGE_INTEGRATION.md](docs/FORGE_INTEGRATION.md) for full details.
 
 ---
 
 ## The GKE Host-Device Contract
 
-`gkebnkctl` automates the host-device dataplane on GKE based on live-discovered invariants:
+`gkebnkctl` automates the host-device dataplane on GKE across 21 idempotent phases (`00` `preflight`, `10` `networks`, `15` `jumphost`, `20` `cluster`, `25` `discover`, `29` `forge-register`, `30` `namespaces`, `31` `cert-manager`, `32` `issuers`, `33` `far-secret`, `34` `multus`, `35` `nads`, `36` `flo`, `37` `node-sysctls`, `38` `cneinstance`, `39` `var-crash-patches`, `40` `license`, `41` `vlans-routes`, `42` `tmm-settle`, `50` `egress`, `51` `ingress-vxlan-routes`):
 
-1. **Multi-Networking (GKE Datapath V2):** Node pools attach secondary (`tmm-ext`) and tertiary (`tmm-int`) NICs using `--additional-node-network` and `--additional-pod-network`. GKE auto-assigns per-node alias `/28` slices from secondary ranges.
+1. **Multi-Networking (GKE Datapath V2):** Node pools attach secondary (`tmm-ext`) and tertiary (`tmm-int`) NICs using additional node and pod networks. GKE auto-assigns per-node alias `/28` slices from secondary ranges.
 2. **Host-Device NADs:** NetworkAttachmentDefinitions use `host-device` with static IPAM carrying discovered cloud self-IPs.
 3. **TMM Environment & PCI Passthrough:** `CNEInstance` sets `TMM_MAPRES_ADDL_VETHS_ON_DP=TRUE` and binds discovered PCI slot addresses (`PCIDEVICE_INTEL_COM_EXT`/`_INT`).
 4. **Node Sysctls:** `bnk-node-sysctls` DaemonSet sets `core_pattern` on TMM nodes, preventing postStart crash loops.
 5. **Crash Storage:** Automatically injects `/var/crash` `emptyDir` volumes into `f5-cne-controller` and `f5-crdconversion`.
 6. **Connected CWC Licensing:** `License` CR resolves F5 subscription JWTs against Cloud Web Console endpoints (`product-tst.apis.f5networks.net` / `product.apis.f5.com`) automatically.
-7. **CoreDNS StubDomain Forwarding:** Deploys `coredns-f5` and updates `kube-dns` `stubDomains` for `f5-bnk.svc.cluster.local`, establishing reliable DSSM HA cluster discovery on GKE.
-8. **Asymmetric Route Closure:** Discovers `vxlan100` VTEP addresses on agent nodes and injects node-specific `F5SPKStaticRoute`s to maintain symmetric ingress/egress return paths.
+7. **CoreDNS StubDomain Forwarding:** Phase 30 creates the 6 required namespaces (`cert-manager`, `f5-cne-core`, `f5-cne-system`, `f5-bnk-instance`, `f5-utils`, and `egress.testNamespace`), deploys `coredns-f5` in `kube-system`, and updates `kube-dns` `stubDomains` for `f5-cne-core.svc.cluster.local`, establishing reliable DSSM HA cluster discovery on GKE.
+8. **Asymmetric Route Closure:** Phase 51 discovers `vxlan100` VTEP addresses on agent nodes and injects node-specific `F5SPKStaticRoute`s to maintain symmetric ingress/egress return paths.
+9. **Safe Shared-VPC Teardown:** `gkebnkctl down` never deletes the shared dataplane VPCs (`network.external.vpc` / `network.internal.vpc`) themselves, while cleaning up per-cluster dataplane subnets and last-cluster-out shared routers/Cloud NATs/firewalls carrying the `gkebnkctl` ownership marker (unless `--keep-dataplane` is passed).
 
 ---
 
@@ -104,20 +153,16 @@ That's the 4-command lifecycle (`init` → `up` → `test` → `down`). See [doc
 `gkebnkctl` is built for pair programming with AI agents. Scaffold instructions for your preferred AI tool:
 
 ```bash
-# Generate agent guidance for Gemini Code Assist / Antigravity
-gkebnkctl agent --tool gemini
+# Generate agent guidance for all supported tools (Claude, Cursor, Copilot, Gemini, Codex)
+gkebnkctl agent all -f cluster.yaml
 
-# Generate agent guidance for Claude Code
-gkebnkctl agent --tool claude
-
-# Generate agent guidance for Cursor
-gkebnkctl agent --tool cursor
-
-# Generate agent guidance for OpenCode
-gkebnkctl agent --tool opencode
+# Or target a single tool
+gkebnkctl agent gemini -f cluster.yaml
+gkebnkctl agent claude -f cluster.yaml
+gkebnkctl agent cursor -f cluster.yaml
 ```
 
-See [AGENTS.md](.agent/AGENTS.md) and [docs/ALIGNMENT.md](docs/ALIGNMENT.md) for agent roles and dual-path SDLC conventions.
+See [docs/ALIGNMENT.md](docs/ALIGNMENT.md) for multi-cloud CLI conventions.
 
 ---
 
@@ -129,32 +174,58 @@ The intent file (`cluster.yaml`) is the single source of truth:
 apiVersion: gkebnkctl/v1
 kind: Cluster
 metadata:
-  name: gke-bnk-syd
+  name: bnk-hostdev
   project: my-gcp-project
-  region: australia-southeast1
-  zone: australia-southeast1-a
+  zone: us-central1-a
+pattern: host-device
 network:
   main:
-    cidr: 10.0.0.0/16
-    podCidr: 10.1.0.0/16
-    svcCidr: 10.2.0.0/20
+    vpc: bnkhd-vpc
+    subnet: bnkhd-subnet
+    cidr: 10.60.0.0/24
+    podsRangeName: bnkhd-pods
+    podsCidr: 10.66.0.0/16
+    svcsRangeName: bnkhd-svcs
+    svcsCidr: 10.67.0.0/20
   external:
-    cidr: 10.10.0.0/16
+    vpc: bnkhd-ext
+    subnet: bnkhd-ext
+    cidr: 10.30.0.0/24
     mtu: 8896
+    podsRangeName: tmm-ext-pods
+    podsCidr: 10.31.0.0/24
+    underlayCidr: 10.30.0.0/16
   internal:
-    cidr: 10.20.0.0/16
+    vpc: bnkhd-int
+    subnet: bnkhd-int
+    cidr: 10.50.0.0/24
     mtu: 8896
+    podsRangeName: tmm-int-pods
+    podsCidr: 10.51.0.0/24
+  allowInternalCidr: 10.0.0.0/8
+  natGateways: true
 cluster:
-  kubernetesVersion: "1.32"
+  kubernetesVersion: "1.35"
+  defaultPool:
+    machineType: e2-standard-4
+    nodeCount: 3
   tmmPool:
-    machineType: n2-standard-8
+    name: tmm-pool
+    machineType: e2-standard-8
     nodeCount: 1
+    maxPodsPerNode: 8
+  agentPool:
+    name: agent-pool
+    machineType: e2-standard-4
+    nodeCount: 1
+    maxPodsPerNode: 8
 bnk:
-  manifestVersion: "2.4.0"
-  tmmMtu: 1460
-  jwtPath: keys/f5-license.jwt
+  manifestVersion: "2.4.0-3.2882.0"
+  tmmMtu: "1460"
+  jwtPath: ./keys/license.jwt
   farSecret:
-    path: keys/far-credentials.json
+    source: dockerconfig
+    dockerConfigFile: ./keys/dockerconfig.json
 ```
 
 ### Dry-Run Preview (No Cloud Mutations)

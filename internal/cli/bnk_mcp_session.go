@@ -74,9 +74,9 @@ iRule's name instead of attaching a second NetPolicy to that listener.
 Without --apply the manifests are printed on stdout. --apply server-side-applies
 them and waits for the profile to report Programmed=True.
 
-Example (the agentcore-demo Gateway):
-  gkebnkctl bnk mcp-session -f examples/agentcore-demo/cluster.yaml \
-    --name mcp-session --gateway bnk-agentcore-demo-gateway \
+Example (the vertex-agent-demo Gateway):
+  gkebnkctl bnk mcp-session -f examples/vertex-agent-demo/cluster.yaml \
+    --name mcp-session --gateway bnk-vertex-agent-demo-gateway \
     --listener http --listener https --irule mcp-rate-limit-irule \
     --passphrase-env MCP_SESSION_PASSPHRASE --apply`,
 	Args: cobra.NoArgs,

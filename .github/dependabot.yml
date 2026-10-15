@@ -1,0 +1,22 @@
+# Dependabot keeps go.mod and the Actions pins fresh. The CI security gate
+# (ci.yml security-audit job) fails when govulncheck reports a reachable
+# vulnerability with a released fix — weekly PRs targeting staging make those
+# dependency bumps routine.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    target-branch: "staging"
+    schedule:
+      interval: weekly
+    groups:
+      go-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: "staging"
+    schedule:
+      interval: weekly
