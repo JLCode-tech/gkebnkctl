@@ -37,7 +37,7 @@ var bnkCmd = &cobra.Command{
 cluster management.
 
 Subcommands:
-  heal         Detect and repair cluster plumbing (Multus, metrics-server, TMM log stream, pod-manager, cwc, dSSM, RBAC, Workload Identity, TMM routes)
+  heal         Detect and repair cluster plumbing (multus-token-watch, tmm-log-stream, pod-manager, cwc, dssm-probe, controller-endpointslices, tmm-k8s-routes, epp-namespaces, test-namespace)
   resync       Force the F5 cne-controller to re-resolve stale TMM pool members
   migrate-2.4  Translate 2.3.x CRs into the 2.4 Infra / GatewaySettings model
   upgrade      In-place FLO + CNEInstance upgrade to BNK 2.4

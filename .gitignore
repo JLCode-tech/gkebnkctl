@@ -31,9 +31,16 @@ forge_agent_token.json
 # Go build artifacts
 /gkebnkctl
 /bin/
+/dist/
 /artifacts/
+*.exe
 *.test
 *.out
+node_modules/
+
+# Local environment files
+.env
+.env.*
 
 # Go-SDK state dirs (`.gkebnkctl/<cluster>/state.env` IDs cache — see
 # internal/gcp/state)
@@ -45,7 +52,7 @@ forge_agent_token.json
 .*-pr-body.md
 /workspaces/
 
-# --- Internal dev tooling (not for public repo) ---
+# --- Internal dev tooling & working docs (not for public repo) ---
 # AI-assisted dev framework (MAF / OpenCode / Claude Code); lives on local disk only.
 .agent/
 .agent-local/
@@ -55,6 +62,12 @@ opencode.json
 opencode.jsonc
 CLAUDE.md
 CLAUDE.local.md
+docs/audits/
+docs/design/
+docs/spikes/
+docs/demo/
+docs/adr/
+docs/REMEDIATION.md
 
 # --- MAF framework operational artifacts (installer-managed) ---
 *.maf.new

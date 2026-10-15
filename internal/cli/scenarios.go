@@ -228,6 +228,7 @@ var (
 	flagScenarioVIP       string
 	flagScenarioDryRun    bool
 	flagScenarioAll       bool
+	flagScenarioCleanAll  bool
 	flagScenarioSynthetic bool
 )
 
@@ -242,7 +243,7 @@ real traffic through the data plane, and emits a JSON report + ASCII env diagram
 Subcommands:
   list           Print registered scenarios with name, rating, and description
   run <name>     Run one scenario (or --all for every registered scenario)
-  clean <name>   Invoke the scenario's Cleanup hook`,
+  clean <name>   Invoke the scenario's Cleanup hook (or --all for every registered scenario)`,
 }
 
 var scenariosListCmd = &cobra.Command{
@@ -279,9 +280,9 @@ Use --all to run every registered scenario in topo-sorted dependency order.`,
 }
 
 var scenariosCleanCmd = &cobra.Command{
-	Use:   "clean <name>",
-	Short: "Invoke a scenario's Cleanup hook",
-	Args:  cobra.ExactArgs(1),
+	Use:   "clean [name]",
+	Short: "Invoke a scenario's Cleanup hook (or --all)",
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runScenariosCleanCmd,
 }
 
@@ -294,6 +295,7 @@ func init() {
 	_ = scenariosRunCmd.MarkFlagRequired("config")
 
 	scenariosCleanCmd.Flags().StringVarP(&flagScenarioConfig, "config", "f", "", "path to cluster.yaml (required)")
+	scenariosCleanCmd.Flags().BoolVar(&flagScenarioCleanAll, "all", false, "clean every registered scenario in reverse dependency order")
 	_ = scenariosCleanCmd.MarkFlagRequired("config")
 
 	scenariosCmd.AddCommand(scenariosListCmd, scenariosRunCmd, scenariosCleanCmd)
@@ -368,11 +370,38 @@ func runScenariosRunCmd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func cleanScenariosList(sctx *scenarios.Context, all []scenarios.Scenario) error {
+	ordered, err := topoSort(all)
+	if err != nil {
+		return err
+	}
+	var failed []string
+	for i := len(ordered) - 1; i >= 0; i-- {
+		s := ordered[i]
+		fmt.Fprintf(os.Stderr, "[scenarios] cleaning %s\n", s.Name())
+		if err := scenarios.Cleanup(sctx, s); err != nil {
+			fmt.Fprintf(os.Stderr, "[scenarios] clean %s failed: %v\n", s.Name(), err)
+			failed = append(failed, s.Name())
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("scenarios clean --all: %d/%d scenario(s) failed cleanup: %v", len(failed), len(ordered), failed)
+	}
+	return nil
+}
+
 func runScenariosCleanCmd(cmd *cobra.Command, args []string) error {
-	name := args[0]
-	s := scenarios.Find(name)
-	if s == nil {
-		return fmt.Errorf("scenario %q not found", name)
+	if !flagScenarioCleanAll && len(args) == 0 {
+		return fmt.Errorf("usage: gkebnkctl scenarios clean <name> | --all")
+	}
+
+	var single scenarios.Scenario
+	if !flagScenarioCleanAll {
+		name := args[0]
+		single = scenarios.Find(name)
+		if single == nil {
+			return fmt.Errorf("scenario %q not found", name)
+		}
 	}
 
 	cl, err := intent.Load(flagScenarioConfig)
@@ -398,7 +427,11 @@ func runScenariosCleanCmd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("building scenario context: %w", err)
 	}
 
-	return scenarios.Cleanup(sctx, s)
+	if flagScenarioCleanAll {
+		return cleanScenariosList(sctx, scenarios.All())
+	}
+
+	return scenarios.Cleanup(sctx, single)
 }
 
 func resolveScenarioKubeconfig(st *state.State, cl *intent.Cluster) string {

@@ -3,9 +3,12 @@ package self
 import (
 	"archive/tar"
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -145,13 +148,31 @@ func DownloadAsset(ctx context.Context, rel *Release, destPath string) error {
 	}
 
 	const maxBinarySize = 500 * 1024 * 1024 // 500MB max limit to guard against decompression bombs
+	archiveBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxBinarySize))
+	if err != nil {
+		return fmt.Errorf("read asset body: %w", err)
+	}
+
+	var sumsAsset *Asset
+	for i := range rel.Assets {
+		if rel.Assets[i].Name == "checksums.txt" {
+			sumsAsset = &rel.Assets[i]
+			break
+		}
+	}
+	if sumsAsset != nil {
+		if err := verifyAssetChecksum(ctx, client, token, sumsAsset, targetAsset.Name, archiveBytes); err != nil {
+			return err
+		}
+	}
+
 	targetName := "gkebnkctl"
 	if runtime.GOOS == "windows" {
 		targetName = "gkebnkctl.exe"
 	}
 
 	if strings.HasSuffix(targetAsset.Name, ".tar.gz") || strings.HasSuffix(targetAsset.Name, ".tgz") {
-		gzr, err := gzip.NewReader(resp.Body)
+		gzr, err := gzip.NewReader(bytes.NewReader(archiveBytes))
 		if err != nil {
 			return fmt.Errorf("open gzip archive: %w", err)
 		}
@@ -188,11 +209,7 @@ func DownloadAsset(ctx context.Context, rel *Release, destPath string) error {
 	}
 
 	if strings.HasSuffix(targetAsset.Name, ".zip") {
-		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxBinarySize))
-		if err != nil {
-			return fmt.Errorf("read zip content: %w", err)
-		}
-		zr, err := zip.NewReader(bytes.NewReader(bodyBytes), int64(len(bodyBytes)))
+		zr, err := zip.NewReader(bytes.NewReader(archiveBytes), int64(len(archiveBytes)))
 		if err != nil {
 			return fmt.Errorf("open zip archive: %w", err)
 		}
@@ -230,9 +247,61 @@ func DownloadAsset(ctx context.Context, rel *Release, destPath string) error {
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, io.LimitReader(resp.Body, maxBinarySize)); err != nil { // #nosec G110
+	if _, err := io.Copy(out, bytes.NewReader(archiveBytes)); err != nil {
 		return fmt.Errorf("write binary to %s: %w", destPath, err)
 	}
 
+	return nil
+}
+
+func verifyAssetChecksum(ctx context.Context, client *http.Client, token string, sumsAsset *Asset, assetName string, data []byte) error {
+	sumsURL := sumsAsset.BrowserDownloadURL
+	if token != "" && sumsAsset.URL != "" {
+		sumsURL = sumsAsset.URL
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sumsURL, nil)
+	if err != nil {
+		return fmt.Errorf("create checksums request: %w", err)
+	}
+	req.Header.Set("User-Agent", "gkebnkctl-updater")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+		if sumsAsset.URL != "" && sumsURL == sumsAsset.URL {
+			req.Header.Set("Accept", "application/octet-stream")
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("download checksums.txt: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("download checksums.txt error (HTTP %d)", resp.StatusCode)
+	}
+
+	var expectedHash string
+	scanner := bufio.NewScanner(io.LimitReader(resp.Body, 1<<20))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 2 && strings.TrimPrefix(fields[1], "*") == assetName {
+			expectedHash = fields[0]
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read checksums.txt: %w", err)
+	}
+	if expectedHash == "" {
+		return fmt.Errorf("asset %s not found in checksums.txt", assetName)
+	}
+
+	sum := sha256.Sum256(data)
+	actualHash := hex.EncodeToString(sum[:])
+	if !strings.EqualFold(actualHash, expectedHash) {
+		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", assetName, expectedHash, actualHash)
+	}
 	return nil
 }

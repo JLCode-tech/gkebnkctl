@@ -93,24 +93,36 @@ jobs:
           mkdir -p bin
           go build -o bin/gkebnkctl ./cmd/gkebnkctl
 
-      - name: gkebnkctl validate examples/host-device/cluster.yaml
+      - name: Validate all example configs
         # Pure schema/semantic validation — no cloud calls even without the
         # skip-auth hook.
-        run: ./bin/gkebnkctl validate examples/host-device/cluster.yaml
+        run: |
+          set -eo pipefail
+          for cfg in \
+            examples/host-device/cluster.yaml \
+            examples/egress/cluster.yaml \
+            examples/ingress/cluster.yaml \
+            examples/multi-protocol-ingress/cluster.yaml \
+            examples/vertex-agent-demo/cluster.yaml; do
+            ./bin/gkebnkctl validate "$cfg"
+          done
 
-      - name: gkebnkctl up --dry-run (GKEBNKCTL_SKIP_AUTH=1)
-        # Asserts (a) exit-0, (b) the phased plan reaches phase 50 (proves
-        # no phase silently regressed to a stub — see runStubPhase's
-        # defensive fallback in internal/cli/lifecycle.go).
+      - name: gkebnkctl up --dry-run (all examples, GKEBNKCTL_SKIP_AUTH=1)
+        # Asserts (a) exit-0 across all 5 examples, (b) the phased plan reaches
+        # phase 50 and phase 51 (proves no phase silently regressed to a stub).
         env:
           GKEBNKCTL_SKIP_AUTH: "1"
         run: |
           set -eo pipefail
           mkdir -p artifacts
-          ./bin/gkebnkctl up -f examples/host-device/cluster.yaml --dry-run \
-            2>&1 | tee artifacts/up-dryrun.log
-          grep -q '\[phase 50\]' artifacts/up-dryrun.log
-          grep -q 'dry-run complete' artifacts/up-dryrun.log
+          for example in host-device egress ingress multi-protocol-ingress vertex-agent-demo; do
+            cfg="examples/${example}/cluster.yaml"
+            log="artifacts/up-dryrun-${example}.log"
+            ./bin/gkebnkctl up -f "$cfg" --dry-run 2>&1 | tee "$log"
+            grep -q '\[phase 50\]' "$log"
+            grep -q '\[phase 51\]' "$log"
+            grep -q 'dry-run complete' "$log"
+          done
 
       - name: gkebnkctl down --dry-run (GKEBNKCTL_SKIP_AUTH=1)
         env:
@@ -130,6 +142,53 @@ jobs:
           path: artifacts/
           if-no-files-found: warn
 
+  test-dryrun:
+    name: test-dryrun (gkebnkctl test {connectivity,dns,egress} --dry-run)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build gkebnkctl
+        run: |
+          mkdir -p bin
+          go build -o bin/gkebnkctl ./cmd/gkebnkctl
+
+      - name: gkebnkctl test connectivity --dry-run
+        run: |
+          set -eo pipefail
+          mkdir -p artifacts
+          ./bin/gkebnkctl test connectivity --target 10.30.0.1:443 --dry-run -f examples/host-device/cluster.yaml \
+            2>&1 | tee artifacts/test-connectivity-dryrun.log
+          grep -qiE 'would probe|dry[- ]run|plan' artifacts/test-connectivity-dryrun.log
+
+      - name: gkebnkctl test dns --dry-run
+        run: |
+          set -eo pipefail
+          ./bin/gkebnkctl test dns --target f5.com --dry-run -f examples/host-device/cluster.yaml \
+            2>&1 | tee artifacts/test-dns-dryrun.log
+          grep -qiE 'would query|dry[- ]run|plan' artifacts/test-dns-dryrun.log
+
+      - name: gkebnkctl test egress --dry-run
+        run: |
+          set -eo pipefail
+          ./bin/gkebnkctl test egress --dry-run -f examples/host-device/cluster.yaml \
+            2>&1 | tee artifacts/test-egress-dryrun.log
+          grep -qiE 'egress|dry[- ]run|plan' artifacts/test-egress-dryrun.log
+
+      - name: Upload test-dryrun logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-dryrun-logs
+          path: artifacts/
+          if-no-files-found: warn
+
   windows-build:
     name: windows build
     runs-on: windows-latest
@@ -141,6 +200,37 @@ jobs:
           go-version-file: go.mod
 
       - run: go build ./...
+
+  goreleaser-check:
+    name: goreleaser config sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+
+  docs-spellcheck:
+    name: docs cspell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: cspell (docs/**/*.md + README + CONTRIBUTING)
+        uses: streetsidesoftware/cspell-action@v6
+        with:
+          config: cspell.json
+          files: |
+            docs/**/*.md
+            README.md
+            CONTRIBUTING.md
 
   security-audit:
     name: security audit (gosec + govulncheck + gitleaks)
@@ -186,4 +276,4 @@ jobs:
           wget -q -O /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
           echo "6298c9235dfc9278c14b28afd9b7fa4e6f4a289cb1974bd27949fc1e9122bdee  /tmp/gitleaks.tar.gz" | sha256sum -c - || exit 1
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-          /tmp/gitleaks detect --source . --no-banner -v
+          /tmp/gitleaks detect --source . --no-banner --redact -v

@@ -91,3 +91,39 @@ func TestTopoSort_CoreFileCollectionSortedLast(t *testing.T) {
 		t.Errorf("last scenario = %s, want core-file-collection", sorted[2].Name())
 	}
 }
+
+type cleanRecorderScenario struct {
+	fakeScenarioCLI
+	cleaned *[]string
+}
+
+func (c *cleanRecorderScenario) Cleanup(*scenarios.Context) error {
+	*c.cleaned = append(*c.cleaned, c.name)
+	return nil
+}
+
+func TestCleanScenariosList_ReverseDepOrder(t *testing.T) {
+	var cleaned []string
+	a := &cleanRecorderScenario{fakeScenarioCLI: fakeScenarioCLI{name: "a"}, cleaned: &cleaned}
+	b := &cleanRecorderScenario{fakeScenarioCLI: fakeScenarioCLI{name: "b", deps: []string{"a"}}, cleaned: &cleaned}
+
+	sctx := &scenarios.Context{Out: ioDiscard{}}
+	if err := cleanScenariosList(sctx, []scenarios.Scenario{a, b}); err != nil {
+		t.Fatalf("cleanScenariosList: %v", err)
+	}
+	if len(cleaned) != 2 || cleaned[0] != "b" || cleaned[1] != "a" {
+		t.Fatalf("cleanup order = %v, want [b a]", cleaned)
+	}
+}
+
+func TestScenariosCleanCmd_RequiresNameOrAll(t *testing.T) {
+	flagScenarioCleanAll = false
+	err := runScenariosCleanCmd(scenariosCleanCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "--all") {
+		t.Fatalf("expected usage error mentioning --all, got: %v", err)
+	}
+}
+
+type ioDiscard struct{}
+
+func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }

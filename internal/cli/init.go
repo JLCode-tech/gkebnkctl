@@ -191,7 +191,7 @@ func runInit(_ *cobra.Command, args []string) error {
 	readmeContent := "# Secret Material Directory\n\n" +
 		"Place your sensitive credentials here:\n" +
 		"- `license.jwt`: Your F5 BNK subscription JWT license.\n" +
-		"- `f5-far-auth-key.tgz`: Your F5 FAR registry auth key archive.\n\n" +
+		"- `dockerconfig.json`: Your F5 FAR registry dockerconfig JSON.\n\n" +
 		"This directory is protected by `.gitignore` to prevent accidental commits.\n"
 	_ = os.WriteFile(keysReadme, []byte(readmeContent), 0o600)
 
@@ -240,10 +240,10 @@ func runInit(_ *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stdout, "✓ Initialized gkebnkctl workspace in %s\n", absDir)
 	fmt.Fprintf(os.Stdout, "  • Created cluster.yaml (cluster=%s, project=%s)\n", clusterName, project)
-	fmt.Fprintf(os.Stdout, "  • Created keys/ (drop license.jwt and f5-far-auth-key.tgz here)\n")
+	fmt.Fprintf(os.Stdout, "  • Created keys/ (drop license.jwt and dockerconfig.json here)\n")
 	fmt.Fprintf(os.Stdout, "  • Created artifacts/ and AGENTS.md\n\n")
 	fmt.Fprintf(os.Stdout, "Next steps:\n")
-	fmt.Fprintf(os.Stdout, "  1. Drop your license in keys/license.jwt\n")
+	fmt.Fprintf(os.Stdout, "  1. Drop your license in keys/license.jwt and FAR auth in keys/dockerconfig.json\n")
 	fmt.Fprintf(os.Stdout, "  2. Run: gkebnkctl doctor --project %s\n", project)
 	fmt.Fprintf(os.Stdout, "  3. Run: gkebnkctl up -f %s/cluster.yaml\n", targetDir)
 
