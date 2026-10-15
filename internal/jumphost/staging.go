@@ -43,6 +43,7 @@ var (
 // RunStagingCommands mints+pushes an ephemeral IAP key internally, then runs each command in order over SSH-via-IAP.
 // When an in-cluster probe pod is available (and GKEBNKCTL_FORCE_IAP is not 1), it executes commands via execInProbe.
 func RunStagingCommands(ctx context.Context, opts ProbeOptions, commands []string) ([]string, error) {
+	ctx = withProbeOptions(ctx, opts)
 	if shouldUseProbe(ctx) {
 		out := make([]string, 0, len(commands))
 		for _, cmd := range commands {
@@ -78,6 +79,7 @@ func RunStagingCommands(ctx context.Context, opts ProbeOptions, commands []strin
 // RunStagingCommandWithStdin runs a SINGLE command over SSH-via-IAP with stdin attached,
 // or via execInProbeWithStdin when using an in-cluster probe pod.
 func RunStagingCommandWithStdin(ctx context.Context, opts ProbeOptions, command string, stdin io.Reader) (string, error) {
+	ctx = withProbeOptions(ctx, opts)
 	if shouldUseProbe(ctx) {
 		cleanedCmd := stripInterfaceFlag(command)
 		return execInProbeWithStdinFn(ctx, cleanedCmd, stdin)
@@ -96,6 +98,7 @@ func RunStagingCommandWithStdin(ctx context.Context, opts ProbeOptions, command 
 
 // CopyFileViaIAP writes content to remotePath on the jumphost by base64-encoding content.
 func CopyFileViaIAP(ctx context.Context, opts ProbeOptions, content []byte, remotePath string) error {
+	ctx = withProbeOptions(ctx, opts)
 	if shouldUseProbe(ctx) {
 		b64 := base64.StdEncoding.EncodeToString(content)
 		dir := filepath.Dir(remotePath)
@@ -139,6 +142,7 @@ func CopyFileViaIAP(ctx context.Context, opts ProbeOptions, content []byte, remo
 
 // CopyFileViaIAPStdin writes content to remotePath on the jumphost by piping the bytes through stdin.
 func CopyFileViaIAPStdin(ctx context.Context, opts ProbeOptions, content []byte, remotePath string) error {
+	ctx = withProbeOptions(ctx, opts)
 	if shouldUseProbe(ctx) {
 		dir := filepath.Dir(remotePath)
 		remoteCmd := fmt.Sprintf(

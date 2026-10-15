@@ -337,9 +337,10 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 }
 
 func (s *scenario) Cleanup(ctx *scenarios.Context) error {
-	// Best-effort: stop the jumphost responder. Requires the jumphost state
-	// keys; if absent we simply skip (nothing was started).
-	if ctx.State != nil && ctx.State.Get("JUMPHOST_INSTANCE_ID") != "" {
+	// Best-effort: stop the jumphost or probe responder. Requires the jumphost
+	// state keys or a running probe pod; if absent we simply skip.
+	hasProbe := os.Getenv("GKEBNKCTL_FORCE_IAP") != "1" && (os.Getenv("GKEBNKCTL_PROBE_IN_CLUSTER") != "" || jumphost.IsProbePodRunning(ctx.Ctx))
+	if (ctx.State != nil && (ctx.State.Get("JUMPHOST_INSTANCE_NAME") != "" || ctx.State.Get("JUMPHOST_INSTANCE_ID") != "")) || hasProbe {
 		opts := probeOptionsFrom(ctx, "")
 		_ = jumphost.StopHTTPResponder(ctx.Ctx, opts, responderPort)
 	}
@@ -394,13 +395,20 @@ func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
 	// Use .102 to avoid colliding with httproutee2e (.100) and http-traffic-split (.101).
 	v.VIP = withLastOctet(vip, strconv.Itoa(102))
 
-	// BackendIP is the off-cluster Pool member — the jumphost's BNK_EXT ENI IP.
+	// BackendIP is the off-cluster Pool member — the jumphost's external IP (or BNK_EXT ENI IP),
+	// falling back to the in-cluster probe pod IP when running without a dedicated jumphost.
 	// Reading state here is allowed (it is NOT k8s I/O).
 	if ctx.State != nil {
-		v.BackendIP = ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
+		v.BackendIP = ctx.State.Get("JUMPHOST_EXT_IP")
+		if v.BackendIP == "" {
+			v.BackendIP = ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
+		}
+	}
+	if v.BackendIP == "" && os.Getenv("GKEBNKCTL_FORCE_IAP") != "1" {
+		v.BackendIP = jumphost.ProbePodIP(ctx.Ctx)
 	}
 	if v.BackendIP == "" {
-		return v, fmt.Errorf("JUMPHOST_BNK_EXT_ENI_IP empty in state.env — run `gkebnkctl up` with testing.jumphost.enabled=true (the jumphost is this scenario's external Pool backend)")
+		return v, fmt.Errorf("JUMPHOST_EXT_IP / JUMPHOST_BNK_EXT_ENI_IP empty in state.env and no probe pod running — run `gkebnkctl up` with testing.jumphost.enabled=true or deploy test-probe pod")
 	}
 	if v.BackendIP == v.VIP {
 		return v, fmt.Errorf("backend IP (%s) cannot equal Gateway VIP (%s)", v.BackendIP, v.VIP)

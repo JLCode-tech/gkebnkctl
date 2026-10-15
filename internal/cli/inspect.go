@@ -446,7 +446,7 @@ type bnkComponent struct {
 var bnkComponents = []bnkComponent{
 	{"flo", "F5 Lifecycle Operator", "f5-cne-core", "app.kubernetes.io/name=f5-lifecycle-operator"},
 	{"cis", "F5 BNK CIS controller", "f5-cne-system", "app=f5-bnk-cis"},
-	{"cwc", "Cluster Wide Controller", "f5-cne-core", "app=f5-spk-cwc"},
+	{"cwc", "Cluster Wide Controller", "f5-utils", "app in (cwc,f5-spk-cwc)"},
 	{"cert-manager", "cert-manager", "cert-manager", "app.kubernetes.io/instance=cert-manager"},
 	{"cneinstance", "BIG-IP TMM data plane (CNEInstance pods)", "f5-cne-system", "app.kubernetes.io/component=tmm"},
 	{"fluentd", "TODA Fluentd log collector", "f5-cne-core", "app=toda-fluentd"},
@@ -532,16 +532,16 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("listing %s pods in %s: %w", component, ns, err)
 	}
 	if len(pods.Items) == 0 && flagLogsNamespace == "" {
-		altNS := "f5-cne-core"
-		if ns == "f5-cne-core" {
-			altNS = "f5-cne-system"
-		}
-		if altNS != ns {
+		for _, altNS := range []string{"f5-utils", "f5-cne-core", "f5-cne-system"} {
+			if altNS == ns {
+				continue
+			}
 			if altPods, altErr := cs.CoreV1().Pods(altNS).List(ctx, metav1.ListOptions{
 				LabelSelector: comp.Selector,
 			}); altErr == nil && len(altPods.Items) > 0 {
 				pods = altPods
 				ns = altNS
+				break
 			}
 		}
 	}

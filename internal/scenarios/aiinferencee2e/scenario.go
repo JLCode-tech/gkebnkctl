@@ -571,9 +571,13 @@ func runVLLMSSEProbe(ctx context.Context, sctx *scenarios.Context, vip string) (
 	// Streaming completion request body — minimal tokens so the probe completes quickly.
 	reqBody := `{"model":"llama3","messages":[{"role":"user","content":"Say hello."}],"stream":true,"max_tokens":32}`
 	// Remote curl: output SSE body on stdout, HTTP code as the final line.
+	ifaceFlag := ""
+	if sourceIP != "" {
+		ifaceFlag = fmt.Sprintf("--interface %s ", sourceIP)
+	}
 	remoteCmd := fmt.Sprintf(
-		`curl -s -N --no-buffer --interface %s -H 'Host: %s' -H 'Content-Type: application/json' -H 'Accept: text/event-stream' -d %s -w '\n%%{http_code}' http://%s/v1/chat/completions`,
-		sourceIP, scnHostname,
+		`curl -s -N --no-buffer %s-H 'Host: %s' -H 'Content-Type: application/json' -H 'Accept: text/event-stream' -d %s -w '\n%%{http_code}' http://%s/v1/chat/completions`,
+		ifaceFlag, scnHostname,
 		shellSingleQuote(reqBody),
 		vip,
 	)

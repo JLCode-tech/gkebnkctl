@@ -76,12 +76,13 @@ func Phase29ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	req := forge.RegisterRequest{
 		WorkspaceName:        cl.Metadata.Name,
 		WorkspaceDir:         workspaceDir,
+		ProjectName:          cl.Forge.ResolveProjectName(cl.Metadata.Name),
 		ClusterName:          cl.Metadata.Name,
 		Region:               region,
 		GCPProject:           cl.Metadata.Project,
 		Environment:          cl.Forge.ResolveEnvironment(),
 		ProjectType:          cl.Forge.ResolveProjectType(),
-		CloudProvider:        "gcp",
+		CloudProvider:        cl.Forge.ResolveCloudProvider(),
 		Kubeconfig:           kubeconfigBytes,
 		CredentialTemplateID: cl.Forge.CredentialTemplateID,
 		PostRegisterScan:     true,
@@ -135,6 +136,7 @@ func Phase29ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		ForgeURL:     restURL,
 		ForgeMCPURL:  mcpURL,
 		Workspace:    cl.Metadata.Name,
+		ProjectName:  cl.Forge.ResolveProjectName(cl.Metadata.Name),
 		ClusterName:  cl.Metadata.Name,
 		RegisteredAt: time.Now().UTC(),
 		Status:       "pending",
@@ -146,8 +148,16 @@ func Phase29ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 }
 
 // Phase29ForgeRegisterDown unregisters the cluster from BNK-Forge during teardown.
-func Phase29ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, _ *state.State, dryRun bool) error {
+func Phase29ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state.State, dryRun bool) error {
 	workspaceDir := cl.StateDir()
+	link, linkErr := forge.ReadLink(workspaceDir)
+	forgeEnabled := cl.Forge != nil && cl.Forge.Enabled
+	forgeStateRegistered := st != nil && st.Get("FORGE_REGISTERED") == "true"
+
+	if (linkErr != nil || link == nil) && !forgeEnabled && !forgeStateRegistered {
+		return nil
+	}
+
 	restURL := intent.DefaultForgeRESTURL
 	mcpURL := forge.DefaultMCPURL
 	var creds forge.RestCreds
@@ -169,19 +179,28 @@ func Phase29ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, _ *state.
 		return nil
 	}
 
-	link, err := forge.ReadLink(workspaceDir)
-	if err == nil && link != nil {
+	if linkErr == nil && link != nil {
 		// Clean up benchmark artifacts first if we have cluster ID
 		if link.ClusterID > 0 {
 			_ = forge.DeleteAllClusterBenchmarkArtifacts(ctx, restURL, creds, link.ClusterID)
 		}
 
-		// Try unregister via MCP
-		mcpClient := forge.NewClient(mcpURL)
-		if unregErr := forge.Unregister(ctx, mcpClient, workspaceDir, true); unregErr != nil {
-			// Fallback to REST
-			_ = forge.UnregisterREST(ctx, restURL, link, creds)
-			_ = forge.RemoveLink(workspaceDir)
+		// Try unregister via MCP when link has registered IDs
+		var unregErr error
+		if link.IsRegistered() {
+			mcpClient := forge.NewClient(mcpURL)
+			unregErr = forge.Unregister(ctx, mcpClient, workspaceDir, true)
+		}
+		if !link.IsRegistered() || unregErr != nil {
+			// Fallback to REST (handles both registered IDs and pending links by name)
+			restErr := forge.UnregisterREST(ctx, restURL, link, creds)
+			if restErr == nil || !link.IsRegistered() {
+				_ = forge.RemoveLink(workspaceDir)
+			}
+		}
+		if st != nil {
+			st.Delete("FORGE_REGISTERED")
+			_ = st.Save()
 		}
 		fmt.Fprintf(os.Stderr, "[down] ✓ cluster %s unregistered from forge\n", cl.Metadata.Name)
 		return nil
@@ -194,6 +213,10 @@ func Phase29ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, _ *state.
 		}
 	} else {
 		fmt.Fprintf(os.Stderr, "[down] ✓ cluster %s purged from forge by name\n", cl.Metadata.Name)
+	}
+	if st != nil {
+		st.Delete("FORGE_REGISTERED")
+		_ = st.Save()
 	}
 
 	return nil

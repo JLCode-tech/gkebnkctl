@@ -328,7 +328,7 @@ func applyDefaults(c *Cluster, baseDir string) {
 	}
 	applyPoolDefaults(&c.ClusterSpec.DefaultPool, "", "e2-standard-4", 3, 0)
 	applyPoolDefaults(&c.ClusterSpec.TmmPool, "tmm-pool", "e2-standard-8", 1, 8)
-	applyPoolDefaults(&c.ClusterSpec.AgentPool, "agent-pool", "e2-standard-4", 1, 8)
+	applyPoolDefaults(&c.ClusterSpec.AgentPool, "agent-pool", "e2-standard-4", 1, 32)
 
 	if c.Bnk.TmmMtu == "" {
 		c.Bnk.TmmMtu = "1460"
@@ -632,6 +632,11 @@ type ForgeSpec struct {
 	Environment string `yaml:"environment,omitempty"`
 	// ProjectType is the forge project type. Default "cloud-gcp".
 	ProjectType string `yaml:"projectType,omitempty"`
+	// ProjectName is the name of the forge project to register the cluster into.
+	// Defaults to "gkebnkctl-" + workspace.
+	ProjectName string `yaml:"projectName,omitempty"`
+	// CloudProvider is the forge cloud provider identifier. Default "gcp".
+	CloudProvider string `yaml:"cloudProvider,omitempty"`
 	// AgentToken is the Forge benchmark agent JWT token (role 'agent').
 	// Resolution order: CLI flag > GKEBNKCTL_FORGE_AGENT_TOKEN / AWSBNKCTL_FORGE_AGENT_TOKEN env > this field.
 	AgentToken string `yaml:"agent_token,omitempty"`
@@ -753,6 +758,25 @@ func (f *ForgeSpec) ResolveProjectType() string {
 		return f.ProjectType
 	}
 	return "cloud-gcp"
+}
+
+// ResolveProjectName returns the forge project name, defaulting to "gkebnkctl-" + clusterName.
+func (f *ForgeSpec) ResolveProjectName(clusterName string) string {
+	if f != nil && f.ProjectName != "" {
+		return f.ProjectName
+	}
+	if clusterName == "" {
+		return "gkebnkctl"
+	}
+	return "gkebnkctl-" + clusterName
+}
+
+// ResolveCloudProvider returns the forge cloud provider identifier.
+func (f *ForgeSpec) ResolveCloudProvider() string {
+	if f != nil && f.CloudProvider != "" {
+		return f.CloudProvider
+	}
+	return "gcp"
 }
 
 // HasInternalInterface reports whether the topology provisions a second data plane interface.

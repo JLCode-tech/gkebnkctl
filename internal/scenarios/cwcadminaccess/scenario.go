@@ -138,6 +138,9 @@ func (s *scenario) Manifests(ctx *scenarios.Context) ([]string, error) {
 func (s *scenario) Apply(ctx *scenarios.Context) error {
 	ns := s.Namespace(ctx)
 	if ctx.Clientset != nil {
+		_, _ = ctx.Clientset.CoreV1().Namespaces().Create(ctx.Ctx, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: ns},
+		}, metav1.CreateOptions{})
 		cwcNS := findCwcNamespace(ctx.Ctx, ctx)
 		// Replicate secrets from cwcNS if present
 		if !replicateSecret(ctx.Ctx, ctx, "cwc-license-client-certs", cwcNS, ns) {

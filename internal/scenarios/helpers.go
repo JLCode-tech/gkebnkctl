@@ -243,45 +243,11 @@ func PollMarkers(ctx context.Context, maxWait, interval time.Duration, fn func()
 // GatewaySettings pools never overlap when `scenarios run --all` leaves earlier
 // scenarios applied. The allocation is documented in docs/SCENARIOS.md
 // ("VIP plan"); http-routing-e2e alone keeps the cluster default (.100).
-//
-// In GKE multi-networking /28 data-path subnet (10.81.1.0/28), valid host
-// offsets are strictly .3 through .14 (.1 is GW, .2 is TMM self-IP, .15 is broadcast).
-// When ip is in 10.81.1.0/28, octets >= 100 are mapped to unique offsets inside .3-.14.
 // Non-IPv4 input is returned unchanged.
 func WithLastOctet(ip, octet string) string {
 	parts := strings.Split(ip, ".")
 	if len(parts) != 4 {
 		return ip
-	}
-	if parts[0] == "10" && parts[1] == "81" && parts[2] == "1" {
-		switch octet {
-		case "100":
-			octet = "10"
-		case "101":
-			octet = "11"
-		case "102":
-			octet = "8"
-		case "103":
-			octet = "13"
-		case "104":
-			octet = "5"
-		case "105":
-			octet = "12"
-		case "106":
-			octet = "7"
-		case "107":
-			octet = "6"
-		case "108":
-			octet = "4"
-		case "109":
-			octet = "3"
-		case "112":
-			octet = "9"
-		case "115":
-			octet = "14"
-		case "116":
-			octet = "7"
-		}
 	}
 	parts[3] = octet
 	return strings.Join(parts, ".")

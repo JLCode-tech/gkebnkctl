@@ -38,8 +38,8 @@ const (
 	InstanceNamespace      = "f5-cne-system"
 	OperatorNamespace      = "f5-cne-core"
 	cneInstanceResource    = "cneinstances"
-	cwcNamespace           = OperatorNamespace
-	cwcLabelSelector       = "app=cwc"
+	cwcNamespace           = "f5-utils"
+	cwcLabelSelector       = "app in (cwc,f5-spk-cwc)"
 	cwcContainerName       = "f5-spk-cwc"
 	cwcRestartThreshold    = int32(3)
 	h4DeploymentName       = "f5-cne-controller"
@@ -230,10 +230,14 @@ var Repairs = []Repair{
 			if err != nil || pod == nil {
 				return "", err
 			}
-			if err := d.Clients.K8s.CoreV1().Pods(cwcNamespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
+			ns := pod.Namespace
+			if ns == "" {
+				ns = cwcNamespace
+			}
+			if err := d.Clients.K8s.CoreV1().Pods(ns).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
 				return "", fmt.Errorf("delete cwc pod %s: %w", pod.Name, err)
 			}
-			if err := waitPodsReady(ctx, d.Clients, cwcNamespace, cwcLabelSelector, healWait); err != nil {
+			if err := waitPodsReady(ctx, d.Clients, ns, cwcLabelSelector, healWait); err != nil {
 				return "", err
 			}
 			return "cwc pod " + pod.Name + " deleted; replacement Ready", nil
@@ -489,26 +493,32 @@ func fixPodManager(ctx context.Context, clients *Clients, log io.Writer) (string
 // --- cwc -----------------------------------------------------------------
 
 func cwcPod(ctx context.Context, clients *Clients) (*corev1.Pod, bool, int32, error) {
-	pods, err := clients.K8s.CoreV1().Pods(cwcNamespace).List(ctx, metav1.ListOptions{LabelSelector: cwcLabelSelector})
-	if err != nil {
-		return nil, false, 0, err
-	}
-	for i := range pods.Items {
-		p := &pods.Items[i]
-		if p.DeletionTimestamp != nil {
-			continue
+	for _, ns := range []string{cwcNamespace, OperatorNamespace} {
+		pods, err := clients.K8s.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: cwcLabelSelector})
+		if err != nil {
+			return nil, false, 0, err
 		}
-		ready, restarts := cwcStatus(p)
-		return p, ready, restarts, nil
+		for i := range pods.Items {
+			p := &pods.Items[i]
+			if p.DeletionTimestamp != nil {
+				continue
+			}
+			ready, restarts := cwcStatus(p)
+			return p, ready, restarts, nil
+		}
 	}
 	return nil, false, 0, nil
 }
 
 func cwcStatus(pod *corev1.Pod) (ready bool, restartCount int32) {
 	for _, cs := range pod.Status.ContainerStatuses {
-		if cs.Name == cwcContainerName {
+		if cs.Name == cwcContainerName || cs.Name == "cwc" {
 			return cs.Ready, cs.RestartCount
 		}
+	}
+	if len(pod.Status.ContainerStatuses) == 1 {
+		cs := pod.Status.ContainerStatuses[0]
+		return cs.Ready, cs.RestartCount
 	}
 	return false, 0
 }
