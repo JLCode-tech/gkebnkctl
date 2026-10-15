@@ -420,6 +420,10 @@ type VPCResources struct {
 	Routers   []*computepb.Router
 }
 
+func matchesVPC(networkURL, vpcSelfLink string) bool {
+	return networkURL == vpcSelfLink || strings.HasSuffix(networkURL, "/"+vpcSelfLink)
+}
+
 // DiscoverDataplaneResources lists all subnets, firewalls, and routers in the given VPC,
 // parses their descriptions for ownership markers, and returns them grouped by cluster.
 func DiscoverDataplaneResources(ctx context.Context, clients *gcp.Clients, project, region, vpc string) (map[string]*VPCResources, error) {
@@ -441,7 +445,7 @@ func DiscoverDataplaneResources(ctx context.Context, clients *gcp.Clients, proje
 		return nil, fmt.Errorf("listing subnets: %w", err)
 	}
 	for _, s := range subnets {
-		if s.GetNetwork() == vpcSelfLink {
+		if matchesVPC(s.GetNetwork(), vpcSelfLink) {
 			owner, managed := labels.ParseOwner(s.GetDescription())
 			if !managed {
 				owner = ""
@@ -455,7 +459,7 @@ func DiscoverDataplaneResources(ctx context.Context, clients *gcp.Clients, proje
 		return nil, fmt.Errorf("listing firewalls: %w", err)
 	}
 	for _, fw := range firewalls {
-		if fw.GetNetwork() == vpcSelfLink {
+		if matchesVPC(fw.GetNetwork(), vpcSelfLink) {
 			owner, managed := labels.ParseOwner(fw.GetDescription())
 			if !managed {
 				owner = ""
@@ -469,7 +473,7 @@ func DiscoverDataplaneResources(ctx context.Context, clients *gcp.Clients, proje
 		return nil, fmt.Errorf("listing routers: %w", err)
 	}
 	for _, r := range routers {
-		if r.GetNetwork() == vpcSelfLink {
+		if matchesVPC(r.GetNetwork(), vpcSelfLink) {
 			owner, managed := labels.ParseOwner(r.GetDescription())
 			if !managed {
 				owner = ""
