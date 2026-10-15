@@ -8,6 +8,11 @@ import (
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
 	gax "github.com/googleapis/gax-go/v2"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 )
@@ -221,5 +226,61 @@ func TestPhaseDownNetworks_TeardownDataplaneResources(t *testing.T) {
 				t.Errorf("unexpected firewall deleted: %s", name)
 			}
 		}
+	}
+}
+
+func TestStripStuckFinalizersWithClient(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvrVlan := schema.GroupVersionResource{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-spk-vlans"}
+	listKinds := map[schema.GroupVersionResource]string{}
+	for _, gvr := range crdsToGVRs([]string{
+		"f5-spk-vlans.k8s.f5net.com",
+		"f5-spk-staticroutes.k8s.f5net.com",
+		"f5-spk-egresses.k8s.f5net.com",
+		"f5-spk-snatpools.k8s.f5net.com",
+		"infras.gateway.k8s.f5.com",
+		"gatewaysettings.gateway.k8s.f5.com",
+		"egressgateways.gateway.k8s.f5.com",
+		"analyzers.k8s.f5.com",
+		"cnecontrollers.k8s.f5.com",
+		"cneinstances.k8s.f5.com",
+		"dssms.k8s.f5.com",
+		"f5tmms.k8s.f5.com",
+		"coremonds.k8s.f5.com",
+		"crdconversions.k8s.f5.com",
+		"crdinstallers.k8s.f5.com",
+		"csrcs.k8s.f5.com",
+		"cwcs.k8s.f5.com",
+		"ipamcontrollers.k8s.f5.com",
+		"rabbitmqs.k8s.f5.com",
+	}) {
+		listKinds[gvr] = "UnstructuredList"
+	}
+
+	vlanObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "k8s.f5net.com/v1",
+			"kind":       "F5SPKVlan",
+			"metadata": map[string]any{
+				"name":       "vlan-ext",
+				"namespace":  "f5-cne-system",
+				"finalizers": []any{"f5.com/vlan-finalizer"},
+			},
+		},
+	}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds)
+	if _, err := dyn.Resource(gvrVlan).Namespace("f5-cne-system").Create(context.Background(), vlanObj, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create vlanObj: %v", err)
+	}
+
+	stripStuckFinalizersWithClient(context.Background(), dyn)
+
+	updated, err := dyn.Resource(gvrVlan).Namespace("f5-cne-system").Get(context.Background(), "vlan-ext", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get vlanObj: %v", err)
+	}
+	if len(updated.GetFinalizers()) != 0 {
+		t.Errorf("expected finalizers to be stripped, got %v", updated.GetFinalizers())
 	}
 }

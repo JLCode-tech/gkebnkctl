@@ -138,7 +138,7 @@ spec:
   targetRefs:
   - group: gateway.networking.k8s.io
     kind: Gateway
-    name: bnk-sydney-gateway
+    name: bnk-vertex-demo-gateway
     sectionName: http
   extensionRefs:
   - group: k8s.f5net.com
@@ -154,7 +154,7 @@ spec:
   targetRefs:
   - group: gateway.networking.k8s.io
     kind: Gateway
-    name: bnk-sydney-gateway
+    name: bnk-vertex-demo-gateway
     sectionName: https
   extensionRefs:
   - group: k8s.f5net.com
@@ -192,7 +192,7 @@ spec:
   targetRefs:
   - group: gateway.networking.k8s.io
     kind: Gateway
-    name: bnk-sydney-gateway
+    name: bnk-vertex-demo-gateway
   extensionRefs:
   - group: k8s.f5net.com
     kind: F5BigFwPolicy

@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
@@ -24,6 +26,7 @@ import (
 
 const (
 	tmmSettleNamespace    = "f5-cne-system"
+	tmmDaemonSetName      = "f5-tmm"
 	tmmSettleLabelSel     = "app=f5-tmm"
 	tmmSettlePollInterval = 10 * time.Second
 
@@ -123,6 +126,8 @@ func Phase42TMMSettle(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 func settleAndGateTMM(ctx context.Context, client kubernetes.Interface, dyn dynamic.Interface, pollInterval, timeout time.Duration) error {
 	lastLicenseState := "unknown"
 	err := gcp.PollUntil(ctx, pollInterval, timeout, func(ctx context.Context) (bool, error) {
+		ensureTMMRollingUpdateStrategy(ctx, client)
+
 		licState, err := getLicenseState(ctx, dyn)
 		if err != nil {
 			licState = fmt.Sprintf("error (%v)", err)
@@ -169,6 +174,39 @@ func settleAndGateTMM(ctx context.Context, client kubernetes.Interface, dyn dyna
 		return err
 	}
 	return nil
+}
+
+// ensureTMMRollingUpdateStrategy ensures DaemonSet/f5-tmm in f5-cne-system uses
+// RollingUpdate with maxSurge=0 and maxUnavailable=1 so single-node TMM restarts
+// terminate the old pod (releasing PCIe host-device NICs) before scheduling the new pod.
+func ensureTMMRollingUpdateStrategy(ctx context.Context, client kubernetes.Interface) {
+	if client == nil {
+		return
+	}
+	ds, err := client.AppsV1().DaemonSets(tmmSettleNamespace).Get(ctx, tmmDaemonSetName, metav1.GetOptions{})
+	if err != nil || ds == nil {
+		return
+	}
+	if ds.Spec.UpdateStrategy.Type == appsv1.RollingUpdateDaemonSetStrategyType &&
+		ds.Spec.UpdateStrategy.RollingUpdate != nil &&
+		ds.Spec.UpdateStrategy.RollingUpdate.MaxSurge != nil &&
+		ds.Spec.UpdateStrategy.RollingUpdate.MaxSurge.IntVal == 0 &&
+		ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable != nil &&
+		ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable.IntVal == 1 {
+		return
+	}
+	maxSurge := intstr.FromInt32(0)
+	maxUnavailable := intstr.FromInt32(1)
+	ds.Spec.UpdateStrategy = appsv1.DaemonSetUpdateStrategy{
+		Type: appsv1.RollingUpdateDaemonSetStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDaemonSet{
+			MaxSurge:       &maxSurge,
+			MaxUnavailable: &maxUnavailable,
+		},
+	}
+	if _, err := client.AppsV1().DaemonSets(tmmSettleNamespace).Update(ctx, ds, metav1.UpdateOptions{}); err != nil {
+		fmt.Fprintf(os.Stderr, "[phase 42] warn: updating DaemonSet %s/%s rollingUpdate strategy: %v\n", tmmSettleNamespace, tmmDaemonSetName, err)
+	}
 }
 
 // tmmAvailable reports whether the CNEInstance's F5TmmAvailable condition is

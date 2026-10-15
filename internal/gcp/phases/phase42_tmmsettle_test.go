@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -105,11 +106,26 @@ func TestPhase42TMMSettle_NilClientsSkips(t *testing.T) {
 
 // The gate returns immediately once the CNEInstance reports F5TmmAvailable=True.
 func TestSettleAndGateTMM_ReturnsWhenTMMAvailable(t *testing.T) {
-	k8sClient := fakek8s.NewClientset(tmmPod("tmm-1", "node-a", false, corev1.PodRunning))
+	tmmDS := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: tmmDaemonSetName, Namespace: tmmSettleNamespace},
+	}
+	k8sClient := fakek8s.NewClientset(tmmDS, tmmPod("tmm-1", "node-a", false, corev1.PodRunning))
 	dyn := dynWithCNE(cneInstance("True"))
 
 	if err := settleAndGateTMM(context.Background(), k8sClient, dyn, testTMMSettlePollInterval, 5*time.Second); err != nil {
 		t.Fatalf("expected success when F5TmmAvailable=True, got: %v", err)
+	}
+
+	gotDS, err := k8sClient.AppsV1().DaemonSets(tmmSettleNamespace).Get(context.Background(), tmmDaemonSetName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get f5-tmm DaemonSet: %v", err)
+	}
+	if gotDS.Spec.UpdateStrategy.RollingUpdate == nil ||
+		gotDS.Spec.UpdateStrategy.RollingUpdate.MaxSurge == nil ||
+		gotDS.Spec.UpdateStrategy.RollingUpdate.MaxSurge.IntVal != 0 ||
+		gotDS.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable == nil ||
+		gotDS.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable.IntVal != 1 {
+		t.Errorf("expected DaemonSet/f5-tmm rollingUpdate {maxSurge:0, maxUnavailable:1}, got %+v", gotDS.Spec.UpdateStrategy)
 	}
 }
 

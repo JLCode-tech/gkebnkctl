@@ -17,9 +17,23 @@ import (
 )
 
 const (
-	floManifestPath = "flo/flo-manifest.yaml"
-	floCRDWait      = 3 * time.Minute
+	floManifestPath        = "flo/flo-manifest.yaml"
+	gatewayAPICRDsPath     = "static/00-gateway-api-crds.yaml"
+	bnkGatewayCRDsPath     = "static/02-bnk-gateway-crds.yaml"
+	gieCRDsPath            = "gie/gie-crds.yaml"
+	gatewayClassController = "f5.com/f5-cne-system-f5-cne-controller"
+	floCRDWait             = 3 * time.Minute
 )
+
+// supplementalCRDManifests are installed idempotently via server-side apply
+// during Phase36FLO so Gateway API CRDs, GIE CRDs, and the gateway.k8s.f5.com
+// CRDs omitted by crd-installer 2.4.0-3.2882.0 are present before CNEInstance
+// spawns f5-cne-controller and before any scenario runs.
+var supplementalCRDManifests = []string{
+	gatewayAPICRDsPath,
+	gieCRDsPath,
+	bnkGatewayCRDsPath,
+}
 
 // floCRDs are the CRDs the FLO operator manifest itself ships, so they are the
 // only ones Phase36 can meaningfully wait on.
@@ -53,7 +67,19 @@ var floInstalledCRDs = []string{
 	"f5-spk-egresses.k8s.f5net.com",
 }
 
+// renderClusterGatewayClass returns the YAML manifest for <cluster>-gatewayclass.
+func renderClusterGatewayClass(clusterName string) []byte {
+	return []byte(fmt.Sprintf(`apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: %s-gatewayclass
+spec:
+  controllerName: %s
+`, clusterName, gatewayClassController))
+}
+
 // Phase36FLO applies the embedded FLO operator manifest (~3 MB, 23 CRDs)
+// plus Gateway API / GIE / BNK 2.4 supplemental CRDs and <cluster>-gatewayclass
 // via SERVER-SIDE dynamic SSA — client-side apply exceeds the CRD annotation
 // size limit, per docs/SPEC-go-tracer.md §3 Phase36 / §9.8 — then waits for
 // the F5 CRDs to establish.
@@ -61,7 +87,7 @@ func Phase36FLO(ctx context.Context, cl *intent.Cluster, _ *state.State, clients
 	fmt.Fprintf(os.Stderr, "[phase 36] FLO: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
-		fmt.Fprintln(os.Stderr, "[phase 36] would server-side-apply FLO operator manifest (~3 MB, 23 CRDs)")
+		fmt.Fprintln(os.Stderr, "[phase 36] would server-side-apply FLO operator manifest (~3 MB, 23 CRDs) + Gateway API/GIE/BNK CRDs + GatewayClass")
 		return nil
 	}
 
@@ -80,6 +106,21 @@ func Phase36FLO(ctx context.Context, cl *intent.Cluster, _ *state.State, clients
 	updateFloDeploymentImage(objs, cl.Bnk.ImageRegistry)
 	if err := applyObjects(ctx, clients, objs, true); err != nil {
 		return fmt.Errorf("phase36: applying %s: %w", floManifestPath, err)
+	}
+
+	for _, crdManifest := range supplementalCRDManifests {
+		crdBytes, err := manifests.FS.ReadFile(crdManifest)
+		if err != nil {
+			return fmt.Errorf("phase36: reading embedded %s: %w", crdManifest, err)
+		}
+		if err := applyManifestBytes(ctx, clients, crdBytes, true); err != nil {
+			return fmt.Errorf("phase36: applying %s: %w", crdManifest, err)
+		}
+	}
+
+	gwClassBytes := renderClusterGatewayClass(cl.Metadata.Name)
+	if err := applyManifestBytes(ctx, clients, gwClassBytes, true); err != nil {
+		return fmt.Errorf("phase36: applying GatewayClass %s-gatewayclass: %w", cl.Metadata.Name, err)
 	}
 
 	if clients.Dynamic == nil {
