@@ -114,6 +114,7 @@ var upPhases = []upPhase{
 	{num: "15", name: "jumphost"},
 	{num: "20", name: "cluster"},
 	{num: "25", name: "discover"},
+	{num: "29", name: "forge-register"},
 	{num: "30", name: "namespaces"},
 	{num: "31", name: "cert-manager"},
 	{num: "32", name: "issuers"},
@@ -143,6 +144,7 @@ var realUpPhases = map[string]func(ctx context.Context, cl *intent.Cluster, st *
 	"15": phases.Phase15Jumphost,
 	"20": phases.Phase20Cluster,
 	"25": phases.Phase25Discover,
+	"29": phases.Phase29ForgeRegister,
 	"30": phases.Phase30Namespaces,
 	"31": phases.Phase31CertManager,
 	"32": phases.Phase32Issuers,
@@ -318,6 +320,8 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun, keepData
 	if err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
+
+	_ = phases.Phase29ForgeRegisterDown(ctx, cl, st, dryRun)
 
 	if err := phases.PhaseDownJumphost(ctx, cl, st, gcl); err != nil {
 		return fmt.Errorf("down: %w", err)

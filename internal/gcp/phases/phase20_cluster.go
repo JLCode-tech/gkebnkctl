@@ -18,6 +18,7 @@ import (
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/labels"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
+	"github.com/JLCode-tech/gkebnkctl/internal/kubeconfig"
 )
 
 const (
@@ -45,7 +46,7 @@ const (
 // networks) and agent-pool (1 additional node/pod network), then labels the
 // tmm-pool's nodes app=f5-tmm. Idempotent: GetCluster/GetNodePool gate every
 // create call, matching bash bin/20-cluster.sh.
-func Phase20Cluster(ctx context.Context, cl *intent.Cluster, _ *state.State, clients *gcp.Clients, dryRun bool) error {
+func Phase20Cluster(ctx context.Context, cl *intent.Cluster, st *state.State, clients *gcp.Clients, dryRun bool) error {
 	fmt.Fprintf(os.Stderr, "[phase 20] cluster: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
@@ -78,6 +79,16 @@ func Phase20Cluster(ctx context.Context, cl *intent.Cluster, _ *state.State, cli
 	if clients.K8s == nil {
 		if err := clients.AttachK8s(ctx, name, zone); err != nil {
 			return fmt.Errorf("phase20: attaching k8s client: %w", err)
+		}
+	}
+
+	if st != nil && st.KubeconfigPath() != "" {
+		if kcBytes, err := kubeconfig.FetchAndGenerate(ctx, cl); err == nil {
+			if err := kubeconfig.WriteFile(st.KubeconfigPath(), kcBytes); err != nil {
+				fmt.Fprintf(os.Stderr, "[phase 20] warn: writing kubeconfig to %s: %v\n", st.KubeconfigPath(), err)
+			} else {
+				fmt.Fprintf(os.Stderr, "[phase 20] wrote cluster kubeconfig to %s\n", st.KubeconfigPath())
+			}
 		}
 	}
 

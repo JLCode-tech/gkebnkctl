@@ -81,7 +81,9 @@ func TestPurgeStaleCPCLSecrets_SyncsKeyAndDeletesStaleSecrets(t *testing.T) {
 	}
 
 	fakeK8s := k8sfake.NewClientset(cm, keySecUtils, keySecCore, staleSecUtils, staleSecCore, staleSecBnk)
-	purgeStaleCPCLSecrets(ctx, &gcp.Clients{K8s: fakeK8s})
+	clients := &gcp.Clients{K8s: fakeK8s}
+	syncCPCLKeySecret(ctx, clients)
+	purgeStaleCPCLSecrets(ctx, clients)
 
 	for _, ns := range []string{"f5-utils", "f5-cne-core"} {
 		got, err := fakeK8s.CoreV1().Secrets(ns).Get(ctx, "cpcl-key-secret", metav1.GetOptions{})

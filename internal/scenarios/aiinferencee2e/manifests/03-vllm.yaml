@@ -41,7 +41,10 @@ spec:
 {{- end}}
     spec:
       enableServiceLinks: false
-{{if not .Synthetic}}
+{{if .Synthetic}}
+      nodeSelector:
+        cloud.google.com/gke-nodepool: agent-pool
+{{else}}
       # Target GPU nodes: the GPU nodegroup is tainted nvidia.com/gpu=present:NoSchedule
       # and labelled gkebnkctl.io/gpu=true. Both nodeSelector and toleration are required.
       nodeSelector:
@@ -261,5 +264,5 @@ spec:
     app: vllm
   ports:
   - name: http
-    port: 80
+    port: 8000
     targetPort: 8000

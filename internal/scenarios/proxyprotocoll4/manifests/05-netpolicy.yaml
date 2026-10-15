@@ -1,4 +1,4 @@
-apiVersion: gateway.k8s.f5.com/v1alpha1
+apiVersion: gateway.k8s.f5.com/v1
 kind: NetPolicy
 metadata:
   name: scn-proxyproto-attach

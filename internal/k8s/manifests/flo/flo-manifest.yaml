@@ -37,7 +37,7 @@ metadata:
 data:
   custom_id: bnk-bny PoC - MCP/A2A gateway
   digital_asset_version: 1.2.0
-  jwt: REDACTED-BY-GKEBNKCTL-see-reference/RECON-REDACTIONS.md  # was a live F5 eval-license JWT; field is deprecated (superseded by the License CR) per this file's own CRD schema comment
+  jwt: ""  # deprecated field (superseded by the License CR); must be empty string so CWC does not fail initialregistrationstatus on startup
   licenseserver_root_ca_path: ""
   log_level: info
   operation_mode: connected

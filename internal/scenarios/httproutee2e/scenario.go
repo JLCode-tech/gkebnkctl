@@ -196,7 +196,7 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 
 var gatewaySettingsGVR = schema.GroupVersionResource{
 	Group:    "gateway.k8s.f5.com",
-	Version:  "v1alpha1",
+	Version:  "v1",
 	Resource: "gatewaysettings",
 }
 

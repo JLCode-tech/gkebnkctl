@@ -5,6 +5,7 @@ kind: CustomResourceDefinition
 metadata:
   name: gatewayclasses.gateway.networking.k8s.io
   annotations:
+    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3175
     gateway.networking.k8s.io/bundle-version: v1.2.0
     gateway.networking.k8s.io/channel: experimental
 spec:
@@ -44,6 +45,7 @@ kind: CustomResourceDefinition
 metadata:
   name: gateways.gateway.networking.k8s.io
   annotations:
+    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3175
     gateway.networking.k8s.io/bundle-version: v1.2.0
     gateway.networking.k8s.io/channel: experimental
 spec:
@@ -83,6 +85,7 @@ kind: CustomResourceDefinition
 metadata:
   name: httproutes.gateway.networking.k8s.io
   annotations:
+    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3175
     gateway.networking.k8s.io/bundle-version: v1.2.0
     gateway.networking.k8s.io/channel: experimental
 spec:
@@ -120,6 +123,7 @@ kind: CustomResourceDefinition
 metadata:
   name: grpcroutes.gateway.networking.k8s.io
   annotations:
+    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3175
     gateway.networking.k8s.io/bundle-version: v1.2.0
     gateway.networking.k8s.io/channel: experimental
 spec:
@@ -157,6 +161,7 @@ kind: CustomResourceDefinition
 metadata:
   name: referencegrants.gateway.networking.k8s.io
   annotations:
+    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3175
     gateway.networking.k8s.io/bundle-version: v1.2.0
     gateway.networking.k8s.io/channel: experimental
 spec:
@@ -196,6 +201,7 @@ kind: CustomResourceDefinition
 metadata:
   name: tcproutes.gateway.networking.k8s.io
   annotations:
+    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3175
     gateway.networking.k8s.io/bundle-version: v1.2.0
     gateway.networking.k8s.io/channel: experimental
 spec:
@@ -224,6 +230,7 @@ kind: CustomResourceDefinition
 metadata:
   name: udproutes.gateway.networking.k8s.io
   annotations:
+    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3175
     gateway.networking.k8s.io/bundle-version: v1.2.0
     gateway.networking.k8s.io/channel: experimental
 spec:
@@ -252,6 +259,7 @@ kind: CustomResourceDefinition
 metadata:
   name: tlsroutes.gateway.networking.k8s.io
   annotations:
+    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3175
     gateway.networking.k8s.io/bundle-version: v1.2.0
     gateway.networking.k8s.io/channel: experimental
 spec:
@@ -280,6 +288,7 @@ kind: CustomResourceDefinition
 metadata:
   name: backendtlspolicies.gateway.networking.k8s.io
   annotations:
+    api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3175
     gateway.networking.k8s.io/bundle-version: v1.2.0
     gateway.networking.k8s.io/channel: experimental
 spec:

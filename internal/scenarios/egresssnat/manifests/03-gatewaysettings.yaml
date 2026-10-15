@@ -3,7 +3,7 @@
 # the self IP of the interface it leaves TMM on (the external VLAN, via the
 # Infra default route); networkRef is the Infra VLAN the worker-node VXLAN
 # tunnel terminates on (Infra egressDefaults names the same one).
-apiVersion: gateway.k8s.f5.com/v1alpha1
+apiVersion: gateway.k8s.f5.com/v1
 kind: GatewaySettings
 metadata:
   name: {{.EgressName}}

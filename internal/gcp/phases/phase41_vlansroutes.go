@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
@@ -55,8 +57,30 @@ func Phase41VlansRoutes(ctx context.Context, cl *intent.Cluster, st *state.State
 		return fmt.Errorf("phase41: rendering vlans-routes: %w", err)
 	}
 
-	if err := applyStaticRouteManifestBytes(ctx, clients, rendered, false); err != nil {
-		return fmt.Errorf("phase41: applying F5SPKVlans/routes: %w", err)
+	const retryAttempts = 24
+	const retryInterval = 5 * time.Second
+	var lastErr error
+	for attempt := 1; attempt <= retryAttempts; attempt++ {
+		lastErr = applyStaticRouteManifestBytes(ctx, clients, rendered, false)
+		if lastErr == nil {
+			break
+		}
+		if !strings.Contains(lastErr.Error(), "f5-validation-svc") &&
+			!strings.Contains(lastErr.Error(), "failed calling webhook") &&
+			!strings.Contains(lastErr.Error(), "connection refused") {
+			return fmt.Errorf("phase41: applying F5SPKVlans/routes: %w", lastErr)
+		}
+		if attempt < retryAttempts {
+			fmt.Fprintf(os.Stderr, "[phase 41] webhook f5-validation-svc not ready yet (attempt %d/%d) — retrying in %s\n", attempt, retryAttempts, retryInterval)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(retryInterval):
+			}
+		}
+	}
+	if lastErr != nil {
+		return fmt.Errorf("phase41: applying F5SPKVlans/routes: %w", lastErr)
 	}
 	fmt.Fprintln(os.Stderr, "[phase 41] F5SPKVlans + static routes OK")
 	return nil

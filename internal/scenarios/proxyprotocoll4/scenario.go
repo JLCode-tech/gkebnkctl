@@ -74,7 +74,7 @@ var l4RouteGVR = schema.GroupVersionResource{
 // bnkNetPolicyGVR is the NetPolicy CR that attaches the iRule to the Gateway.
 var bnkNetPolicyGVR = schema.GroupVersionResource{
 	Group:    "gateway.k8s.f5.com",
-	Version:  "v1alpha1",
+	Version:  "v1",
 	Resource: "netpolicies",
 }
 

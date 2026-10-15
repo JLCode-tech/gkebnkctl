@@ -205,13 +205,16 @@ func (r *CreateClusterResponse) UnmarshalJSON(b []byte) error {
 	*r = CreateClusterResponse(a)
 
 	var flat struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
+		ClusterID int    `json:"cluster_id"`
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
 	}
 	if err := json.Unmarshal(b, &flat); err != nil {
 		return err
 	}
-	if flat.ID != 0 {
+	if flat.ClusterID != 0 {
+		r.Cluster.ID = flat.ClusterID
+	} else if flat.ID != 0 {
 		r.Cluster.ID = flat.ID
 	}
 	if r.Cluster.Name == "" && flat.Name != "" {

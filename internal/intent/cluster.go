@@ -637,6 +637,8 @@ type ForgeSpec struct {
 	AgentToken string `yaml:"agent_token,omitempty"`
 	// AgentTokenCamel is a fallback alias for camelCase YAML configs (agentToken).
 	AgentTokenCamel string `yaml:"agentToken,omitempty"`
+	// CredentialTemplateID is the optional Forge credential template ID attached to the project.
+	CredentialTemplateID int `yaml:"credentialTemplateId,omitempty"`
 }
 
 // DefaultForgeRESTURL is the fallback REST base when forge.url is not set.

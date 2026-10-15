@@ -1,8 +1,8 @@
 {{- if .EPP}}
 # BNK 2.4: TMM consults the F5 Endpoint Picker for every request and routes to
 # the vLLM pod it picks (queue depth, KV-cache use, prompt-prefix affinity).
-apiVersion: inference.k8s.f5.com/v1alpha1
-kind: F5EPP
+apiVersion: inference.k8s.f5.com/v1
+kind: F5Epp
 metadata:
   name: vllm-pool-epp
   namespace: {{.Namespace}}
@@ -74,5 +74,5 @@ spec:
       port: 8000
 {{- else}}
     - name: vllm
-      port: 80
+      port: 8000
 {{- end}}

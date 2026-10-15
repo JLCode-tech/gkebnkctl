@@ -632,13 +632,13 @@ func eppEnabled(ctx *scenarios.Context) bool {
 	if v, ok := ctx.Options["epp"]; ok {
 		return strings.EqualFold(v, "true") || v == "1"
 	}
-	return ctx.Cluster != nil && ctx.Cluster.Bnk.ManifestVersion != "" && !strings.HasPrefix(ctx.Cluster.Bnk.ManifestVersion, "2.3")
+	return false
 }
 
 // giecrdManifest holds the InferencePool CRD the F5 EPP needs; BNK does not ship it.
 const giecrdManifest = "gie/gateway-api-inference-extension-v1.5.0.yaml"
 
-var f5EPPGVR = schema.GroupVersionResource{Group: "inference.k8s.f5.com", Version: "v1alpha1", Resource: "f5-epps"}
+var f5EPPGVR = schema.GroupVersionResource{Group: "inference.k8s.f5.com", Version: "v1", Resource: "f5epps"}
 
 var crdGVR = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
 

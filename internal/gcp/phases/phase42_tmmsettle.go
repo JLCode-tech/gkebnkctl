@@ -46,8 +46,8 @@ const (
 	// meaningful than pod-Ready alone.
 	tmmAvailableCondition = "F5TmmAvailable"
 
-	licenseNamespacePrimary  = "f5-cne-core"
-	licenseNamespaceFallback = "f5-utils"
+	licenseNamespacePrimary  = "f5-utils"
+	licenseNamespaceFallback = "f5-cne-core"
 	licenseName              = "bnk-license"
 )
 
@@ -61,7 +61,8 @@ var cneInstanceGVR = schema.GroupVersionResource{
 }
 
 // licenseGVR resolves the License CR (k8s.f5net.com/v1).
-var licenseGVR = schema.GroupVersionResource{
+// licenseGVR defined in phase40_license.go
+var _ = schema.GroupVersionResource{
 	Group:    "k8s.f5net.com",
 	Version:  "v1",
 	Resource: "licenses",
@@ -264,6 +265,13 @@ func isLicenseFailed(state string) bool {
 func getLicenseState(ctx context.Context, dyn dynamic.Interface) (string, error) {
 	if dyn == nil {
 		return "client unavailable", nil
+	}
+	// Check f5-utils first, then f5-cne-core. If one is Active or explicitly Failed/Error, return it immediately.
+	for _, ns := range []string{licenseNamespacePrimary, licenseNamespaceFallback} {
+		state, err := getLicenseInNamespace(ctx, dyn, ns, licenseName)
+		if err == nil && state != "Pending" && state != "" {
+			return state, nil
+		}
 	}
 	state, err := getLicenseInNamespace(ctx, dyn, licenseNamespacePrimary, licenseName)
 	if err == nil {

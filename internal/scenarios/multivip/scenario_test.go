@@ -108,7 +108,7 @@ func TestManifestsRendered(t *testing.T) {
 			for _, want := range []string{
 				"kind: GatewaySettings",
 				"name: listener-pool",
-				"name: ext-vlan",
+				"name: external",
 			} {
 				if !strings.Contains(content, want) {
 					t.Errorf("02-gatewaysettings.yaml missing %q:\n%s", want, content)

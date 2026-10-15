@@ -55,8 +55,8 @@ const (
 )
 
 var (
-	egressGatewayGVR   = schema.GroupVersionResource{Group: "gateway.k8s.f5.com", Version: "v1alpha1", Resource: "egressgateways"}
-	gatewaySettingsGVR = schema.GroupVersionResource{Group: "gateway.k8s.f5.com", Version: "v1alpha1", Resource: "gatewaysettings"}
+	egressGatewayGVR   = schema.GroupVersionResource{Group: "gateway.k8s.f5.com", Version: "v1", Resource: "egressgateways"}
+	gatewaySettingsGVR = schema.GroupVersionResource{Group: "gateway.k8s.f5.com", Version: "v1", Resource: "gatewaysettings"}
 	f5SpkEgressGVR     = schema.GroupVersionResource{Group: "k8s.f5net.com", Version: "v3", Resource: "f5-spk-egresses"}
 )
 
