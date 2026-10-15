@@ -74,8 +74,8 @@ bnk:
   farSecret:
     source: kubecontext
     sourceContext: some-other-cluster
-    sourceNamespace: f5-bnk
-    namespaces: [f5-bnk, f5-utils]
+    sourceNamespace: f5-cne-core
+    namespaces: [f5-cne-core, f5-utils]
 
 egress:
   testNamespace: egress-test
@@ -293,8 +293,8 @@ func TestValidate_JwtPathMustExist(t *testing.T) {
 func TestValidate_FarSecretDockerConfigRequiresFile(t *testing.T) {
 	dir := t.TempDir()
 	body := strings.Replace(validYAML,
-		"farSecret:\n    source: kubecontext\n    sourceContext: some-other-cluster\n    sourceNamespace: f5-bnk\n    namespaces: [f5-bnk, f5-utils]",
-		"farSecret:\n    source: dockerconfig\n    sourceNamespace: f5-bnk\n    namespaces: [f5-bnk, f5-utils]",
+		"farSecret:\n    source: kubecontext\n    sourceContext: some-other-cluster\n    sourceNamespace: f5-cne-core\n    namespaces: [f5-cne-core, f5-utils]",
+		"farSecret:\n    source: dockerconfig\n    sourceNamespace: f5-cne-core\n    namespaces: [f5-cne-core, f5-utils]",
 		1)
 	path := writeCluster(t, dir, body)
 	_, err := Load(path)
@@ -309,8 +309,8 @@ func TestValidate_FarSecretDockerConfigRequiresFile(t *testing.T) {
 func TestLoad_DockerConfigFileMustExist(t *testing.T) {
 	dir := t.TempDir()
 	body := strings.Replace(validYAML,
-		"farSecret:\n    source: kubecontext\n    sourceContext: some-other-cluster\n    sourceNamespace: f5-bnk\n    namespaces: [f5-bnk, f5-utils]",
-		"farSecret:\n    source: dockerconfig\n    dockerConfigFile: ./nonexistent.json\n    sourceNamespace: f5-bnk\n    namespaces: [f5-bnk, f5-utils]",
+		"farSecret:\n    source: kubecontext\n    sourceContext: some-other-cluster\n    sourceNamespace: f5-cne-core\n    namespaces: [f5-cne-core, f5-utils]",
+		"farSecret:\n    source: dockerconfig\n    dockerConfigFile: ./nonexistent.json\n    sourceNamespace: f5-cne-core\n    namespaces: [f5-cne-core, f5-utils]",
 		1)
 	path := writeCluster(t, dir, body)
 	_, err := Load(path)
@@ -393,10 +393,10 @@ bnk:
 	if c.Bnk.ImageRegistry != "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga" {
 		t.Errorf("Bnk.ImageRegistry = %q, want default GAR registry", c.Bnk.ImageRegistry)
 	}
-	if c.Bnk.FarSecret.SourceNamespace != "f5-bnk" {
-		t.Errorf("FarSecret.SourceNamespace = %q, want f5-bnk", c.Bnk.FarSecret.SourceNamespace)
+	if c.Bnk.FarSecret.SourceNamespace != "f5-cne-core" {
+		t.Errorf("FarSecret.SourceNamespace = %q, want f5-cne-core", c.Bnk.FarSecret.SourceNamespace)
 	}
-	wantNS := []string{"f5-bnk", "f5-utils"}
+	wantNS := []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance", "f5-utils", "default"}
 	if len(c.Bnk.FarSecret.Namespaces) != len(wantNS) {
 		t.Fatalf("FarSecret.Namespaces = %v, want %v", c.Bnk.FarSecret.Namespaces, wantNS)
 	}

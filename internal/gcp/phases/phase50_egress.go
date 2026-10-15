@@ -274,6 +274,6 @@ func logEgressVerification(r egressVerifyResult) {
 			r.pktsInBefore, r.pktsInAfter, r.egressIP)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[phase 50] verify: FAIL (non-fatal) — pkts_in delta=%d, trace ip=%q; check: kubectl get f5spkegress,f5spkvlan -n f5-bnk; kubectl logs -n f5-bnk %s -c tmm\n",
+	fmt.Fprintf(os.Stderr, "[phase 50] verify: FAIL (non-fatal) — pkts_in delta=%d, trace ip=%q; check: kubectl get f5spkegress,f5spkvlan -n f5-cne-system; kubectl logs -n f5-cne-system %s -c tmm\n",
 		r.pktsInAfter-r.pktsInBefore, r.egressIP, r.tmmPod)
 }

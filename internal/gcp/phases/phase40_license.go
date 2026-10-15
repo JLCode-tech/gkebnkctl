@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
@@ -28,7 +30,7 @@ func Phase40License(ctx context.Context, cl *intent.Cluster, _ *state.State, cli
 	fmt.Fprintf(os.Stderr, "[phase 40] License: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
-		fmt.Fprintln(os.Stderr, "[phase 40] would apply License/bnk-license in f5-utils (connected mode, JWT never written to disk)")
+		fmt.Fprintln(os.Stderr, "[phase 40] would apply License/bnk-license in f5-cne-core (connected mode, JWT never written to disk)")
 		return nil
 	}
 
@@ -47,11 +49,28 @@ func Phase40License(ctx context.Context, cl *intent.Cluster, _ *state.State, cli
 		return fmt.Errorf("phase40: rendering license-cr: %w", err)
 	}
 
+	// Purge cached CPCL registration secrets so previous failed activations do not deadlock.
+	purgeStaleCPCLSecrets(ctx, clients)
+
 	if err := applyLicenseWithQuotaRetry(ctx, clients, rendered); err != nil {
 		return fmt.Errorf("phase40: applying License CR: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "[phase 40] License OK")
 	return nil
+}
+
+// purgeStaleCPCLSecrets deletes cached CPCL secrets left behind by previously failed
+// activation attempts. CPCL (cm20 daemon) caches token failure status in these secrets;
+// if not cleared, future activation attempts deadlock even with a valid JWT.
+func purgeStaleCPCLSecrets(ctx context.Context, clients *gcp.Clients) {
+	if clients == nil || clients.K8s == nil {
+		return
+	}
+	for _, ns := range []string{"f5-utils", "f5-cne-core"} {
+		for _, name := range []string{"licensestatus", "cpcl-config-secret"} {
+			_ = clients.K8s.CoreV1().Secrets(ns).Delete(ctx, name, metav1.DeleteOptions{})
+		}
+	}
 }
 
 const (

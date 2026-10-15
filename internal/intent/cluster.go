@@ -218,13 +218,13 @@ type FarSecretSpec struct {
 	// SourceContext is the kube context to copy far-secret FROM. Required
 	// iff source == "kubecontext".
 	SourceContext string `yaml:"sourceContext,omitempty"`
-	// SourceNamespace is the source namespace for the copy. Default "f5-bnk".
+	// SourceNamespace is the source namespace for the copy. Default "f5-cne-core".
 	SourceNamespace string `yaml:"sourceNamespace,omitempty"`
 	// DockerConfigFile is the path to a docker-config JSON. Runtime input,
 	// gitignored. Required iff source == "dockerconfig".
 	DockerConfigFile string `yaml:"dockerConfigFile,omitempty"`
 	// Namespaces are the namespaces to install far-secret into. Default
-	// [f5-bnk, f5-utils].
+	// [f5-cne-core, f5-cne-system, f5-bnk-instance, f5-utils, default].
 	Namespaces []string `yaml:"namespaces,omitempty"`
 }
 
@@ -350,10 +350,10 @@ func applyDefaults(c *Cluster, baseDir string) {
 		c.Bnk.FARArchive = filepath.Join(baseDir, c.Bnk.FARArchive)
 	}
 	if c.Bnk.FarSecret.SourceNamespace == "" {
-		c.Bnk.FarSecret.SourceNamespace = "f5-bnk"
+		c.Bnk.FarSecret.SourceNamespace = "f5-cne-core"
 	}
 	if len(c.Bnk.FarSecret.Namespaces) == 0 {
-		c.Bnk.FarSecret.Namespaces = []string{"f5-bnk", "f5-utils"}
+		c.Bnk.FarSecret.Namespaces = []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance", "f5-utils", "default"}
 	}
 	if c.Bnk.FarSecret.DockerConfigFile != "" && !filepath.IsAbs(c.Bnk.FarSecret.DockerConfigFile) {
 		c.Bnk.FarSecret.DockerConfigFile = filepath.Join(baseDir, c.Bnk.FarSecret.DockerConfigFile)

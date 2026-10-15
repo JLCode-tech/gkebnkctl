@@ -8,7 +8,7 @@ apiVersion: k8s.f5net.com/v3
 kind: F5SPKEgress
 metadata:
   name: egress-agents
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   egressSnatpoolMode: UNIQUE_SNAT_ADDRESS
   maxTmmReplicas: 1

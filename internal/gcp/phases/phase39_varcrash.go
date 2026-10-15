@@ -28,7 +28,7 @@ type varCrashTarget struct {
 // image digests carry a crashagent that hard-dies without /var/crash and
 // s6-tears-down the main service (reference/TRIAL-NOTES.md item 5).
 var varCrashTargets = []varCrashTarget{
-	{Namespace: "f5-bnk", Deployment: "f5-cne-controller"},
+	{Namespace: "f5-cne-system", Deployment: "f5-cne-controller"},
 	{Namespace: "f5-utils", Deployment: "f5-crdconversion"},
 }
 

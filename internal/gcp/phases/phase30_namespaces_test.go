@@ -37,7 +37,7 @@ func TestPhase30Namespaces_LiveMode_NilClientsErrors(t *testing.T) {
 }
 
 // TestNamespacesTemplate_RendersThreeNamespaces proves the embedded template
-// this phase renders parses to exactly f5-bnk, f5-utils, and the configured
+// this phase renders parses to cert-manager, f5-cne-core, f5-cne-system, f5-bnk-instance, f5-utils, and the configured
 // TestNamespace — a regression guard independent of the SSA apply path (which
 // dynamicfake cannot exercise — see docs/SPEC-go-tracer.md §7).
 func TestNamespacesTemplate_RendersThreeNamespaces(t *testing.T) {
@@ -62,7 +62,14 @@ func TestNamespacesTemplate_RendersThreeNamespaces(t *testing.T) {
 			names = append(names, o.GetName())
 		}
 	}
-	want := map[string]bool{"f5-bnk": false, "f5-utils": false, "egress-test": false}
+	want := map[string]bool{
+		"cert-manager":    false,
+		"f5-cne-core":     false,
+		"f5-cne-system":   false,
+		"f5-bnk-instance": false,
+		"f5-utils":        false,
+		"egress-test":     false,
+	}
 	for _, n := range names {
 		if _, ok := want[n]; ok {
 			want[n] = true

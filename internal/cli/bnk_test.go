@@ -17,15 +17,15 @@ func resetBnkResyncFlags() {
 
 func TestResolveBnkResyncOpts_PositionalRoute(t *testing.T) {
 	resetBnkResyncFlags()
-	flagBnkResyncNamespace = "f5-bnk"
+	flagBnkResyncNamespace = "f5-cne-system"
 	flagBnkResyncDryRun = true
 
 	opts, err := resolveBnkResyncOpts([]string{"my-route"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if opts.Namespace != "f5-bnk" || opts.Name != "my-route" {
-		t.Errorf("expected f5-bnk/my-route, got %s/%s", opts.Namespace, opts.Name)
+	if opts.Namespace != "f5-cne-system" || opts.Name != "my-route" {
+		t.Errorf("expected f5-cne-system/my-route, got %s/%s", opts.Namespace, opts.Name)
 	}
 	if !opts.DryRun {
 		t.Error("expected DryRun=true")
@@ -80,7 +80,7 @@ func TestResolveBnkResyncOpts_GatewayClass(t *testing.T) {
 
 func TestResolveBnkResyncOpts_MultipleSelectors(t *testing.T) {
 	resetBnkResyncFlags()
-	flagBnkResyncNamespace = "f5-bnk"
+	flagBnkResyncNamespace = "f5-cne-system"
 	flagBnkResyncAllInNS = true
 	flagBnkResyncGatewayClass = "f5-bnk"
 

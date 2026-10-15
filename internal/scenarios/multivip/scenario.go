@@ -33,6 +33,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -305,13 +306,20 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		return scenarios.FinalizeResult(res)
 	}
 
-	instanceID := ctx.State.Get("JUMPHOST_INSTANCE_ID")
-	sourceIP := ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
-	if instanceID == "" || sourceIP == "" {
+	hasProbe := os.Getenv("GKEBNKCTL_FORCE_IAP") != "1" && (os.Getenv("GKEBNKCTL_PROBE_IN_CLUSTER") != "" || jumphost.IsProbePodRunning(ctx.Ctx))
+	instanceID := ctx.State.Get("JUMPHOST_INSTANCE_NAME")
+	if instanceID == "" {
+		instanceID = ctx.State.Get("JUMPHOST_INSTANCE_ID")
+	}
+	sourceIP := ctx.State.Get("JUMPHOST_EXT_IP")
+	if sourceIP == "" {
+		sourceIP = ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
+	}
+	if !hasProbe && (instanceID == "" || sourceIP == "") {
 		res.Assertions = append(res.Assertions, scenarios.Assertion{
 			Description: "jumphost state keys present",
 			OK:          false,
-			Got:         "JUMPHOST_INSTANCE_ID / JUMPHOST_BNK_EXT_ENI_IP missing from state.env — run `gkebnkctl up` with testing.jumphost.enabled=true",
+			Got:         "JUMPHOST_INSTANCE_ID / JUMPHOST_BNK_EXT_ENI_IP missing from state.env and probe pod not running — run `gkebnkctl up` with testing.jumphost.enabled=true or deploy in-cluster probe",
 		})
 		return scenarios.FinalizeResult(res)
 	}

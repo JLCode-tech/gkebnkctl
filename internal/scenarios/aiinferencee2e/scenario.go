@@ -552,8 +552,9 @@ func runVLLMSSEProbe(ctx context.Context, sctx *scenarios.Context, vip string) (
 		zone = sctx.Cluster.Metadata.Zone
 		region = sctx.Cluster.Region
 	}
-	if instanceID == "" || sourceIP == "" || region == "" {
-		return false, false, "jumphost state not available (JUMPHOST_INSTANCE_NAME / JUMPHOST_EXT_IP / region)"
+	hasProbe := os.Getenv("GKEBNKCTL_FORCE_IAP") != "1" && (os.Getenv("GKEBNKCTL_PROBE_IN_CLUSTER") != "" || jumphost.IsProbePodRunning(sctx.Ctx))
+	if !hasProbe && (instanceID == "" || sourceIP == "" || region == "") {
+		return false, false, "jumphost state not available (JUMPHOST_INSTANCE_NAME / JUMPHOST_EXT_IP / region) and probe pod not running"
 	}
 
 	probeOpts := jumphost.ProbeOptions{
@@ -686,7 +687,7 @@ func ensureFARSecret(ctx *scenarios.Context, ns string) error {
 	secrets := ctx.Clientset.CoreV1()
 	var src *corev1.Secret
 	var err error
-	for _, cand := range []string{"f5-bnk", "f5-utils", "f5-cne-system", "default"} {
+	for _, cand := range []string{"f5-cne-core", "f5-cne-system", "f5-utils", "default"} {
 		src, err = secrets.Secrets(cand).Get(ctx.Ctx, farSecretName, metav1.GetOptions{})
 		if err == nil {
 			break

@@ -12,7 +12,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKVlan
 metadata:
   name: external
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   name: external
   category: external
@@ -39,7 +39,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKVlan
 metadata:
   name: internal
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   name: internal
   interfaces:
@@ -61,7 +61,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-ext-gw
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .ExtGwIP }}
   prefixLen: 32
@@ -72,7 +72,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-int-gw
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .IntGwIP }}
   prefixLen: 32
@@ -83,7 +83,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-ext-underlay
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .ExtUnderlayDest }}
   prefixLen: {{ .ExtUnderlayPrefixLen }}
@@ -94,7 +94,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-cluster-pods
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .MainPodsDest }}
   prefixLen: {{ .MainPodsPrefixLen }}
@@ -105,7 +105,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-cluster-svcs
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .MainSvcsDest }}
   prefixLen: {{ .MainSvcsPrefixLen }}
@@ -116,7 +116,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-default-egress
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: 0.0.0.0
   prefixLen: 0

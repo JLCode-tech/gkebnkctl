@@ -121,7 +121,7 @@ data:
     [INPUT]
         Name              tail
         Tag               bnkgov
-        Path              /var/log/containers/f5-tmm-*_f5-bnk_f5-tmm-*.log
+        Path              /var/log/containers/f5-tmm-*_f5-cne-system_f5-tmm-*.log
         Parser            cri
         Refresh_Interval  5
         Skip_Long_Lines   On

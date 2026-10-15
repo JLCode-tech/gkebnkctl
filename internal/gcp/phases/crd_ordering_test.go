@@ -32,18 +32,18 @@ func TestWaitForDeploymentExists_ReturnsOnceCreated(t *testing.T) {
 	client := fakek8s.NewClientset()
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		_, _ = client.AppsV1().Deployments("f5-bnk").Create(context.Background(),
-			&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "f5-crdconversion", Namespace: "f5-bnk"}},
+		_, _ = client.AppsV1().Deployments("f5-cne-system").Create(context.Background(),
+			&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "f5-crdconversion", Namespace: "f5-cne-system"}},
 			metav1.CreateOptions{})
 	}()
-	if err := waitForDeploymentExists(context.Background(), client, "f5-bnk", "f5-crdconversion", 10*time.Second); err != nil {
+	if err := waitForDeploymentExists(context.Background(), client, "f5-cne-system", "f5-crdconversion", 10*time.Second); err != nil {
 		t.Errorf("waitForDeploymentExists: %v", err)
 	}
 }
 
 func TestWaitForDeploymentExists_TimesOutWhenAbsent(t *testing.T) {
 	client := fakek8s.NewClientset()
-	err := waitForDeploymentExists(context.Background(), client, "f5-bnk", "never-appears", 100*time.Millisecond)
+	err := waitForDeploymentExists(context.Background(), client, "f5-cne-system", "never-appears", 100*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected a timeout error when the deployment is never created")
 	}

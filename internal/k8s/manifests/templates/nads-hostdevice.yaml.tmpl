@@ -9,7 +9,7 @@ apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
   name: tmm-ext
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   config: |
     {
@@ -27,7 +27,7 @@ apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
   name: tmm-int
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   config: |
     {

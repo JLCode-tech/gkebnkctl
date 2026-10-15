@@ -23,8 +23,8 @@ It uses artifacts/kubeconfig if present, or dynamically fetches credentials from
 
 Example:
   gkebnkctl k get pods -A
-  gkebnkctl k get cneinstances,f5spkvlans -n f5-bnk
-  gkebnkctl k logs -n f5-bnk daemonset/f5-tmm -c tmm
+  gkebnkctl k get cneinstances,f5spkvlans -n f5-cne-system
+  gkebnkctl k logs -n f5-cne-system daemonset/f5-tmm -c tmm
   gkebnkctl k exec -it -n egress-test egress-client -- curl -v http://10.30.0.1`,
 	DisableFlagParsing: true,
 	RunE:               runK,

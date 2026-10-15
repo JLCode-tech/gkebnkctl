@@ -113,8 +113,8 @@ type NamespacesVars struct {
 }
 
 // RenderNamespaces renders templates/namespaces.yaml.tmpl (Phase30):
-// the f5-bnk, f5-utils, and egress test namespaces. f5-bnk and f5-utils
-// are static; TestNamespace is templated to support custom egress namespaces.
+// the cert-manager, f5-cne-core, f5-cne-system, f5-bnk-instance, f5-utils, and
+// egress test namespaces. TestNamespace is templated to support custom egress namespaces.
 func RenderNamespaces(tmpl []byte, v NamespacesVars) ([]byte, error) {
 	return Render(tmpl, v)
 }
@@ -216,14 +216,14 @@ func CNEControllerRBACName(cl *intent.Cluster) string {
 type CNEControllerRBACVars struct {
 	Name           string // <cluster>-cne-controller-endpointslices
 	LabName        string // cl.Metadata.Name
-	InstanceNS     string // f5-bnk
+	InstanceNS     string // f5-cne-system
 	ServiceAccount string // f5-cne-controller
 }
 
 // RenderCNEControllerRBAC renders the EndpointSlice + NAD ClusterRole + binding for
 // the cne-controller ServiceAccount.
 func RenderCNEControllerRBAC(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
-	return RenderCNEControllerRBACNamespace(tmpl, cl, "f5-bnk")
+	return RenderCNEControllerRBACNamespace(tmpl, cl, "f5-cne-system")
 }
 
 // RenderCNEControllerRBACNamespace renders the RBAC with an explicit namespace.
@@ -232,7 +232,7 @@ func RenderCNEControllerRBACNamespace(tmpl []byte, cl *intent.Cluster, ns string
 		return nil, fmt.Errorf("render cne-controller rbac: cluster name is required")
 	}
 	if ns == "" {
-		ns = "f5-bnk"
+		ns = "f5-cne-system"
 	}
 	return renderTemplateString(string(tmpl), CNEControllerRBACVars{
 		Name:           CNEControllerRBACName(cl),

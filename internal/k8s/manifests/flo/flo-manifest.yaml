@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/version: "v2.25.4"
     app.kubernetes.io/managed-by: Helm
   name: flo-f5-lifecycle-operator
-  namespace: f5-bnk
+  namespace: f5-cne-core
 # secrets:
 #   - name: far-secret
 ---
@@ -49337,7 +49337,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: flo-f5-lifecycle-operator
-  namespace: f5-bnk
+  namespace: f5-cne-core
 
 ---
 # Source: f5-lifecycle-operator/templates/deployment.yaml
@@ -49345,7 +49345,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: flo-f5-lifecycle-operator
-  namespace: f5-bnk
+  namespace: f5-cne-core
   labels:
     helm.sh/chart: f5-lifecycle-operator-v2.25.4
     app.kubernetes.io/name: f5-lifecycle-operator

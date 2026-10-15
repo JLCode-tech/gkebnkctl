@@ -19,7 +19,7 @@ const vlansRoutesTemplatePath = "templates/vlans-routes.yaml.tmpl"
 
 // Phase41VlansRoutes renders and applies the external+internal F5SPKVlan +
 // 6 F5SPKStaticRoutes (ext-gw, int-gw, ext-underlay, cluster-pods,
-// cluster-svcs, default-egress) in f5-bnk. route-int-gw
+// cluster-svcs, default-egress) in f5-cne-system. route-int-gw
 // (10.50.0.1/32, interface internal) is the item that made egress work
 // where the reference cluster failed — do not drop it (docs/SPEC-go-tracer.md
 // "Notes for Builder"). Needs a live cluster — docs/SPEC-go-tracer.md §3
@@ -28,7 +28,7 @@ func Phase41VlansRoutes(ctx context.Context, cl *intent.Cluster, st *state.State
 	fmt.Fprintf(os.Stderr, "[phase 41] F5SPKVlans + static routes: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
-		fmt.Fprintln(os.Stderr, "[phase 41] would apply F5SPKVlan (external, internal) + 6 F5SPKStaticRoutes incl. route-int-gw in f5-bnk (needs live cluster)")
+		fmt.Fprintln(os.Stderr, "[phase 41] would apply F5SPKVlan (external, internal) + 6 F5SPKStaticRoutes incl. route-int-gw in f5-cne-system (needs live cluster)")
 		return nil
 	}
 

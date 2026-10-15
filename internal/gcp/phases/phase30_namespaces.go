@@ -14,17 +14,17 @@ import (
 )
 
 // namespacesTemplatePath is the embedded template applied by Phase30Namespaces,
-// rendering f5-bnk, f5-utils, and the configurable egress-test namespace.
+// rendering standard F5 BNK 2.4 namespaces and the configurable egress-test namespace.
 const namespacesTemplatePath = "templates/namespaces.yaml.tmpl"
 const coreDNSForwarderPath = "static/03-coredns-forwarder.yaml"
 
-// Phase30Namespaces applies the f5-bnk / f5-utils / egress-test namespaces
+// Phase30Namespaces applies the standard F5 BNK 2.4 / egress-test namespaces
 // and the CoreDNS forwarder for StatefulSet discovery.
 func Phase30Namespaces(ctx context.Context, cl *intent.Cluster, _ *state.State, clients *gcp.Clients, dryRun bool) error {
 	fmt.Fprintf(os.Stderr, "[phase 30] namespaces: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
-		fmt.Fprintf(os.Stderr, "[phase 30] would apply namespaces: f5-bnk, f5-utils, %s\n", cl.Egress.TestNamespace)
+		fmt.Fprintf(os.Stderr, "[phase 30] would apply namespaces: cert-manager, f5-cne-core, f5-cne-system, f5-bnk-instance, f5-utils, %s\n", cl.Egress.TestNamespace)
 		return nil
 	}
 
@@ -67,7 +67,7 @@ func applyCoreDNSForwarder(ctx context.Context, clients *gcp.Clients) error {
 				if cm.Data == nil {
 					cm.Data = map[string]string{}
 				}
-				stub := fmt.Sprintf(`{"f5-bnk.svc.cluster.local":["%s"]}`, svc.Spec.ClusterIP)
+				stub := fmt.Sprintf(`{"f5-cne-core.svc.cluster.local":["%s"]}`, svc.Spec.ClusterIP)
 				if cm.Data["stubDomains"] != stub {
 					cm.Data["stubDomains"] = stub
 					_, _ = clients.K8s.CoreV1().ConfigMaps("kube-system").Update(ctx, cm, metav1.UpdateOptions{})

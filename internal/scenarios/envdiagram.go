@@ -163,14 +163,12 @@ func liveReadTMMPodIP(cs kubernetes.Interface) string {
 		return "(unknown)"
 	}
 	ctx := context.Background()
-	for _, ns := range []string{"f5-bnk", "f5-cne-system"} {
-		pods, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
-			LabelSelector: "app=f5-tmm",
-			Limit:         1,
-		})
-		if err == nil && len(pods.Items) > 0 && pods.Items[0].Status.PodIP != "" {
-			return pods.Items[0].Status.PodIP
-		}
+	pods, err := cs.CoreV1().Pods("f5-cne-system").List(ctx, metav1.ListOptions{
+		LabelSelector: "app=f5-tmm",
+		Limit:         1,
+	})
+	if err == nil && len(pods.Items) > 0 && pods.Items[0].Status.PodIP != "" {
+		return pods.Items[0].Status.PodIP
 	}
 	return "(unknown)"
 }

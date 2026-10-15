@@ -44,7 +44,7 @@ func TestPhase33FarSecret_DockerConfig_CreatesInAllNamespaces(t *testing.T) {
 	cl := testCluster()
 	cl.Bnk.FarSecret.Source = "dockerconfig"
 	cl.Bnk.FarSecret.DockerConfigFile = writeTempFile(t, `{"auths":{"repo.f5.com":{"auth":"Zm9vOmJhcg=="}}}`)
-	cl.Bnk.FarSecret.Namespaces = []string{"f5-bnk", "f5-utils"}
+	cl.Bnk.FarSecret.Namespaces = []string{"f5-cne-core", "f5-utils"}
 	st := testState(t)
 	k8sClient := fakek8s.NewClientset()
 	clients := &gcp.Clients{K8s: k8sClient}
@@ -71,15 +71,15 @@ func TestPhase33FarSecret_DockerConfig_CreatesInAllNamespaces(t *testing.T) {
 // skip-if-exists idempotency gate.
 func TestCreateFarSecretFromDockerConfig_SkipsWhenPresent(t *testing.T) {
 	k8sClient := fakek8s.NewClientset(
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: farSecretName, Namespace: "f5-bnk"}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: farSecretName, Namespace: "f5-cne-core"}},
 	)
-	if err := createFarSecretFromDockerConfig(context.Background(), k8sClient, "f5-bnk", []byte(`{}`)); err != nil {
+	if err := createFarSecretFromDockerConfig(context.Background(), k8sClient, "f5-cne-core", []byte(`{}`)); err != nil {
 		t.Fatalf("createFarSecretFromDockerConfig: %v", err)
 	}
 	// No panic/error is the assertion here — a real overwrite attempt would
 	// still succeed against the fake, so also assert the original (empty)
 	// Data survived untouched.
-	sec, _ := k8sClient.CoreV1().Secrets("f5-bnk").Get(context.Background(), farSecretName, metav1.GetOptions{})
+	sec, _ := k8sClient.CoreV1().Secrets("f5-cne-core").Get(context.Background(), farSecretName, metav1.GetOptions{})
 	if len(sec.Data) != 0 {
 		t.Error("expected the pre-existing far-secret to be left untouched")
 	}
@@ -93,7 +93,7 @@ func TestCopyFarSecretFromContext_StripsMetadataAndCopiesData(t *testing.T) {
 	srcClient := fakek8s.NewClientset(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        farSecretName,
-			Namespace:   "f5-bnk",
+			Namespace:   "f5-cne-core",
 			UID:         "some-uid",
 			Annotations: map[string]string{"kubectl.kubernetes.io/last-applied-configuration": "{}"},
 		},
@@ -102,7 +102,7 @@ func TestCopyFarSecretFromContext_StripsMetadataAndCopiesData(t *testing.T) {
 	})
 	dstClient := fakek8s.NewClientset()
 
-	if err := copyFarSecretFromContext(context.Background(), srcClient, "f5-bnk", dstClient, "f5-utils"); err != nil {
+	if err := copyFarSecretFromContext(context.Background(), srcClient, "f5-cne-core", dstClient, "f5-utils"); err != nil {
 		t.Fatalf("copyFarSecretFromContext: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestCopyFarSecretFromContext_StripsMetadataAndCopiesData(t *testing.T) {
 
 func TestCopyFarSecretFromContext_SkipsWhenDestinationHasSecret(t *testing.T) {
 	srcClient := fakek8s.NewClientset(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: farSecretName, Namespace: "f5-bnk"},
+		ObjectMeta: metav1.ObjectMeta{Name: farSecretName, Namespace: "f5-cne-core"},
 		Data:       map[string][]byte{".dockerconfigjson": []byte("from-source")},
 	})
 	dstClient := fakek8s.NewClientset(&corev1.Secret{
@@ -134,7 +134,7 @@ func TestCopyFarSecretFromContext_SkipsWhenDestinationHasSecret(t *testing.T) {
 		Data:       map[string][]byte{".dockerconfigjson": []byte("pre-existing")},
 	})
 
-	if err := copyFarSecretFromContext(context.Background(), srcClient, "f5-bnk", dstClient, "f5-utils"); err != nil {
+	if err := copyFarSecretFromContext(context.Background(), srcClient, "f5-cne-core", dstClient, "f5-utils"); err != nil {
 		t.Fatalf("copyFarSecretFromContext: %v", err)
 	}
 

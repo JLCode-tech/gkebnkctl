@@ -46,8 +46,8 @@ func testCluster() *intent.Cluster {
 			FarSecret: intent.FarSecretSpec{
 				Source:          "kubecontext",
 				SourceContext:   "some-other-cluster",
-				SourceNamespace: "f5-bnk",
-				Namespaces:      []string{"f5-bnk", "f5-utils"},
+				SourceNamespace: "f5-cne-core",
+				Namespaces:      []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance", "f5-utils", "default"},
 			},
 		},
 		Egress: intent.EgressSpec{

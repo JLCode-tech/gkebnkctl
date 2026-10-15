@@ -35,7 +35,7 @@ import (
 
 const (
 	K8sTestNamespace       = "gkebnkctl-test"
-	InstanceNamespace      = "f5-bnk"
+	InstanceNamespace      = "f5-cne-system"
 	OperatorNamespace      = "f5-cne-core"
 	cneInstanceResource    = "cneinstances"
 	cwcNamespace           = OperatorNamespace

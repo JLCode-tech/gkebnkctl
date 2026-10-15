@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -196,6 +197,33 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 		if fn, ok := realUpPhases[p.num]; ok {
 			if err := fn(ctx, cl, st, gcl, dryRun); err != nil {
 				return fmt.Errorf("up: %w", err)
+			}
+			if !dryRun {
+				ts := time.Now().UTC().Format(time.RFC3339)
+				kv := map[string]string{
+					fmt.Sprintf("PHASE_%s_APPLIED_AT", p.num): ts,
+				}
+				switch p.num {
+				case "20":
+					kv["CLUSTER_CREATED_AT"] = ts
+				case "31":
+					kv["CERT_MANAGER_INSTALLED_AT"] = ts
+				case "36":
+					kv["FLO_INSTALLED_AT"] = ts
+				case "38", "42", "70":
+					kv["CNEINSTANCE_READY_AT"] = ts
+				case "40":
+					kv["LICENSE_APPLIED_AT"] = ts
+				case "50":
+					kv["EGRESS_CONFIGURED_AT"] = ts
+				case "51":
+					kv["INGRESS_VXLAN_ROUTES_APPLIED_AT"] = ts
+				}
+				for k, v := range kv {
+					st.Set(k, v)
+				}
+				_ = st.Save()
+				_ = state.WriteValues(cl.StateDir(), kv)
 			}
 			continue
 		}

@@ -57,6 +57,19 @@ func IsProbePodRunning(ctx context.Context) bool {
 	return strings.TrimSpace(out.String()) == "Running"
 }
 
+// ProbePodIP returns the IP address of the in-cluster probe pod if running, or "" if unavailable.
+func ProbePodIP(ctx context.Context) string {
+	pod := probePodName()
+	ns := probePodNamespace()
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", pod, "-n", ns, "-o", "jsonpath={.status.podIP}")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.String())
+}
+
 func execInProbe(ctx context.Context, cmdStr string) (string, error) {
 	pod := probePodName()
 	ns := probePodNamespace()
