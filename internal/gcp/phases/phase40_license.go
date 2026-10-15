@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
@@ -49,7 +50,8 @@ func Phase40License(ctx context.Context, cl *intent.Cluster, _ *state.State, cli
 		return fmt.Errorf("phase40: rendering license-cr: %w", err)
 	}
 
-	// Purge cached CPCL registration secrets so previous failed activations do not deadlock.
+	// Sync cpcl-key-secret from cpcl-key-cm and purge cached CPCL registration
+	// secrets so previous failed activations or rotated JWKS certs do not deadlock.
 	purgeStaleCPCLSecrets(ctx, clients)
 
 	if err := applyLicenseWithQuotaRetry(ctx, clients, rendered); err != nil {
@@ -59,16 +61,64 @@ func Phase40License(ctx context.Context, cl *intent.Cluster, _ *state.State, cli
 	return nil
 }
 
-// purgeStaleCPCLSecrets deletes cached CPCL secrets left behind by previously failed
-// activation attempts. CPCL (cm20 daemon) caches token failure status in these secrets;
-// if not cleared, future activation attempts deadlock even with a valid JWT.
+// purgeStaleCPCLSecrets syncs Secret/cpcl-key-secret from ConfigMap/cpcl-key-cm
+// and deletes stale CPCL/CWC state secrets in f5-utils, f5-cne-core, and f5-bnk
+// before applying the License CR so CPCL does not get stuck in a stale state across re-runs.
 func purgeStaleCPCLSecrets(ctx context.Context, clients *gcp.Clients) {
 	if clients == nil || clients.K8s == nil {
 		return
 	}
+
+	var fallbackJWTKey string
+	if cm, err := clients.K8s.CoreV1().ConfigMaps("f5-utils").Get(ctx, "cpcl-key-cm", metav1.GetOptions{}); err == nil && cm != nil {
+		fallbackJWTKey = cm.Data["jwt.key"]
+	}
+
 	for _, ns := range []string{"f5-utils", "f5-cne-core"} {
-		for _, name := range []string{"licensestatus", "cpcl-config-secret"} {
-			_ = clients.K8s.CoreV1().Secrets(ns).Delete(ctx, name, metav1.DeleteOptions{})
+		jwtKey := fallbackJWTKey
+		if cm, err := clients.K8s.CoreV1().ConfigMaps(ns).Get(ctx, "cpcl-key-cm", metav1.GetOptions{}); err == nil && cm != nil && cm.Data["jwt.key"] != "" {
+			jwtKey = cm.Data["jwt.key"]
+		}
+		if jwtKey == "" {
+			continue
+		}
+		sec, err := clients.K8s.CoreV1().Secrets(ns).Get(ctx, "cpcl-key-secret", metav1.GetOptions{})
+		if err != nil || sec == nil {
+			continue
+		}
+		if sec.Data == nil {
+			sec.Data = make(map[string][]byte)
+		}
+		sec.Data["jwt.key"] = []byte(jwtKey)
+		if _, updErr := clients.K8s.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{}); updErr == nil {
+			fmt.Fprintf(os.Stderr, "[phase 40] synced cpcl-key-secret from cpcl-key-cm in %s\n", ns)
+		}
+	}
+
+	staleSecrets := []string{
+		"context",
+		"initialregistrationstatus",
+		"licensestatus",
+		"activationmessage",
+		"activationstatus",
+		"statehistory",
+		"switchlicensestatus",
+		"telemetrystatus",
+		"telemetryreports",
+		"f5-Flo-lic-msg",
+		"f5-cwc-state",
+		"cpcl-Dynamic-state",
+		"cpcl-config-secret",
+	}
+	for _, ns := range []string{"f5-utils", "f5-cne-core", "f5-bnk"} {
+		for _, name := range staleSecrets {
+			err := clients.K8s.CoreV1().Secrets(ns).Delete(ctx, name, metav1.DeleteOptions{})
+			if err != nil && !apierrors.IsNotFound(err) {
+				continue
+			}
+			if err == nil {
+				fmt.Fprintf(os.Stderr, "[phase 40] purged stale CPCL secret %s/%s\n", ns, name)
+			}
 		}
 	}
 }

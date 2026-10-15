@@ -208,6 +208,10 @@ func TestRenderEgress_Golden(t *testing.T) {
 	for _, want := range []string{
 		"kind: F5SPKEgress",
 		"- egress-test",
+		"- default",
+		"- gkebnkctl-scn-httproute-e2e",
+		"- gkebnkctl-scn-aiinference",
+		"- gkebnkctl-scn-aitokens",
 		"key: 100",
 		"mtu: 1410",
 		"nodeInterfaceName: ens5",

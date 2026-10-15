@@ -25,5 +25,5 @@ import "embed"
 
 // FS is the embedded manifest filesystem.
 //
-//go:embed all:static all:multus all:cert-manager all:flo all:templates
+//go:embed all:static all:multus all:cert-manager all:flo all:gie all:templates
 var FS embed.FS

@@ -31,7 +31,8 @@ kubectl apply -f "$DEMO_DIR/traffic-generator-deployment.yaml"
 
 # Step 5: Check Status
 echo "[Step 5] Checking Gateway and Pod Status..."
-kubectl get gateway,httproute -A
+kubectl get gatewayclass,gateway,httproute -A
+kubectl get pods -n f5-cne-system
 kubectl get pods -n bnk-demo
 kubectl get pods -n llm-egress
 

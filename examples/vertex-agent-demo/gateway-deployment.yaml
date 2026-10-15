@@ -1,7 +1,7 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
 metadata:
-  name: bnk-sydney-gatewayclass
+  name: bnk-vertex-demo-gatewayclass
 spec:
   controllerName: f5.com/f5-cne-system-f5-cne-controller
   description: F5 BIG-IP Kubernetes Gateway
@@ -26,10 +26,10 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
-  name: bnk-sydney-gateway
+  name: bnk-vertex-demo-gateway
   namespace: default
 spec:
-  gatewayClassName: bnk-sydney-gatewayclass
+  gatewayClassName: bnk-vertex-demo-gatewayclass
   listeners:
   - name: http
     protocol: HTTP
@@ -64,7 +64,7 @@ metadata:
   namespace: default
 spec:
   parentRefs:
-  - name: bnk-sydney-gateway
+  - name: bnk-vertex-demo-gateway
   rules:
   - matches:
     - path:

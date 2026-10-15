@@ -4,19 +4,25 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
+	"github.com/JLCode-tech/gkebnkctl/internal/k8s"
 )
 
 // PhaseDownCluster deletes the GKE cluster (node pools go with it) and waits
 // until it is gone. Tolerates "already gone" (a 404 on GetCluster / a 404 on
 // DeleteCluster).
-func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, _ *state.State, clients *gcp.Clients) error {
+func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, st *state.State, clients *gcp.Clients) error {
 	project := cl.Metadata.Project
 	zone := cl.Metadata.Zone
 	name := cl.Metadata.Name
@@ -30,6 +36,17 @@ func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 			return nil
 		}
 		return fmt.Errorf("down: cluster: GetCluster: %w", err)
+	}
+
+	// Best-effort strip of F5 BNK CR finalizers before deleting the GKE cluster.
+	if clients.Dynamic != nil {
+		stripStuckFinalizersWithClient(ctx, clients.Dynamic)
+	} else if st != nil {
+		if kcPath := st.KubeconfigPath(); kcPath != "" {
+			if _, err := os.Stat(kcPath); err == nil {
+				stripStuckFinalizers(ctx, kcPath)
+			}
+		}
 	}
 
 	op, err := clients.GKE.DeleteCluster(ctx, &containerpb.DeleteClusterRequest{Name: clusterName})
@@ -240,4 +257,103 @@ func teardownDataplaneResources(ctx context.Context, project, region, vpc, clust
 	}
 
 	return nil
+}
+
+// stripStuckFinalizers best-effort strips finalizers from F5 BNK CRs that
+// otherwise block namespace and cluster deletion when controller pods are gone.
+func stripStuckFinalizers(ctx context.Context, kubeconfigPath string) {
+	cfg, err := k8s.BuildRESTConfigFromKubeconfig(kubeconfigPath, "")
+	if err != nil {
+		return
+	}
+	dyn, err := k8s.NewDynamicFromConfig(cfg)
+	if err != nil {
+		return
+	}
+	stripStuckFinalizersWithClient(ctx, dyn)
+}
+
+func stripStuckFinalizersWithClient(ctx context.Context, dyn dynamic.Interface) {
+	if dyn == nil {
+		return
+	}
+	tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	crds := []string{
+		"f5-spk-vlans.k8s.f5net.com",
+		"f5-spk-staticroutes.k8s.f5net.com",
+		"f5-spk-egresses.k8s.f5net.com",
+		"f5-spk-snatpools.k8s.f5net.com",
+		"infras.gateway.k8s.f5.com",
+		"gatewaysettings.gateway.k8s.f5.com",
+		"egressgateways.gateway.k8s.f5.com",
+		"analyzers.k8s.f5.com",
+		"cnecontrollers.k8s.f5.com",
+		"cneinstances.k8s.f5.com",
+		"dssms.k8s.f5.com",
+		"f5tmms.k8s.f5.com",
+		"coremonds.k8s.f5.com",
+		"crdconversions.k8s.f5.com",
+		"crdinstallers.k8s.f5.com",
+		"csrcs.k8s.f5.com",
+		"cwcs.k8s.f5.com",
+		"ipamcontrollers.k8s.f5.com",
+		"rabbitmqs.k8s.f5.com",
+	}
+	gvrs := crdsToGVRs(crds)
+	namespaces := []string{
+		"f5-cne-core",
+		"f5-cne-system",
+		"f5-bnk-instance",
+		"f5-utils",
+		"f5-bnk",
+		"bnk-demo",
+		"egress-test",
+	}
+
+	for _, ns := range namespaces {
+		for _, gvr := range gvrs {
+			list, listErr := dyn.Resource(gvr).Namespace(ns).List(tctx, metav1.ListOptions{})
+			if listErr != nil || list == nil {
+				continue
+			}
+			for i := range list.Items {
+				item := list.Items[i]
+				if len(item.GetFinalizers()) == 0 {
+					continue
+				}
+				unstructured.RemoveNestedField(item.Object, "metadata", "finalizers")
+				if _, updErr := dyn.Resource(gvr).Namespace(ns).Update(tctx, &item, metav1.UpdateOptions{}); updErr == nil {
+					fmt.Fprintf(os.Stderr, "[down] stripped finalizers from %s %s/%s\n", gvr.Resource, ns, item.GetName())
+				}
+			}
+		}
+	}
+}
+
+func crdsToGVRs(crds []string) []schema.GroupVersionResource {
+	var gvrs []schema.GroupVersionResource
+	for _, crd := range crds {
+		var resource, group string
+		for i := 0; i < len(crd); i++ {
+			if crd[i] == '.' {
+				resource = crd[:i]
+				group = crd[i+1:]
+				break
+			}
+		}
+		if resource == "" || group == "" {
+			continue
+		}
+		version := "v1"
+		if group == "gateway.k8s.f5.com" {
+			version = "v1alpha1"
+		}
+		gvrs = append(gvrs, schema.GroupVersionResource{Group: group, Version: version, Resource: resource})
+		if resource == "f5-spk-egresses" {
+			gvrs = append(gvrs, schema.GroupVersionResource{Group: group, Version: "v3", Resource: resource})
+		}
+	}
+	return gvrs
 }
