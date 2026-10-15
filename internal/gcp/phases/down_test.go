@@ -189,10 +189,22 @@ func TestPhaseDownNetworks_TeardownDataplaneResources(t *testing.T) {
 	}
 
 	// Now remove the other cluster's subnet, simulating that we are the last tenant out.
-	// But leave the other cluster's marked routers and firewalls to prove that we sweep them.
+	// Also use full GCP Compute API URLs (https://www.googleapis.com/compute/v1/...) as returned
+	// by live GCP ListAll responses to verify matchesVPC handles full URLs and relative paths.
+	fullVPCURL := "https://www.googleapis.com/compute/v1/" + vpcSelfLink
 	subnets.subnets = []*computepb.Subnetwork{
-		{Name: strPtr("sn-us"), Network: strPtr(vpcSelfLink), Description: strPtr("gkebnkctl-cluster=bnk-hostdev gkebnkctl-managed=true")},
-		{Name: strPtr("sn-unmarked"), Network: strPtr(vpcSelfLink)},
+		{Name: strPtr("sn-us"), Network: strPtr(fullVPCURL), Description: strPtr("gkebnkctl-cluster=bnk-hostdev gkebnkctl-managed=true")},
+		{Name: strPtr("sn-unmarked"), Network: strPtr(fullVPCURL)},
+	}
+	routers.routers = []*computepb.Router{
+		{Name: strPtr("rt-us"), Network: strPtr(fullVPCURL), Description: strPtr("gkebnkctl-cluster=bnk-hostdev gkebnkctl-managed=true")},
+		{Name: strPtr("rt-them"), Network: strPtr(fullVPCURL), Description: strPtr("gkebnkctl-cluster=other-cluster gkebnkctl-managed=true")},
+		{Name: strPtr("rt-unmarked"), Network: strPtr(fullVPCURL)},
+	}
+	firewalls.firewalls = []*computepb.Firewall{
+		{Name: strPtr("fw-us"), Network: strPtr(fullVPCURL), Description: strPtr("gkebnkctl-cluster=bnk-hostdev gkebnkctl-managed=true")},
+		{Name: strPtr("fw-them"), Network: strPtr(fullVPCURL), Description: strPtr("gkebnkctl-cluster=other-cluster gkebnkctl-managed=true")},
+		{Name: strPtr("fw-unmarked"), Network: strPtr(fullVPCURL)},
 	}
 	subnets.deleted = nil
 	routers.deleted = nil
