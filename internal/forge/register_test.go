@@ -296,6 +296,35 @@ func TestRegister_PendingLinkFallsThrough(t *testing.T) {
 	}
 }
 
+func TestRegister_ProjectConflictReusesExisting(t *testing.T) {
+	f := newScriptedForge()
+	f.responses["create_project"] = `{"ok":false,"error":"PROJECT_CONFLICT","detail":"Project 'gkebnkctl-default' already exists"}`
+	f.responses["list_projects"] = `{"projects":[{"id":42,"name":"gkebnkctl-default"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(f.handler))
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/mcp/")
+	dir := t.TempDir()
+	res, err := Register(context.Background(), c, RegisterRequest{
+		WorkspaceName: "default",
+		WorkspaceDir:  dir,
+		ClusterName:   "bnk-prod",
+		Region:        "us-central1",
+		Kubeconfig:    []byte("apiVersion: v1\nkind: Config\n"),
+	})
+	if err != nil {
+		t.Fatalf("Register on 409 conflict: %v", err)
+	}
+	if res.Link == nil || res.Link.ProjectID != 42 {
+		t.Fatalf("Link = %+v, want ProjectID 42", res.Link)
+	}
+	got := f.calls()
+	want := []string{"create_project", "list_projects", "create_cluster"}
+	if !equalSlices(got, want) {
+		t.Errorf("call order = %v, want %v", got, want)
+	}
+}
+
 func equalSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

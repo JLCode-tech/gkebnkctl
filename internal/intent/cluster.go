@@ -8,6 +8,7 @@
 package intent
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -15,10 +16,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/JLCode-tech/gkebnkctl/internal/manifest"
 	"github.com/JLCode-tech/gkebnkctl/internal/netcalc"
 )
 
@@ -207,6 +210,54 @@ type BnkSpec struct {
 	// ImageRegistry is the container registry prefix where BNK/FLO images are pulled from.
 	// Default "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga".
 	ImageRegistry string `yaml:"imageRegistry,omitempty"`
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler for BnkSpec so tmmMtu accepts
+// both integer (9000) and string ("9000") YAML scalars while still enforcing
+// KnownFields(true).
+func (b *BnkSpec) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i < len(value.Content)-1; i += 2 {
+			k := value.Content[i]
+			v := value.Content[i+1]
+			if k.Value == "tmmMtu" && v.Kind == yaml.ScalarNode && v.Value != "" {
+				if _, err := strconv.Atoi(strings.TrimSpace(v.Value)); err != nil {
+					return fmt.Errorf("bnk.tmmMtu %q is not a valid integer: %w", v.Value, err)
+				}
+				v.Value = strings.TrimSpace(v.Value)
+				v.Tag = "!!str"
+			}
+		}
+	}
+	type rawBnkSpec BnkSpec
+	rawBytes, err := yaml.Marshal(value)
+	if err != nil {
+		return err
+	}
+	var raw rawBnkSpec
+	dec := yaml.NewDecoder(bytes.NewReader(rawBytes))
+	dec.KnownFields(true)
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+	*b = BnkSpec(raw)
+	return nil
+}
+
+// Is24 reports whether the configured BNK manifest version uses the 2.4+ Gateway API / Infra CR model.
+func (b BnkSpec) Is24() bool {
+	v := strings.TrimPrefix(strings.TrimSpace(b.ManifestVersion), "v")
+	return !strings.HasPrefix(v, "2.3")
+}
+
+// FLOVersion resolves the FLO chart version paired with bnk.manifestVersion.
+func (c *Cluster) FLOVersion() string {
+	if c != nil && c.Bnk.ManifestVersion != "" {
+		if chart, ok := manifest.FLOChartFor(c.Bnk.ManifestVersion); ok {
+			return chart
+		}
+	}
+	return manifest.DefaultFLOChart()
 }
 
 // FarSecretSpec configures the far-secret pull-credential source.

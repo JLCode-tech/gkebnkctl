@@ -15,7 +15,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,52 +44,12 @@ func probeOptionsFromCtx(ctx context.Context) (ProbeOptions, bool) {
 	return opts, ok
 }
 
-// ensureKubeconfigEnv sets KUBECONFIG on cmd if it is not already in the environment
-// and a workspace kubeconfig exists under .gkebnkctl/*/kubeconfig or workspaces/*/.gkebnkctl/*/kubeconfig.
-func ensureKubeconfigEnv(cmd *exec.Cmd) {
-	if os.Getenv("KUBECONFIG") != "" {
-		return
-	}
-	matches, _ := filepath.Glob(".gkebnkctl/*/kubeconfig")
-	if len(matches) == 0 {
-		matches, _ = filepath.Glob("workspaces/*/.gkebnkctl/*/kubeconfig")
-	}
-	if len(matches) > 0 {
-		cmd.Env = append(os.Environ(), "KUBECONFIG="+matches[0])
-	}
-}
-
 func isNamedPodRunning(pod, ns string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", pod, "-n", ns, "-o", "jsonpath={.status.phase}")
-	ensureKubeconfigEnv(cmd)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-	return strings.TrimSpace(out.String()) == "Running"
+	return isNamedPodRunningInProcess(pod, ns)
 }
 
 func findTMMProbePod() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", "f5-cne-system",
-		"--no-headers", "-o", "custom-columns=:metadata.name,:status.phase")
-	ensureKubeconfigEnv(cmd)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && strings.HasPrefix(fields[0], "f5-tmm") && fields[1] == "Running" {
-			return fields[0]
-		}
-	}
-	return ""
+	return findTMMProbePodInProcess()
 }
 
 func probePodName() string {
@@ -126,73 +85,36 @@ func probePodContainer() string {
 	return ""
 }
 
-// IsProbePodRunning checks if the in-cluster probe pod is available and running.
-func IsProbePodRunning(ctx context.Context) bool {
+// IsProbePodRunning checks if the in-cluster probe pod is available and running using in-process client-go.
+func IsProbePodRunning(_ context.Context) bool {
 	pod := probePodName()
 	ns := probePodNamespace()
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", pod, "-n", ns, "-o", "jsonpath={.status.phase}")
-	ensureKubeconfigEnv(cmd)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-	return strings.TrimSpace(out.String()) == "Running"
+	return isNamedPodRunningInProcess(pod, ns)
 }
 
 // ProbePodIP returns the IP address of the in-cluster probe pod if running, or "" if unavailable.
 func ProbePodIP(ctx context.Context) string {
 	pod := probePodName()
 	ns := probePodNamespace()
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", pod, "-n", ns, "-o", "jsonpath={.status.podIP}")
-	ensureKubeconfigEnv(cmd)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out.String())
+	return probePodIPInProcess(ctx, pod, ns)
 }
 
 func execInProbe(ctx context.Context, cmdStr string) (string, error) {
-	pod := probePodName()
-	ns := probePodNamespace()
-	args := []string{"exec", "-n", ns, pod}
-	if c := probePodContainer(); c != "" {
-		args = append(args, "-c", c)
+	runner := &PodExecRunner{
+		Namespace: probePodNamespace(),
+		PodName:   probePodName(),
+		Container: probePodContainer(),
 	}
-	args = append(args, "--", "sh", "-c", cmdStr)
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	ensureKubeconfigEnv(cmd)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return strings.TrimSpace(stdout.String()), fmt.Errorf("probe-exec: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(stdout.String()), nil
+	return runner.Run(ctx, cmdStr, nil)
 }
 
 func execInProbeWithStdin(ctx context.Context, cmdStr string, stdin io.Reader) (string, error) {
-	pod := probePodName()
-	ns := probePodNamespace()
-	args := []string{"exec", "-i", "-n", ns, pod}
-	if c := probePodContainer(); c != "" {
-		args = append(args, "-c", c)
+	runner := &PodExecRunner{
+		Namespace: probePodNamespace(),
+		PodName:   probePodName(),
+		Container: probePodContainer(),
 	}
-	args = append(args, "--", "sh", "-c", cmdStr)
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	ensureKubeconfigEnv(cmd)
-	if stdin != nil {
-		cmd.Stdin = stdin
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return strings.TrimSpace(stdout.String()), fmt.Errorf("probe-exec: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(stdout.String()), nil
+	return runner.Run(ctx, cmdStr, stdin)
 }
 
 // ProbeOptions configures a jumphost curl probe run.

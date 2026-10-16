@@ -150,15 +150,16 @@ func TestScenario_ChildCounts(t *testing.T) {
 		key   string
 		count int
 	}{
-		{"baseline", 4},         // DEFAULT_SWEEP = {50,100,150,200}
-		{"high-concurrency", 4}, // HEAVY_CONC_ISL = 4 pairs
-		{"mixed-workload", 9},   // 1 warmup + 4 short + 4 long
-		{"multi-turn", 16},      // 4 turns × 4 sweep = 16
-		{"prefix-cache", 4},     // HEAVY_CONC_ISL = 4 pairs
-		{"bimodal", 4},          // DEFAULT_SWEEP
-		{"sustained-load", 5},   // sweep {50,100,150,200,250}
-		{"burst-recovery", 10},  // 5 rounds × 2 (burst+probe)
-		{"mooncake", 1},         // single trace variant
+		{"inferencex-agentx-mvp", 4}, // rates {2,4,8,16}
+		{"baseline", 4},              // DEFAULT_SWEEP = {50,100,150,200}
+		{"high-concurrency", 4},      // HEAVY_CONC_ISL = 4 pairs
+		{"mixed-workload", 9},        // 1 warmup + 4 short + 4 long
+		{"multi-turn", 16},           // 4 turns × 4 sweep = 16
+		{"prefix-cache", 4},          // HEAVY_CONC_ISL = 4 pairs
+		{"bimodal", 4},               // DEFAULT_SWEEP
+		{"sustained-load", 5},        // sweep {50,100,150,200,250}
+		{"burst-recovery", 10},       // 5 rounds × 2 (burst+probe)
+		{"mooncake", 1},              // single trace variant
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {
@@ -767,5 +768,56 @@ func TestExpandForgeScenario_Poisson(t *testing.T) {
 	prefix, _ := expandForgeScenario("poisson-rate-prefix", jumphost.AiperfConfig{})
 	if p := prefix[0].Config; p.RequestRate != 1 || p.PrefixPromptLength != 4000 || p.NumPrefixPrompts != 20 || p.BenchmarkDuration != 300 {
 		t.Errorf("prefix 1 rps step = %+v", p)
+	}
+}
+
+func TestExpandForgeScenario_InferenceXAgentXMvp(t *testing.T) {
+	base := jumphost.AiperfConfig{
+		Model:      "llama3",
+		Tokenizer:  "NousResearch/Meta-Llama-3-8B-Instruct",
+		HostHeader: "gkebnkctl-aiinference.local",
+		Timeout:    5 * time.Minute,
+	}
+	children, err := expandForgeScenario("inferencex-agentx-mvp", base)
+	if err != nil {
+		t.Fatalf("expandForgeScenario(inferencex-agentx-mvp): %v", err)
+	}
+	if len(children) != 4 {
+		t.Fatalf("len(children) = %d, want 4", len(children))
+	}
+	wantRates := []float64{2, 4, 8, 16}
+	wantLabels := []string{"2rps", "4rps", "8rps", "16rps"}
+	for i, ch := range children {
+		if ch.VariantLabel != wantLabels[i] {
+			t.Errorf("[%d] VariantLabel = %q, want %q", i, ch.VariantLabel, wantLabels[i])
+		}
+		cfg := ch.Config
+		if cfg.Model != "llama3" {
+			t.Errorf("[%d] Model = %q, want llama3", i, cfg.Model)
+		}
+		if cfg.Scenario != "inferencex-agentx-mvp" {
+			t.Errorf("[%d] Scenario = %q, want inferencex-agentx-mvp", i, cfg.Scenario)
+		}
+		if cfg.PublicDataset != "custom_multi_turn" {
+			t.Errorf("[%d] PublicDataset = %q, want custom_multi_turn", i, cfg.PublicDataset)
+		}
+		if cfg.RequestRate != wantRates[i] {
+			t.Errorf("[%d] RequestRate = %v, want %v", i, cfg.RequestRate, wantRates[i])
+		}
+		if !cfg.UseServerTokenCount {
+			t.Errorf("[%d] UseServerTokenCount = false, want true", i)
+		}
+		if cfg.MaxContextLength != 32768 {
+			t.Errorf("[%d] MaxContextLength = %d, want 32768", i, cfg.MaxContextLength)
+		}
+		if len(cfg.UnsafeOverride) != 1 || cfg.UnsafeOverride[0] != "dataset.conversation_num=30" {
+			t.Errorf("[%d] UnsafeOverride = %v, want [dataset.conversation_num=30]", i, cfg.UnsafeOverride)
+		}
+		if cfg.Tokenizer != "" {
+			t.Errorf("[%d] Tokenizer = %q, want empty (native scenario uses server token count)", i, cfg.Tokenizer)
+		}
+		if cfg.HostHeader != "gkebnkctl-aiinference.local" {
+			t.Errorf("[%d] HostHeader = %q, want gkebnkctl-aiinference.local", i, cfg.HostHeader)
+		}
 	}
 }

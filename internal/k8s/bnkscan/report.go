@@ -51,6 +51,11 @@ func WriteReport(w io.Writer, idx *Index) {
 	section("SecPolicy", idx.SecPolicies)
 	section("NetPolicy", idx.NetPolicies)
 	section("F5BigPersistenceProfile", idx.PersistenceProfiles)
+	section("F5BigDnsCache", idx.DNSCaches)
+	section("F5BigDnsApp", idx.DNSApps)
+	section("F5BigDnsZone", idx.DNSZones)
+	section("F5BigCnatPolicy", idx.CGNATPolicies)
+	section("F5DiameterEndpoint", idx.DiameterEndpoints)
 
 	if idx.Legacy.Any() {
 		fmt.Fprintf(w, "legacy 2.3 CRs: F5BnkGateway=%d BNKSecPolicy=%d BNKNetPolicy=%d F5SPKVlan=%d F5SPKEgress=%d\n",

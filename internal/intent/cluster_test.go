@@ -548,3 +548,41 @@ func TestSyntheticAIEnabled(t *testing.T) {
 		t.Error("SyntheticAIEnabled() = false, want true")
 	}
 }
+
+func TestLoad_TmmMtuIntAndString(t *testing.T) {
+	dir := t.TempDir()
+	intBody := strings.Replace(validYAML, `tmmMtu: "1460"`, `tmmMtu: 9000`, 1)
+	pathInt := writeCluster(t, dir, intBody)
+	clInt, err := Load(pathInt)
+	if err != nil {
+		t.Fatalf("Load with int tmmMtu failed: %v", err)
+	}
+	if clInt.Bnk.TmmMtu != "9000" {
+		t.Errorf("Bnk.TmmMtu = %q, want 9000", clInt.Bnk.TmmMtu)
+	}
+
+	strBody := strings.Replace(validYAML, `tmmMtu: "1460"`, `tmmMtu: "8896"`, 1)
+	pathStr := writeCluster(t, dir, strBody)
+	clStr, err := Load(pathStr)
+	if err != nil {
+		t.Fatalf("Load with string tmmMtu failed: %v", err)
+	}
+	if clStr.Bnk.TmmMtu != "8896" {
+		t.Errorf("Bnk.TmmMtu = %q, want 8896", clStr.Bnk.TmmMtu)
+	}
+
+	badBody := strings.Replace(validYAML, `tmmMtu: "1460"`, `tmmMtu: "not-an-int"`, 1)
+	pathBad := writeCluster(t, dir, badBody)
+	if _, err := Load(pathBad); err == nil {
+		t.Fatal("Load with invalid string tmmMtu should fail")
+	}
+}
+
+func TestBnkSpec_Is24(t *testing.T) {
+	if !(BnkSpec{ManifestVersion: "2.4.0-3.2882.0"}).Is24() {
+		t.Error("expected 2.4.0-3.2882.0 to be Is24() == true")
+	}
+	if (BnkSpec{ManifestVersion: "2.3.2-3.2598.3-0.0.392"}).Is24() {
+		t.Error("expected 2.3.2-3.2598.3-0.0.392 to be Is24() == false")
+	}
+}

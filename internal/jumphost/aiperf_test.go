@@ -706,3 +706,59 @@ func TestBuildMooncakeCmd_DefaultDilation(t *testing.T) {
 		t.Errorf("BuildMooncakeCmd with TraceDilation=0 should default to 0.8; cmd=%q", cmd)
 	}
 }
+
+func TestBuildAiperfCmd_NativeScenario_InferenceXAgentXMvp(t *testing.T) {
+	opts := jumphost.AiperfRunOptions{
+		ProbeOptions: jumphost.ProbeOptions{
+			VIP: "10.0.10.100",
+		},
+		Config: jumphost.AiperfConfig{
+			Model:               "llama3",
+			Scenario:            "inferencex-agentx-mvp",
+			PublicDataset:       "custom_multi_turn",
+			RequestRate:         4,
+			UseServerTokenCount: true,
+			MaxContextLength:    32768,
+			UnsafeOverride:      []string{"dataset.conversation_num=30"},
+			HostHeader:          "gkebnkctl-aiinference.local",
+		},
+	}
+
+	cmd := jumphost.BuildAiperfCmd(opts)
+
+	mustContain := []string{
+		"aiperf profile",
+		"-m 'llama3'",
+		"-u 'http://10.0.10.100'",
+		"--scenario 'inferencex-agentx-mvp'",
+		"--public-dataset 'custom_multi_turn'",
+		"--request-rate 4",
+		"--use-server-token-count",
+		"--max-context-length 32768",
+		"--unsafe-override 'dataset.conversation_num=30'",
+		"--header 'Host:gkebnkctl-aiinference.local'",
+		"--artifact-dir",
+		"--ui none",
+		"cat",
+		"profile_export_aiperf.json",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("buildAiperfCmd missing %q; cmd=%q", want, cmd)
+		}
+	}
+
+	mustNotContain := []string{
+		"--endpoint-type",
+		"--concurrency",
+		"--request-count",
+		"--synthetic-input-tokens-mean",
+		"--output-tokens-mean",
+		"--tokenizer",
+	}
+	for _, bad := range mustNotContain {
+		if strings.Contains(cmd, bad) {
+			t.Errorf("buildAiperfCmd must NOT contain %q for native scenario; cmd=%q", bad, cmd)
+		}
+	}
+}

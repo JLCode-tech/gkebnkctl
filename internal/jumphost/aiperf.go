@@ -72,6 +72,13 @@ type AiperfConfig struct {
 	WarmupDuration    float64
 	BenchmarkDuration float64
 	NumDatasetEntries int
+
+	// Native aiperf scenario fields
+	Scenario            string
+	PublicDataset       string
+	UseServerTokenCount bool
+	MaxContextLength    int
+	UnsafeOverride      []string
 }
 
 // aiperfMetricDist is the distribution shape used for most aiperf 0.10.0 metrics.
@@ -345,13 +352,14 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 	}
 
 	cfg := opts.Config
-	if cfg.EndpointType == "" {
+	nativeScenario := cfg.Scenario != ""
+	if cfg.EndpointType == "" && !nativeScenario {
 		cfg.EndpointType = "chat"
 	}
-	// Closed-loop defaults apply only when no rate or duration drives the run:
+	// Closed-loop defaults apply only when no rate, duration, or native scenario drives the run:
 	// a forced --concurrency 1 would cap an open-loop run at one in flight, and
 	// a forced --request-count would end a timed step early.
-	openLoop := cfg.RequestRate > 0 || cfg.BenchmarkDuration > 0
+	openLoop := cfg.RequestRate > 0 || cfg.BenchmarkDuration > 0 || nativeScenario
 	if cfg.Concurrency <= 0 && !openLoop {
 		cfg.Concurrency = 1
 	}
@@ -360,17 +368,19 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 	}
 	// aiperf cycles through 100 prompts by default; on a timed run that set fits in a
 	// KV cache whole and every request hits. Generate one per request instead.
-	if cfg.NumDatasetEntries <= 0 && cfg.NumRequests <= 0 && cfg.RequestRate > 0 && cfg.BenchmarkDuration > 0 {
+	if cfg.NumDatasetEntries <= 0 && cfg.NumRequests <= 0 && cfg.RequestRate > 0 && cfg.BenchmarkDuration > 0 && !nativeScenario {
 		cfg.NumDatasetEntries = int(math.Ceil(cfg.RequestRate * (cfg.WarmupDuration + cfg.BenchmarkDuration)))
 	}
-	if cfg.ISL <= 0 {
-		cfg.ISL = 512
-	}
-	if cfg.OSL <= 0 {
-		cfg.OSL = 128
-	}
-	if cfg.Tokenizer == "" {
-		cfg.Tokenizer = "NousResearch/Meta-Llama-3-8B-Instruct"
+	if !nativeScenario {
+		if cfg.ISL <= 0 {
+			cfg.ISL = 512
+		}
+		if cfg.OSL <= 0 {
+			cfg.OSL = 128
+		}
+		if cfg.Tokenizer == "" {
+			cfg.Tokenizer = "NousResearch/Meta-Llama-3-8B-Instruct"
+		}
 	}
 
 	vip := opts.ProbeOptions.VIP
@@ -391,7 +401,15 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 		"aiperf", "profile",
 		"-m", shellSingleQuote(cfg.Model),
 		"-u", shellSingleQuote(fmt.Sprintf("http://%s", vip)),
-		"--endpoint-type", shellSingleQuote(cfg.EndpointType),
+	}
+	if cfg.EndpointType != "" {
+		args = append(args, "--endpoint-type", shellSingleQuote(cfg.EndpointType))
+	}
+	if cfg.Scenario != "" {
+		args = append(args, "--scenario", shellSingleQuote(cfg.Scenario))
+	}
+	if cfg.PublicDataset != "" {
+		args = append(args, "--public-dataset", shellSingleQuote(cfg.PublicDataset))
 	}
 	if cfg.Concurrency > 0 {
 		args = append(args, "--concurrency", fmt.Sprintf("%d", cfg.Concurrency))
@@ -417,10 +435,19 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 	if cfg.RandomSeed > 0 {
 		args = append(args, "--random-seed", fmt.Sprintf("%d", cfg.RandomSeed))
 	}
+	if cfg.UseServerTokenCount {
+		args = append(args, "--use-server-token-count")
+	}
+	if cfg.MaxContextLength > 0 {
+		args = append(args, "--max-context-length", fmt.Sprintf("%d", cfg.MaxContextLength))
+	}
+	for _, uo := range cfg.UnsafeOverride {
+		args = append(args, "--unsafe-override", shellSingleQuote(uo))
+	}
 
 	if cfg.SeqDist != "" {
 		args = append(args, "--seq-dist", shellSingleQuote(cfg.SeqDist))
-	} else {
+	} else if !nativeScenario {
 		args = append(args,
 			"--synthetic-input-tokens-mean", fmt.Sprintf("%d", cfg.ISL),
 			"--output-tokens-mean", fmt.Sprintf("%d", cfg.OSL),
@@ -447,7 +474,9 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 		args = append(args, "--extra-inputs", shellSingleQuote(ei))
 	}
 
-	args = append(args, "--tokenizer", shellSingleQuote(cfg.Tokenizer))
+	if cfg.Tokenizer != "" {
+		args = append(args, "--tokenizer", shellSingleQuote(cfg.Tokenizer))
+	}
 
 	if cfg.HostHeader != "" {
 		args = append(args, "--header", shellSingleQuote(fmt.Sprintf("Host:%s", cfg.HostHeader)))

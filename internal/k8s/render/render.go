@@ -94,6 +94,39 @@ func RenderVlansRoutes(tmpl []byte, v VlansRoutesVars) ([]byte, error) {
 	return Render(tmpl, v)
 }
 
+// InfraVars is the Vars struct for templates/infra.yaml.tmpl (BNK 2.4).
+type InfraVars struct {
+	TmmMtu               string
+	ExtSelfIP            string
+	IntSelfIP            string
+	ExtGwIP              string
+	IntGwIP              string
+	ListenerStart        string
+	ListenerEnd          string
+	VxlanPort            int
+	ExtUnderlayDest      string
+	ExtUnderlayPrefixLen int
+	MainPodsDest         string
+	MainPodsPrefixLen    int
+	MainSvcsDest         string
+	MainSvcsPrefixLen    int
+	TmmPodGW             string
+}
+
+// RenderInfra renders templates/infra.yaml.tmpl (Phase41 on BNK 2.4).
+func RenderInfra(tmpl []byte, v InfraVars) ([]byte, error) {
+	if v.TmmMtu == "" {
+		v.TmmMtu = "1460"
+	}
+	if v.ListenerStart == "" {
+		v.ListenerStart = "10.30.0.100"
+	}
+	if v.ListenerEnd == "" {
+		v.ListenerEnd = "10.30.0.199"
+	}
+	return Render(tmpl, v)
+}
+
 // LicenseCRVars is the Vars struct for templates/license-cr.yaml.tmpl.
 type LicenseCRVars struct {
 	// JWT is the raw, whitespace-trimmed license token — never base64, never
@@ -133,6 +166,28 @@ type EgressVars struct {
 // RenderEgress renders templates/egress.yaml.tmpl (Phase50): the
 // F5SPKEgress pseudo-CNI vxlan CR + the egress-client test pod.
 func RenderEgress(tmpl []byte, v EgressVars) ([]byte, error) {
+	return Render(tmpl, v)
+}
+
+// EgressGatewayVars is the Vars struct for templates/egress-gateway.yaml.tmpl (BNK 2.4).
+type EgressGatewayVars struct {
+	TestNamespace    string
+	GatewayClassName string
+	NetworkRef       string
+	AgentPoolName    string
+}
+
+// RenderEgressGateway renders templates/egress-gateway.yaml.tmpl (Phase50 on BNK 2.4).
+func RenderEgressGateway(tmpl []byte, v EgressGatewayVars) ([]byte, error) {
+	if v.TestNamespace == "" {
+		v.TestNamespace = "egress-test"
+	}
+	if v.GatewayClassName == "" {
+		v.GatewayClassName = "f5-gateway-class"
+	}
+	if v.NetworkRef == "" {
+		v.NetworkRef = InfraIntNetwork
+	}
 	return Render(tmpl, v)
 }
 

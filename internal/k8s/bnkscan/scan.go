@@ -19,7 +19,7 @@ import (
 // Options tunes Scan.
 type Options struct {
 	// ControllerNamespace and ControllerName locate the f5-cne-controller
-	// Deployment. Empty values use the awsbnkctl defaults.
+	// Deployment. Empty values use the gkebnkctl defaults.
 	ControllerNamespace string
 	ControllerName      string
 	// TMMName is the TMM DaemonSet in ControllerNamespace (default f5-tmm).
@@ -62,7 +62,7 @@ func Scan(ctx context.Context, dyn dynamic.Interface, cs kubernetes.Interface, o
 	idx := &Index{Controller: Controller{Namespace: opts.ControllerNamespace, Name: opts.ControllerName}, TMM: TMM{Namespace: opts.ControllerNamespace, Name: opts.TMMName}}
 	r := &raw{gatewayReady: map[string]bool{}}
 
-	groups, err := f5CRDGroups(ctx, dyn)
+	groups, servedCRDs, crdsListed, err := f5CRDGroups(ctx, dyn)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +110,38 @@ func Scan(ctx context.Context, dyn dynamic.Interface, cs kubernetes.Interface, o
 	r.netPolicies = keep["NetPolicy"]
 	r.secPolicies = keep["SecPolicy"]
 	r.persistence = keep["F5BigPersistenceProfile"]
+
+	// F5 CNF kinds (Cloud-Native Network Functions): scanned when CRDs exist, never required.
+	type cnfKindSpec struct {
+		kind    string
+		crdName string
+		gvr     schema.GroupVersionResource
+		ready   func(*unstructured.Unstructured) (bool, string)
+		dest    *[]Object
+	}
+	cnfSpecs := []cnfKindSpec{
+		{"F5BigDnsCache", "f5-big-dns-caches.k8s.f5net.com", DNSCacheGVR, trueIfPresent("Programmed"), &idx.DNSCaches},
+		{"F5BigDnsApp", "f5-big-dns-apps.k8s.f5net.com", DNSAppGVR, trueIfPresent("Programmed"), &idx.DNSApps},
+		{"F5BigDnsZone", "f5-big-dns-zones.k8s.f5net.com", DNSZoneGVR, trueIfPresent("Programmed"), &idx.DNSZones},
+		{"F5BigCnatPolicy", "f5-big-cnat-policies.k8s.f5net.com", CGNATPolicyGVR, trueIfPresent("Programmed"), &idx.CGNATPolicies},
+		{"F5DiameterEndpoint", "f5-diameter-endpoints.k8s.f5net.com", DiameterEndpointGVR, trueIfPresent("Programmed"), &idx.DiameterEndpoints},
+	}
+	for _, s := range cnfSpecs {
+		// Only list if the CRD was confirmed served, or if CRDs couldn't be listed.
+		if crdsListed && !servedCRDs[s.crdName] {
+			continue
+		}
+		items, err := listAll(ctx, dyn, s.gvr)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return nil, fmt.Errorf("list %s (%s): %w", s.kind, s.gvr.GroupResource(), err)
+		}
+		for _, it := range items {
+			*s.dest = append(*s.dest, toObject(it, s.ready))
+		}
+	}
 
 	// Gateway API: keep the Gateways whose class belongs to a BNK controller.
 	classes, err := list("GatewayClass", GatewayClassGVR)
@@ -215,20 +247,26 @@ func countAll(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersio
 	return len(l.Items)
 }
 
-// f5CRDGroups returns the sorted F5 CRD groups the API server serves. When
-// CRDs cannot be listed (RBAC), it probes the two policy groups directly.
-func f5CRDGroups(ctx context.Context, dyn dynamic.Interface) ([]string, error) {
+// f5CRDGroups returns the sorted F5 CRD groups the API server serves and the
+// set of served CRD resource names. When CRDs cannot be listed (RBAC), it
+// probes the two policy groups directly.
+func f5CRDGroups(ctx context.Context, dyn dynamic.Interface) ([]string, map[string]bool, bool, error) {
 	seen := map[string]bool{}
+	crds := map[string]bool{}
+	crdsListed := false
 	l, err := dyn.Resource(CRDGVR).List(ctx, metav1.ListOptions{})
 	if err == nil {
+		crdsListed = true
 		for i := range l.Items {
+			name := l.Items[i].GetName()
+			crds[name] = true
 			g, _, _ := unstructured.NestedString(l.Items[i].Object, "spec", "group")
 			if strings.HasSuffix(g, "f5.com") || strings.HasSuffix(g, "f5net.com") {
 				seen[g] = true
 			}
 		}
 	} else if !apierrors.IsForbidden(err) && !apierrors.IsNotFound(err) {
-		return nil, fmt.Errorf("list CRDs: %w", err)
+		return nil, nil, false, fmt.Errorf("list CRDs: %w", err)
 	} else {
 		for g, gvr := range map[string]schema.GroupVersionResource{
 			GatewayF5Group:    NetPolicyGVR,
@@ -246,7 +284,7 @@ func f5CRDGroups(ctx context.Context, dyn dynamic.Interface) ([]string, error) {
 		out = append(out, g)
 	}
 	sort.Strings(out)
-	return out, nil
+	return out, crds, crdsListed, nil
 }
 
 // bnkGatewayClasses returns the names of the GatewayClasses whose controller

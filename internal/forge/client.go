@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/forge/mcp"
@@ -112,6 +113,7 @@ func (r *CreateProjectResponse) UnmarshalJSON(b []byte) error {
 
 	var flat struct {
 		ProjectID int    `json:"project_id"`
+		ID        int    `json:"id"`
 		Name      string `json:"name"`
 	}
 	if err := json.Unmarshal(b, &flat); err != nil {
@@ -119,6 +121,8 @@ func (r *CreateProjectResponse) UnmarshalJSON(b []byte) error {
 	}
 	if flat.ProjectID != 0 {
 		r.Project.ID = flat.ProjectID
+	} else if flat.ID != 0 {
+		r.Project.ID = flat.ID
 	}
 	if r.Project.Name == "" && flat.Name != "" {
 		r.Project.Name = flat.Name
@@ -154,12 +158,61 @@ func (c *Client) CreateProject(ctx context.Context, req CreateProjectRequest) (C
 	}
 	var out CreateProjectResponse
 	if err := r.UnmarshalToolJSON(&out); err != nil {
+		if strings.Contains(r.Text(), "already exists") || strings.Contains(r.Text(), "PROJECT_CONFLICT") {
+			if existing, findErr := c.FindProjectByName(ctx, req.Name); findErr == nil {
+				return existing, nil
+			}
+		}
 		return CreateProjectResponse{}, err
 	}
 	if out.Project.ID == 0 {
+		if strings.Contains(r.Text(), "already exists") || strings.Contains(r.Text(), "PROJECT_CONFLICT") {
+			if existing, findErr := c.FindProjectByName(ctx, req.Name); findErr == nil {
+				return existing, nil
+			}
+		}
 		return out, fmt.Errorf("create_project succeeded but no project ID in response: %s", r.Text())
 	}
 	return out, nil
+}
+
+// ListProjectsResponse captures the list_projects MCP tool response.
+type ListProjectsResponse struct {
+	Projects []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"projects"`
+}
+
+// ListProjects returns all projects visible in forge.
+func (c *Client) ListProjects(ctx context.Context) (ListProjectsResponse, error) {
+	res, err := c.mcp.CallTool(ctx, "list_projects", map[string]any{})
+	if err != nil {
+		return ListProjectsResponse{}, err
+	}
+	var out ListProjectsResponse
+	if err := json.Unmarshal([]byte(res.Text()), &out); err != nil {
+		return ListProjectsResponse{}, err
+	}
+	return out, nil
+}
+
+// FindProjectByName queries list_projects MCP tool and matches by name.
+func (c *Client) FindProjectByName(ctx context.Context, name string) (CreateProjectResponse, error) {
+	data, err := c.ListProjects(ctx)
+	if err != nil {
+		return CreateProjectResponse{}, err
+	}
+	for _, p := range data.Projects {
+		if strings.EqualFold(p.Name, name) {
+			var resp CreateProjectResponse
+			resp.Success = true
+			resp.Project.ID = p.ID
+			resp.Project.Name = p.Name
+			return resp, nil
+		}
+	}
+	return CreateProjectResponse{}, fmt.Errorf("project %q not found", name)
 }
 
 // DeleteProject removes a project. force bypasses the active/only-project

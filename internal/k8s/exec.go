@@ -3,31 +3,100 @@ package k8s
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 )
 
+// ExecOptions captures the flag-parsed inputs to `gkebnkctl k exec`.
+type ExecOptions struct {
+	PodName        string
+	Namespace      string
+	Container      string
+	Stdin          bool
+	TTY            bool
+	Command        []string
+	KubeconfigPath string
+
+	IOStreams genericiooptions.IOStreams
+
+	// SizeQueue is consulted when TTY is true so the remote PTY tracks
+	// terminal resizes. Optional; nil disables resize forwarding.
+	SizeQueue remotecommand.TerminalSizeQueue
+}
+
+// Run opens an SPDY exec stream against the pod and proxies stdio.
+func (o *ExecOptions) Run(ctx context.Context) error {
+	if o.PodName == "" {
+		return errors.New("pod name required")
+	}
+	if len(o.Command) == 0 {
+		return errors.New("command required after `--`")
+	}
+	cfg, err := BuildRESTConfig(o.KubeconfigPath)
+	if err != nil {
+		return err
+	}
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	ns := o.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
+	req := cs.CoreV1().RESTClient().
+		Post().
+		Resource("pods").
+		Name(o.PodName).
+		Namespace(ns).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: o.Container,
+			Command:   o.Command,
+			Stdin:     o.Stdin,
+			Stdout:    true,
+			Stderr:    !o.TTY,
+			TTY:       o.TTY,
+		}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(cfg, "POST", req.URL())
+	if err != nil {
+		return fmt.Errorf("setting up SPDY executor: %w", err)
+	}
+
+	streamOpts := remotecommand.StreamOptions{
+		Stdout: o.IOStreams.Out,
+		Stderr: o.IOStreams.ErrOut,
+		Tty:    o.TTY,
+	}
+	if o.Stdin {
+		streamOpts.Stdin = o.IOStreams.In
+	}
+	if o.TTY && o.SizeQueue != nil {
+		streamOpts.TerminalSizeQueue = o.SizeQueue
+	}
+	if streamOpts.Stdout == nil {
+		streamOpts.Stdout = io.Discard
+	}
+	if streamOpts.Stderr == nil {
+		streamOpts.Stderr = io.Discard
+	}
+
+	return exec.StreamWithContext(ctx, streamOpts)
+}
+
 // ExecCapture runs command inside ns/pod (scoped to container, if non-empty)
 // via a non-interactive SPDY exec stream and returns its captured
-// stdout/stderr. Added in Task D for Phase50's egress verification
-// (docs/SPEC-go-tracer.md §3 Phase50: "verification via client-go exec").
-//
-// Unlike awsbnkctl's internal/k8s/exec.go ExecOptions.Run (which proxies
-// live stdio for the interactive `k exec` CLI), this helper buffers output
-// for programmatic use and needs no IOStreams/TTY plumbing.
-//
-// SPDY exec needs a real upgradeable HTTP connection to an API server, so it
-// cannot be unit-tested directly — the same boundary awsbnkctl's
-// exec_test.go documents ("SPDY exec needs a real upgradeable connection —
-// not fakeable"). Callers that need test coverage over their exec-driven
-// logic should depend on a function value that wraps ExecCapture (see
-// internal/gcp/phases/phase50_egress.go's egressExecFunc), not on
-// ExecCapture itself.
+// stdout/stderr.
 func ExecCapture(ctx context.Context, cfg *rest.Config, clientset kubernetes.Interface, ns, pod, container string, command []string) (stdout, stderr string, err error) {
 	if cfg == nil {
 		return "", "", fmt.Errorf("k8s: ExecCapture: rest.Config is nil")

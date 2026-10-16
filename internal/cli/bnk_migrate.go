@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
@@ -63,7 +64,7 @@ var (
 		return migrate.NewDynamicApplier(cfg)
 	}
 	bnkUpgradeIdentity = func(ctx context.Context, cl *intent.Cluster, st *state.State, kubeconfigPath string) error {
-		return nil
+		return ensureGKEWorkloadIdentitySA(ctx, st, kubeconfigPath, flagBnkUpgradeNamespace)
 	}
 	bnkUpgradeDeps = func(kubeconfigPath, farKeyB64 string) (migrate.UpgradeDeps, error) {
 		helm, err := phases.NewHelmInstaller(kubeconfigPath, farKeyB64)
@@ -417,4 +418,38 @@ var bnkUpgradeServiceCIDR = func(ctx context.Context, cl *intent.Cluster, flag s
 		return cl.Network.Main.SvcsCIDR, ""
 	}
 	return "", ""
+}
+
+func ensureGKEWorkloadIdentitySA(ctx context.Context, st *state.State, kubeconfigPath, ns string) error {
+	if ns == "" {
+		ns = migrate.DefaultInstanceNamespace
+	}
+	gsaEmail := ""
+	if st != nil {
+		gsaEmail = st.Get("GCP_GSA_EMAIL")
+	}
+	if gsaEmail == "" {
+		gsaEmail = os.Getenv("GCP_GSA_EMAIL")
+	}
+	if gsaEmail == "" {
+		return nil
+	}
+	cfg, err := k8s.BuildRESTConfig(kubeconfigPath)
+	if err != nil {
+		return err
+	}
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	sa, err := cs.CoreV1().ServiceAccounts(ns).Get(ctx, render.CNEControllerServiceAccount, metav1.GetOptions{})
+	if err != nil {
+		return nil // non-fatal if SA is managed differently
+	}
+	if sa.Annotations == nil {
+		sa.Annotations = map[string]string{}
+	}
+	sa.Annotations["iam.gke.io/gcp-service-account"] = gsaEmail
+	_, err = cs.CoreV1().ServiceAccounts(ns).Update(ctx, sa, metav1.UpdateOptions{})
+	return err
 }

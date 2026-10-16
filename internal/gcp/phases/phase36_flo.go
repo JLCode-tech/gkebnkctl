@@ -8,12 +8,15 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 	"github.com/JLCode-tech/gkebnkctl/internal/k8s"
 	"github.com/JLCode-tech/gkebnkctl/internal/k8s/manifests"
+	"github.com/JLCode-tech/gkebnkctl/internal/k8s/render"
+	"github.com/JLCode-tech/gkebnkctl/internal/manifest"
 )
 
 const (
@@ -25,41 +28,16 @@ const (
 	floCRDWait             = 3 * time.Minute
 )
 
-// supplementalCRDManifests are installed idempotently via server-side apply
-// during Phase36FLO so Gateway API CRDs, GIE CRDs, and the gateway.k8s.f5.com
-// CRDs omitted by crd-installer 2.4.0-3.2882.0 are present before CNEInstance
-// spawns f5-cne-controller and before any scenario runs.
 var supplementalCRDManifests = []string{
 	gatewayAPICRDsPath,
 	gieCRDsPath,
 	bnkGatewayCRDsPath,
 }
 
-// floCRDs are the CRDs the FLO operator manifest itself ships, so they are the
-// only ones Phase36 can meaningfully wait on.
-//
-// The k8s.f5net.com CRDs (licenses, f5spkvlans, f5spkstaticroutes,
-// f5spkegresses) are NOT in that manifest: FLO creates them from a
-// `crd-installer` Job that it only spawns once Phase38 has applied the
-// CNEInstance. Waiting for them here therefore burned 3 minutes each, timed out
-// four times, and then Phase40 died anyway with
-// `no matches for kind "License"` (live-hit 2026-07-21 on cluster
-// bnk-scratch). They are waited for in Phase38 instead — see floInstalledCRDs.
 var floCRDs = []string{
 	"cneinstances.k8s.f5.com",
 }
 
-// floInstalledCRDs are created by FLO's crd-installer Job after the CNEInstance
-// exists. Phase38 waits for them so the phases that apply CRs against them —
-// Phase40 (License), Phase41 (F5SPKVlan/F5SPKStaticRoute), Phase50
-// (F5SPKEgress), Phase51 (F5SPKStaticRoute) — cannot run before the kinds are
-// registered.
-// A CRD's metadata.name is "<plural>.<group>", and F5's SPK plurals are
-// HYPHENATED — f5-spk-vlans, not f5spkvlans (verified live 2026-07-21:
-// `kubectl get crd` returns f5-spk-vlans.k8s.f5net.com etc.). The
-// un-hyphenated spellings previously used here matched nothing, so every run
-// burned 3 minutes per CRD timing out and the wait guarded nothing. Only
-// licenses.k8s.f5net.com was ever correct.
 var floInstalledCRDs = []string{
 	"licenses.k8s.f5net.com",
 	"f5-spk-vlans.k8s.f5net.com",
@@ -67,7 +45,6 @@ var floInstalledCRDs = []string{
 	"f5-spk-egresses.k8s.f5net.com",
 }
 
-// renderClusterGatewayClass returns the YAML manifest for <cluster>-gatewayclass.
 func renderClusterGatewayClass(clusterName string) []byte {
 	return []byte(fmt.Sprintf(`apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
@@ -78,26 +55,70 @@ spec:
 `, clusterName, gatewayClassController))
 }
 
-// Phase36FLO applies the embedded FLO operator manifest (~3 MB, 23 CRDs)
+// Phase36FLO dynamically pulls and renders the FLO Helm chart from
+// oci://repo.f5.com/charts/f5-lifecycle-operator when a FAR archive is configured,
+// falling back to the embedded FLO operator manifest (~3 MB, 23 CRDs) otherwise,
 // plus Gateway API / GIE / BNK 2.4 supplemental CRDs and <cluster>-gatewayclass
-// via SERVER-SIDE dynamic SSA — client-side apply exceeds the CRD annotation
-// size limit, per docs/SPEC-go-tracer.md §3 Phase36 / §9.8 — then waits for
-// the F5 CRDs to establish.
-func Phase36FLO(ctx context.Context, cl *intent.Cluster, _ *state.State, clients *gcp.Clients, dryRun bool) error {
+// via SERVER-SIDE dynamic SSA.
+func Phase36FLO(ctx context.Context, cl *intent.Cluster, st *state.State, clients *gcp.Clients, dryRun bool) error {
 	fmt.Fprintf(os.Stderr, "[phase 36] FLO: cluster=%s\n", cl.Metadata.Name)
 
+	floVersion := cl.FLOVersion()
 	if dryRun {
-		fmt.Fprintln(os.Stderr, "[phase 36] would server-side-apply FLO operator manifest (~3 MB, 23 CRDs) + Gateway API/GIE/BNK CRDs + GatewayClass")
+		fmt.Fprintf(os.Stderr, "[phase 36] would server-side-apply FLO operator manifest (%s) + Gateway API/GIE/BNK CRDs + GatewayClass\n", floVersion)
+		if st != nil {
+			st.Set("FLO_RELEASE_NAME", FLOReleaseName)
+			st.Set("FLO_VERSION", floVersion)
+			st.Set("FLO_NAMESPACE", FLONamespace)
+		}
 		return nil
 	}
 
-	// Force SSA (Force: true) instead of plain kubectl apply --server-side.
-	// Client-side apply would exceed CRD annotation size limits (23 CRDs, ~3 MB manifest).
-	// Force ensures idempotent application even if the manifest has been partially applied.
-	data, err := manifests.FS.ReadFile(floManifestPath)
-	if err != nil {
-		return fmt.Errorf("phase36: reading embedded FLO manifest: %w", err)
+	var data []byte
+	var err error
+
+	farPath := cl.Bnk.FARArchive
+	if farPath == "" {
+		farPath = cl.Bnk.FarSecret.DockerConfigFile
 	}
+	if farPath == "" {
+		farPath = os.Getenv("FAR_AUTH_KEY_PATH")
+	}
+	if farPath != "" {
+		if _, farKeyB64, authErr := manifest.ExtractFARAuth(farPath); authErr == nil && farKeyB64 != "" {
+			if m, pErr := manifest.Probe(ctx, cl.Bnk.ManifestVersion, farPath); pErr == nil {
+				if v, ok := m.HelmCharts["f5-lifecycle-operator"]; ok && v != "" {
+					floVersion = v
+				}
+			}
+			var jwtStr string
+			if cl.Bnk.JwtPath != "" {
+				if jwtBytes, jErr := os.ReadFile(cl.Bnk.JwtPath); jErr == nil {
+					jwtStr = strings.TrimSpace(string(jwtBytes))
+				}
+			}
+			if valsTmpl, rErr := manifests.FS.ReadFile(FLOValuesTemplatePath); rErr == nil {
+				if renderedVals, rErr := render.RenderFLOValues(valsTmpl, cl, jwtStr); rErr == nil {
+					var valuesMap map[string]interface{}
+					if yaml.Unmarshal(renderedVals, &valuesMap) == nil {
+						if helmBytes, hErr := k8s.PullAndRenderFLOChart(FLOChartRef, floVersion, FLOReleaseName, FLONamespace, farKeyB64, valuesMap); hErr == nil && len(helmBytes) > 0 {
+							data = helmBytes
+						} else if hErr != nil {
+							fmt.Fprintf(os.Stderr, "[phase 36] warn: OCI Helm chart pull failed (%v); falling back to embedded FLO manifest\n", hErr)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(data) == 0 {
+		data, err = manifests.FS.ReadFile(floManifestPath)
+		if err != nil {
+			return fmt.Errorf("phase36: reading embedded FLO manifest: %w", err)
+		}
+	}
+
 	objs, err := k8s.ParseYAMLStream(data)
 	if err != nil {
 		return fmt.Errorf("phase36: parsing FLO manifest: %w", err)
@@ -106,6 +127,13 @@ func Phase36FLO(ctx context.Context, cl *intent.Cluster, _ *state.State, clients
 	updateFloDeploymentImage(objs, cl.Bnk.ImageRegistry)
 	if err := applyObjects(ctx, clients, objs, true); err != nil {
 		return fmt.Errorf("phase36: applying %s: %w", floManifestPath, err)
+	}
+
+	if st != nil {
+		st.Set("FLO_RELEASE_NAME", FLOReleaseName)
+		st.Set("FLO_VERSION", floVersion)
+		st.Set("FLO_NAMESPACE", FLONamespace)
+		st.Set("FLO_INSTALLED_AT", time.Now().UTC().Format(time.RFC3339))
 	}
 
 	for _, crdManifest := range supplementalCRDManifests {
@@ -139,31 +167,8 @@ func Phase36FLO(ctx context.Context, cl *intent.Cluster, _ *state.State, clients
 	return nil
 }
 
-// redactionSentinel marks values scrubbed out of the vendored FLO manifest
-// before it was committed — see reference/RECON-REDACTIONS.md.
 const redactionSentinel = "REDACTED-BY-GKEBNKCTL"
 
-// dropRedactedSecrets removes Secret objects whose data still carries the
-// redaction sentinel.
-//
-// The vendored FLO manifest is a real capture that had live secret material
-// scrubbed from it before commit. A Secret's `data` values must be base64, and
-// the sentinel is not, so applying it verbatim is rejected by the API server:
-//
-//	failed to convert new object (f5-utils/external-otelsvr-secret) ...
-//	error decoding from json: illegal base64 data at input byte 8
-//
-// which aborted Phase36 and every phase after it (live-hit 2026-07-21 on
-// cluster bnk-scratch). Per reference/RECON-REDACTIONS.md the only affected
-// Secret is f5-utils/external-otelsvr-secret, which is self-managed by the
-// FLO/CNE operator for its otel endpoint and off this seed's critical path
-// (telemetry is disabled in the CNEInstance template); the doc's explicit
-// guidance is to let the operator regenerate it rather than restore the
-// scrubbed values.
-//
-// Only Secrets are dropped. ConfigMap data is plain strings, so the sentinel
-// in cpcl-config-cm's deprecated `jwt` key applies cleanly and is harmless —
-// it is superseded by the License CR that Phase40 applies.
 func dropRedactedSecrets(objs []*unstructured.Unstructured) []*unstructured.Unstructured {
 	kept := make([]*unstructured.Unstructured, 0, len(objs))
 	for _, obj := range objs {

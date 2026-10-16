@@ -9,23 +9,14 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 )
 
-// IOStreams holds standard input/output streams for log streaming commands.
-type IOStreams struct {
-	In     io.Reader
-	Out    io.Writer
-	ErrOut io.Writer
-}
+// IOStreams aliases genericiooptions.IOStreams for backwards compatibility
+// with internal callers (e.g. inspect.go).
+type IOStreams = genericiooptions.IOStreams
 
-// LogsOptions captures the flag-parsed inputs to `gkebnkctl logs`.
-//
-// PodName is the literal pod name (the kubectl-style direct path).
-// Container picks one container in a multi-container pod; "" picks the
-// first one (kubectl behaviour).
-// Follow streams; SinceSeconds bounds the time range (-1 = unbounded);
-// TailLines bounds the line count (-1 = unbounded); Previous fetches
-// the previous-instance logs.
+// LogsOptions captures the flag-parsed inputs to `gkebnkctl k logs` / `gkebnkctl logs`.
 type LogsOptions struct {
 	PodName        string
 	Namespace      string
@@ -36,7 +27,7 @@ type LogsOptions struct {
 	TailLines      int64
 	KubeconfigPath string
 
-	IOStreams IOStreams
+	IOStreams genericiooptions.IOStreams
 }
 
 // Run streams the named pod's logs to o.IOStreams.Out. Returns when the

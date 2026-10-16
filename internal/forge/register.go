@@ -13,6 +13,10 @@ import (
 // caller. The caller is responsible for resolving the workspace dir and
 // providing the kubeconfig — this package doesn't reach into config/.
 type RegisterRequest struct {
+	// ForgeRESTURL is the Forge REST base URL recorded in the link so the
+	// REST-side commands (forge scan --register-targets, benchmark) find Forge
+	// without flags. Optional.
+	ForgeRESTURL  string
 	WorkspaceName string // logical workspace label (used in project name)
 	WorkspaceDir  string // filesystem dir where forge_link.json lives
 	ProjectName   string // forge project name; empty → "gkebnkctl-<workspace>"
@@ -46,10 +50,13 @@ type RegisterRequest struct {
 
 // RegisterResult is what forge register returns to the CLI for display.
 type RegisterResult struct {
-	Link        *Link
-	ScanOutput  string // raw JSON from scan_cluster (empty if skipped)
-	HealthCheck string // raw JSON from bnk_health (empty if skipped)
-	ForgeURL    string
+	Link *Link
+	// LinkRefreshed is true when an existing link was kept but its Forge
+	// URLs were rewritten to the ones this run used.
+	LinkRefreshed bool
+	ScanOutput    string // raw JSON from scan_cluster (empty if skipped)
+	HealthCheck   string // raw JSON from bnk_health (empty if skipped)
+	ForgeURL      string
 }
 
 // Register executes the gkebnkctl→forge handoff:
@@ -83,7 +90,14 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 					fmt.Errorf("workspace already linked to forge cluster_id=%d but get_cluster failed: %w",
 						existing.ClusterID, gerr)
 			}
-			return RegisterResult{Link: existing, ForgeURL: c.URL()}, nil
+			out := RegisterResult{Link: existing, ForgeURL: c.URL()}
+			if refreshLinkURLs(existing, c.URL(), req.ForgeRESTURL) {
+				if err := WriteLink(req.WorkspaceDir, existing); err != nil {
+					return out, fmt.Errorf("refresh link URLs: %w", err)
+				}
+				out.LinkRefreshed = true
+			}
+			return out, nil
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return RegisterResult{}, fmt.Errorf("read existing link: %w", err)
@@ -102,6 +116,10 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 		cloudProv = "gcp"
 	}
 
+	var projectID int
+	var projectName string
+	createdProject := false
+
 	proj, err := c.CreateProject(ctx, CreateProjectRequest{
 		Name:                 req.ProjectName,
 		ProjectType:          projType,
@@ -113,24 +131,46 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 		CredentialTemplateID: req.CredentialTemplateID,
 	})
 	if err != nil {
-		return RegisterResult{}, fmt.Errorf("create_project: %w", err)
+		errLower := strings.ToLower(err.Error())
+		if strings.Contains(errLower, "already exists") || strings.Contains(errLower, "conflict") || strings.Contains(errLower, "409") {
+			if plist, lerr := c.ListProjects(ctx); lerr == nil {
+				for _, p := range plist.Projects {
+					if strings.EqualFold(p.Name, req.ProjectName) {
+						projectID = p.ID
+						projectName = p.Name
+						err = nil
+						break
+					}
+				}
+			}
+		}
+		if err != nil {
+			return RegisterResult{}, fmt.Errorf("create_project: %w", err)
+		}
+	} else {
+		projectID = proj.Project.ID
+		projectName = proj.Project.Name
+		createdProject = true
 	}
 
 	cluster, err := c.CreateCluster(ctx, CreateClusterRequest{
-		ProjectID:     proj.Project.ID,
+		ProjectID:     projectID,
 		Name:          req.ClusterName,
 		CloudProvider: cloudProv,
 		Region:        req.Region,
 	}, req.Kubeconfig)
 	if err != nil {
-		_ = c.DeleteProject(ctx, proj.Project.ID, true)
+		if createdProject {
+			_ = c.DeleteProject(ctx, projectID, true)
+		}
 		return RegisterResult{}, fmt.Errorf("create_cluster: %w", err)
 	}
 
 	link := &Link{
 		ForgeMCPURL:  c.URL(),
-		ProjectID:    proj.Project.ID,
-		ProjectName:  proj.Project.Name,
+		ForgeURL:     req.ForgeRESTURL,
+		ProjectID:    projectID,
+		ProjectName:  projectName,
 		ClusterID:    cluster.Cluster.ID,
 		ClusterName:  cluster.Cluster.Name,
 		RegisteredAt: time.Now().UTC(),
@@ -228,4 +268,19 @@ func Is404(err error) bool {
 
 func is404(err error) bool {
 	return Is404(err)
+}
+
+// refreshLinkURLs points l at the Forge endpoints in use and reports whether
+// anything changed. An empty restURL leaves the recorded REST URL alone.
+func refreshLinkURLs(l *Link, mcpURL, restURL string) bool {
+	changed := false
+	if mcpURL != "" && l.ForgeMCPURL != mcpURL {
+		l.ForgeMCPURL = mcpURL
+		changed = true
+	}
+	if restURL != "" && l.ForgeURL != restURL {
+		l.ForgeURL = restURL
+		changed = true
+	}
+	return changed
 }
