@@ -771,53 +771,45 @@ func TestExpandForgeScenario_Poisson(t *testing.T) {
 	}
 }
 
-func TestExpandForgeScenario_InferenceXAgentXMvp(t *testing.T) {
-	base := jumphost.AiperfConfig{
-		Model:      "llama3",
-		Tokenizer:  "NousResearch/Meta-Llama-3-8B-Instruct",
-		HostHeader: "gkebnkctl-aiinference.local",
-		Timeout:    5 * time.Minute,
-	}
-	children, err := expandForgeScenario("inferencex-agentx-mvp", base)
+func TestExpandForgeScenario_AgentXMvp_Values(t *testing.T) {
+	children, err := expandForgeScenario("inferencex-agentx-mvp", defaultBaseCfg())
 	if err != nil {
 		t.Fatalf("expandForgeScenario(inferencex-agentx-mvp): %v", err)
 	}
 	if len(children) != 4 {
-		t.Fatalf("len(children) = %d, want 4", len(children))
+		t.Fatalf("expected 4 children, got %d", len(children))
 	}
-	wantRates := []float64{2, 4, 8, 16}
-	wantLabels := []string{"2rps", "4rps", "8rps", "16rps"}
-	for i, ch := range children {
-		if ch.VariantLabel != wantLabels[i] {
-			t.Errorf("[%d] VariantLabel = %q, want %q", i, ch.VariantLabel, wantLabels[i])
+	expectedLadder := []int{8, 16, 32, 64}
+	for i, expC := range expectedLadder {
+		ch := children[i]
+		expectedLabel := "c" + itoa(expC)
+		if ch.VariantLabel != expectedLabel {
+			t.Errorf("[%d] VariantLabel = %q, want %q", i, ch.VariantLabel, expectedLabel)
 		}
 		cfg := ch.Config
-		if cfg.Model != "llama3" {
-			t.Errorf("[%d] Model = %q, want llama3", i, cfg.Model)
+		if cfg.Concurrency != expC {
+			t.Errorf("[%d] Concurrency = %d, want %d", i, cfg.Concurrency, expC)
 		}
 		if cfg.Scenario != "inferencex-agentx-mvp" {
-			t.Errorf("[%d] Scenario = %q, want inferencex-agentx-mvp", i, cfg.Scenario)
+			t.Errorf("[%d] Scenario = %q, want %q", i, cfg.Scenario, "inferencex-agentx-mvp")
 		}
-		if cfg.PublicDataset != "custom_multi_turn" {
-			t.Errorf("[%d] PublicDataset = %q, want custom_multi_turn", i, cfg.PublicDataset)
+		if cfg.PublicDataset != "semianalysis_cc_traces_weka_with_subagents" {
+			t.Errorf("[%d] PublicDataset = %q, want %q", i, cfg.PublicDataset, "semianalysis_cc_traces_weka_with_subagents")
 		}
-		if cfg.RequestRate != wantRates[i] {
-			t.Errorf("[%d] RequestRate = %v, want %v", i, cfg.RequestRate, wantRates[i])
+		if cfg.BenchmarkDuration != 900 {
+			t.Errorf("[%d] BenchmarkDuration = %v, want 900", i, cfg.BenchmarkDuration)
+		}
+		if cfg.RandomSeed != 20260707 {
+			t.Errorf("[%d] RandomSeed = %d, want 20260707", i, cfg.RandomSeed)
+		}
+		if !cfg.Streaming {
+			t.Errorf("[%d] Streaming = false, want true", i)
 		}
 		if !cfg.UseServerTokenCount {
 			t.Errorf("[%d] UseServerTokenCount = false, want true", i)
 		}
-		if cfg.MaxContextLength != 32768 {
-			t.Errorf("[%d] MaxContextLength = %d, want 32768", i, cfg.MaxContextLength)
-		}
-		if len(cfg.UnsafeOverride) != 1 || cfg.UnsafeOverride[0] != "dataset.conversation_num=30" {
-			t.Errorf("[%d] UnsafeOverride = %v, want [dataset.conversation_num=30]", i, cfg.UnsafeOverride)
-		}
-		if cfg.Tokenizer != "" {
-			t.Errorf("[%d] Tokenizer = %q, want empty (native scenario uses server token count)", i, cfg.Tokenizer)
-		}
-		if cfg.HostHeader != "gkebnkctl-aiinference.local" {
-			t.Errorf("[%d] HostHeader = %q, want gkebnkctl-aiinference.local", i, cfg.HostHeader)
+		if cfg.Timeout < 40*time.Minute {
+			t.Errorf("[%d] Timeout = %v, want >= 40m", i, cfg.Timeout)
 		}
 	}
 }

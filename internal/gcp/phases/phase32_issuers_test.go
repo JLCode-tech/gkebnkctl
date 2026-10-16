@@ -46,4 +46,9 @@ func TestIssuersManifest_ParsesToExpectedObjects(t *testing.T) {
 	if len(certs) != 1 || certs[0] != extCACertName {
 		t.Errorf("expected exactly 1 Certificate named %s, got %v", extCACertName, certs)
 	}
+
+	caIssuer := string(renderClusterCAIssuer("my-gke"))
+	if !strings.Contains(caIssuer, "name: my-gke-ca-cluster-issuer") || !strings.Contains(caIssuer, "secretName: ext-ca") {
+		t.Errorf("unexpected renderClusterCAIssuer output:\n%s", caIssuer)
+	}
 }

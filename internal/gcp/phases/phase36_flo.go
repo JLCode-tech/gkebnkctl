@@ -36,6 +36,12 @@ var supplementalCRDManifests = []string{
 
 var floCRDs = []string{
 	"cneinstances.k8s.f5.com",
+	"infras.gateway.k8s.f5.com",
+	"l2networks.gateway.k8s.f5.com",
+	"l3networks.gateway.k8s.f5.com",
+	"gatewaysettings.gateway.k8s.f5.com",
+	"egressgateways.gateway.k8s.f5.com",
+	"backends.gateway.k8s.f5.com",
 }
 
 var floInstalledCRDs = []string{
@@ -49,29 +55,42 @@ func renderClusterGatewayClass(clusterName string) []byte {
 	return []byte(fmt.Sprintf(`apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
 metadata:
+  name: f5-gateway-class
+spec:
+  controllerName: %s
+  description: "F5 BIG-IP Kubernetes Gateway"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
   name: %s-gatewayclass
 spec:
   controllerName: %s
-`, clusterName, gatewayClassController))
+  description: "F5 BIG-IP Kubernetes Gateway"
+`, gatewayClassController, clusterName, gatewayClassController))
 }
 
 // Phase36FLO dynamically pulls and renders the FLO Helm chart from
 // oci://repo.f5.com/charts/f5-lifecycle-operator when a FAR archive is configured,
 // falling back to the embedded FLO operator manifest (~3 MB, 23 CRDs) otherwise,
-// plus Gateway API / GIE / BNK 2.4 supplemental CRDs and <cluster>-gatewayclass
-// via SERVER-SIDE dynamic SSA.
+// plus Gateway API / GIE / BNK 2.4 supplemental CRDs and GatewayClasses
+// (f5-gateway-class, <cluster>-gatewayclass) via SERVER-SIDE dynamic SSA.
 func Phase36FLO(ctx context.Context, cl *intent.Cluster, st *state.State, clients *gcp.Clients, dryRun bool) error {
 	fmt.Fprintf(os.Stderr, "[phase 36] FLO: cluster=%s\n", cl.Metadata.Name)
 
 	floVersion := cl.FLOVersion()
 	if dryRun {
-		fmt.Fprintf(os.Stderr, "[phase 36] would server-side-apply FLO operator manifest (%s) + Gateway API/GIE/BNK CRDs + GatewayClass\n", floVersion)
+		fmt.Fprintf(os.Stderr, "[phase 36] would server-side-apply FLO operator manifest (%s) + Gateway API/GIE/BNK CRDs + GatewayClasses (f5-gateway-class, %s-gatewayclass)\n", floVersion, cl.Metadata.Name)
 		if st != nil {
 			st.Set("FLO_RELEASE_NAME", FLOReleaseName)
 			st.Set("FLO_VERSION", floVersion)
 			st.Set("FLO_NAMESPACE", FLONamespace)
 		}
 		return nil
+	}
+
+	if cl != nil && cl.Metadata.Name != "" {
+		_ = applyManifestBytes(ctx, clients, renderClusterCAIssuer(cl.Metadata.Name), true)
 	}
 
 	var data []byte
@@ -148,7 +167,7 @@ func Phase36FLO(ctx context.Context, cl *intent.Cluster, st *state.State, client
 
 	gwClassBytes := renderClusterGatewayClass(cl.Metadata.Name)
 	if err := applyManifestBytes(ctx, clients, gwClassBytes, true); err != nil {
-		return fmt.Errorf("phase36: applying GatewayClass %s-gatewayclass: %w", cl.Metadata.Name, err)
+		return fmt.Errorf("phase36: applying GatewayClasses (f5-gateway-class, %s-gatewayclass): %w", cl.Metadata.Name, err)
 	}
 
 	if clients.Dynamic == nil {

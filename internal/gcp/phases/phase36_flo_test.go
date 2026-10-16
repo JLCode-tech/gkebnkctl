@@ -29,20 +29,21 @@ func TestPhase36FLO_LiveMode_NilClientsErrors(t *testing.T) {
 }
 
 // TestFLOCRDs_IncludesAllFiveContractCRDs proves the CRD wait list matches
-// docs/SPEC-go-tracer.md §3 Phase36 exactly.
+// docs/SPEC-go-tracer.md §3 Phase36 plus the 6 BNK 2.4 Gateway CRDs.
 func TestFLOCRDs_IncludesAllFiveContractCRDs(t *testing.T) {
 	want := map[string]bool{
-		"cneinstances.k8s.f5.com":           false,
-		"f5-spk-vlans.k8s.f5net.com":        false,
-		"f5-spk-staticroutes.k8s.f5net.com": false,
-		"f5-spk-egresses.k8s.f5net.com":     false,
-		"licenses.k8s.f5net.com":            false,
+		"cneinstances.k8s.f5.com":            false,
+		"infras.gateway.k8s.f5.com":          false,
+		"l2networks.gateway.k8s.f5.com":      false,
+		"l3networks.gateway.k8s.f5.com":      false,
+		"gatewaysettings.gateway.k8s.f5.com": false,
+		"egressgateways.gateway.k8s.f5.com":  false,
+		"backends.gateway.k8s.f5.com":        false,
+		"f5-spk-vlans.k8s.f5net.com":         false,
+		"f5-spk-staticroutes.k8s.f5net.com":  false,
+		"f5-spk-egresses.k8s.f5net.com":      false,
+		"licenses.k8s.f5net.com":             false,
 	}
-	// The five contract CRDs are waited for across TWO lists: floCRDs (shipped
-	// by FLO's own manifest, waited in Phase36) and floInstalledCRDs (created
-	// by FLO's crd-installer only after Phase38 applies the CNEInstance, waited
-	// in Phase38). What matters is that every kind is covered somewhere before
-	// a phase applies a CR against it.
 	for _, c := range append(append([]string{}, floCRDs...), floInstalledCRDs...) {
 		if _, ok := want[c]; ok {
 			want[c] = true
@@ -52,6 +53,19 @@ func TestFLOCRDs_IncludesAllFiveContractCRDs(t *testing.T) {
 		if !found {
 			t.Errorf("CRD %s is waited for by neither floCRDs (%v) nor floInstalledCRDs (%v)", crd, floCRDs, floInstalledCRDs)
 		}
+	}
+}
+
+func TestRenderClusterGatewayClass_IncludesCanonicalAndClusterNamed(t *testing.T) {
+	raw := string(renderClusterGatewayClass("my-gke"))
+	if !strings.Contains(raw, "name: f5-gateway-class") {
+		t.Errorf("expected f5-gateway-class in rendered GatewayClasses, got:\n%s", raw)
+	}
+	if !strings.Contains(raw, "name: my-gke-gatewayclass") {
+		t.Errorf("expected my-gke-gatewayclass in rendered GatewayClasses, got:\n%s", raw)
+	}
+	if !strings.Contains(raw, "controllerName: f5.com/f5-cne-system-f5-cne-controller") {
+		t.Errorf("expected controllerName f5.com/f5-cne-system-f5-cne-controller, got:\n%s", raw)
 	}
 }
 

@@ -22,7 +22,7 @@ type Options struct {
 	// whose controllerName starts with "f5.com/".
 	GatewayClassName string
 	// ZoneByNetwork maps a VLAN name to the availability zone of its subnet.
-	// On AWS the 2.4 controller groups TMMs per zone and only counts pools
+	// On GKE the 2.4 controller groups TMMs per zone and only counts pools
 	// that carry one, so gkebnkctl fills this from cluster.yaml when it can.
 	ZoneByNetwork map[string]string
 	// SingleSelfIP keeps each self-IP pool at exactly the 2.3 address. The
@@ -114,7 +114,7 @@ func (t *translator) loadNADs() {
 // nadForInterface maps a 2.3 trunk interface ("1.1") to the NAD name.
 func (t *translator) nadForInterface(iface string) (string, bool) {
 	parts := strings.Split(iface, ".")
-	if len(parts) != 2 {
+	if len(parts) != 2 || parts[0] != "1" {
 		return "", false
 	}
 	n, err := strconv.Atoi(parts[1])
@@ -179,7 +179,7 @@ func (t *translator) vlans() {
 			t.warn("F5SPKVlan %s has no selfip_v4s: network %s gets no ipamRefs", name, name)
 		}
 		if zone == "" {
-			t.warn("F5SPKVlan %s: no availability zone known for its pool; on AWS the 2.4 controller only counts zoned pools (pass --config so gkebnkctl reads network.dataPath)", name)
+			t.warn("F5SPKVlan %s: no availability zone known for its pool; on GKE the 2.4 controller only counts zoned pools (pass --config so gkebnkctl reads network.dataPath)", name)
 		}
 		ipamName := name + "-selfip"
 		t.addIpam(ipamName, pools)
