@@ -1,293 +1,247 @@
-# Performance Benchmarking & BNK Forge Guide
+# AI Inference Benchmarking & Proxy Shootout Guide
 
-`gkebnkctl` includes a built-in dataplane benchmarking subsystem (`gkebnkctl benchmark`) and control-plane integration with **BNK Forge** (`gkebnkctl forge`). Together, they enable repeatable wire-speed L4/L7 throughput, latency percentile, and GenAI token/TTFT measurements against F5 BIG-IP Next for Kubernetes (BNK) 2.4 on Google Kubernetes Engine (GKE).
+`gkebnkctl` provides an enterprise-grade AI performance benchmarking engine tailored for **F5 BIG-IP Next for Kubernetes (BNK)** on Google Kubernetes Engine (GKE). It drives real-world and synthetic LLM inference workloads using NVIDIA's [`aiperf`](https://github.com/triton-inference-server/perf_analyzer) tool directly from an in-VPC GCE test jumphost VM, measures critical GenAI metrics (TTFT, ITL, token throughput, and prefix cache hit rates), and pushes telemetry into [BNK Forge](https://github.com/f5devcentral/bnk-forge) for real-time visualization and multi-proxy shootout analysis.
 
 ---
 
-## 1. Architecture Overview
+## 1. Why Benchmark F5 BNK for AI?
 
-To avoid public internet latency, NAT hairpins, or local laptop bandwidth limits, `gkebnkctl benchmark` executes load generators directly from the **dual-NIC GCE Jumphost** (`10.30.0.200`) provisioned in Phase 15.
+Modern GenAI inference serving imposes unique demands on networking infrastructure:
 
-- **Control Channel:** `gkebnkctl` connects from the operator workstation to `nic0` (`main` VPC) on the GCE jumphost over **Google Cloud Identity-Aware Proxy (IAP) SSH** (`gcloud compute ssh --tunnel-through-iap`).
-- **Dataplane Channel:** The jumphost's secondary interface (`nic1`, `10.30.0.200`) sits directly on the `external` dataplane VPC (`10.30.0.0/24`, MTU `8896`) alongside the TMM `ext-vlan` self-IPs and Gateway VIPs (`10.30.0.100`–`10.30.0.117`).
-- **Zero-Hop Wire Path:** Load traffic flows from jumphost `nic1` (`--interface 10.30.0.200`) across the Google Andromeda VPC fabric directly into the TMM `host-device` interface (`ens5`/`eth1`) on `tmm-pool`.
+- **Time to First Token (TTFT)**: High connection setup latency or proxy buffer bloat directly degrades conversational AI responsiveness.
+- **Inter-Token Latency (ITL)**: Streaming Server-Sent Events (SSE) require zero packet jitter and high-efficiency TCP window management.
+- **Prompt Prefix Caching**: Reusing common prompt prefixes (e.g., system instructions, few-shot examples) in vLLM / SGLang drastically cuts TTFT, provided the ingress layer supports intelligent request routing and sticky session affinity.
+- **Line-Rate Throughput**: When serving multi-tenant LLM clusters across tens of concurrent users, traditional software proxies (Envoy, NGINX, HAProxy) often become CPU-bottlenecked by user-space context switches. F5 BNK TMM (Traffic Management Microkernel) uses dedicated GKE Datapath V2 multi-networking interfaces (`host-device` NADs and PCI passthrough) to deliver predictable, microsecond-level proxy latencies.
+
+`gkebnkctl` makes benchmarking push-button: zero manual `aiperf` script writing, zero public exposure of private VIP endpoints, and automated multi-proxy comparative shootouts.
+
+---
+
+## 2. Benchmarking Architecture
+
+Because F5 BNK's Gateway VIP lives on an isolated, non-routable external data-plane VPC (`10.30.0.0/24`), external workstations cannot hit the VIP directly. `gkebnkctl` solves this with a secure bidirectional architecture:
 
 ```mermaid
 flowchart LR
-  subgraph Workstation["Operator Workstation"]
-    CLI["gkebnkctl benchmark / forge"]
-  end
-
-  subgraph GCP["Google Cloud Project"]
-    IAP["Cloud IAP Tunnel\n(tcp:22)"]
-
-    subgraph ExtVPC["External Dataplane VPC (10.30.0.0/24 · MTU 8896)"]
-      JH["GCE Jumphost (nic0: 10.60.0.x Main · nic1: 10.30.0.200 Ext · wrk · hey · ghz · iperf3 · ab)"]
-      TMM["tmm-pool Node (f5-tmm · nic1 host-device ext-nad · VIPs: 10.30.0.100–.117)"]
+    subgraph Operator["Operator Workstation"]
+        direction TB
+        UI["Forge Web UI (:3000)<br/>Dashboard & Sweeps"]
+        Server["Forge Server (:8000)<br/>Dispatcher & Telemetry DB"]
+        Daemon["gkebnkctl daemon<br/>Persistent Agent Listener"]
+        UI --> Server
+        Server <--> Daemon
     end
 
-    subgraph MainVPC["Main VPC / Pod Network (10.66.0.0/16)"]
-      Daemon["benchmark-daemon Pod\n(In-Cluster Continuous Runner)"]
-      Backends["Backend Pods (agent-pool)\nnginx · echo · grpc · vllm"]
+    subgraph VPC["GCP Private Data Plane"]
+        direction TB
+        IAP["IAP / SSH Tunnel<br/>(Jumphost Tunnel)"]
+        JH["In-VPC GCE Jumphost<br/>(aiperf Runner: 10.30.0.200)"]
+        IAP --> JH
     end
-  end
 
-  subgraph Forge["BNK Forge Control Plane"]
-    ForgeAPI["BNK Forge REST API\n/api/v1/clusters\n/api/v1/benchmarks"]
-  end
+    subgraph Ingress["F5 BNK Data Plane (External VPC: 10.30.0.0/24)"]
+        direction TB
+        VIP["Gateway VIP: 10.30.0.100:80<br/>(Host: gkebnkctl-aiinference.local)"]
+        TMM["TMM Microkernel (host-device)<br/>Prefix Routing & Rate Limiting"]
+        VIP --> TMM
+    end
 
-  CLI -->|"gcloud compute ssh\n--tunnel-through-iap"| IAP --> JH
-  JH -->|"L4/L7 Load (HTTP/HTTPS/gRPC/TCP/UDP)\nSource: 10.30.0.200"| TMM
-  TMM -->|"VXLAN vxlan100 / Pod Route"| Backends
-  CLI -.->|"--push / ingest"| ForgeAPI
-  Daemon -.->|"Periodic Heartbeat & Metrics"| ForgeAPI
+    subgraph Serving["Inference Cluster (GKE)"]
+        direction TB
+        vLLM[("vLLM Model Serving<br/>Llama-3.1-8B GPU Pod")]
+        EPP[("Prefill & Decode Endpoints<br/>Prometheus /metrics")]
+    end
+
+    Daemon -->|Secure Command Tunnel| IAP
+    JH -->|L7 SSE Inference Stream| VIP
+    TMM -->|Inference Forwarding| vLLM
+    TMM -->|Disaggregated Routing| EPP
+    Daemon -.->|Scrape Prometheus Metrics| EPP
+```
+
+### Architecture Highlights
+1. **Workstation Daemon**: `gkebnkctl benchmark daemon` runs locally on the operator workstation and maintains a persistent WebSocket connection with 15-second heartbeats to Forge.
+2. **In-VPC Execution**: Benchmark commands are dispatched over IAP / SSH to the GCE Jumphost VM (or via an in-cluster probe pod when `GKEBNKCTL_PROBE_IN_CLUSTER=1` is active), keeping the BNK VIP private inside the external VPC.
+3. **In-Network Driver**: The dual-NIC GCE Jumphost VM attaches directly to the external data-plane VPC (`10.30.0.200`), generating high-concurrency traffic directly against the TMM Gateway VIP.
+4. **Header Injection**: The runner automatically injects required Gateway API headers (`Host: gkebnkctl-aiinference.local`) to match Kubernetes `HTTPRoute` rules.
+5. **Real-Time GenAI Scrapes**: Prometheus `/metrics` are scraped before and after each run to measure exact prefix-cache hit rates and KV-cache pool utilization.
+
+---
+
+## 3. Command Suite Reference
+
+The `gkebnkctl benchmark` command family covers the full lifecycle of AI performance validation:
+
+| Command | Primary Flags | Purpose |
+|---|---|---|
+| `benchmark setup` | `-f <cluster.yaml>`, `--preflight`, `--daemon` | Verifies `aiperf >= 0.10.0` on jumphost, registers SSH AccessMethod, BenchmarkAgent, and Target in Forge. |
+| `benchmark daemon` | `-f <cluster.yaml>`, `--forge-agent-token`, `--heartbeat-interval` | Runs the persistent WebSocket listener to receive and execute dispatched benchmark tasks from Forge UI. |
+| `benchmark run` | `-f <cluster.yaml>`, `--scenario`, `--scenarios`, `--proxies` | Executes a benchmark run directly via CLI (single run, smoke preset, native Forge scenario, or multi-proxy shootout). |
+| `benchmark list` | `-o json` | Lists all available native Forge scenarios and built-in smoke presets. |
+| `benchmark status` | `-f <cluster.yaml>`, `-w <workspace>` | Inspects jumphost readiness, `aiperf` version, Forge linkage, and discovered targets. |
+
+---
+
+## 4. Built-in Smoke Presets (`--scenarios`)
+
+For rapid health validation and quick sanity checks, `gkebnkctl` includes 4 built-in smoke presets accessible via the `--scenarios` flag:
+
+```bash
+# Run a single preset
+gkebnkctl benchmark run -f cluster.yaml --scenarios latency
+
+# Run multiple presets sequentially
+gkebnkctl benchmark run -f cluster.yaml --scenarios latency,throughput,streaming
+
+# Run all 4 presets
+gkebnkctl benchmark run -f cluster.yaml --scenarios all
+```
+
+| Preset Name | Concurrency | Num Requests | ISL (Input Tokens) | OSL (Output Tokens) | Streaming | Primary Focus |
+|---|:---:|:---:|:---:|:---:|:---:|---|
+| `latency` | 1 | 50 | 512 | 128 | Yes | Baseline TTFT and single-stream latency without queuing. |
+| `throughput` | 32 | 500 | 512 | 128 | No | Maximum sustained request and token throughput under heavy saturation. |
+| `long-context` | 4 | 50 | 4096 | 512 | Yes | Memory bandwidth, KV cache expansion, and long-context decode performance. |
+| `streaming` | 8 | 200 | 512 | 256 | Yes | Mid-load conversational streaming with Server-Sent Events (SSE). |
+
+---
+
+## 5. Native Forge Scenarios (`--scenario`)
+
+For exhaustive performance benchmarking and characterization, `gkebnkctl` implements the full native Forge benchmark engine (WS-C1/WS-C2). Each scenario automatically expands into an ordered sequence of child runs (e.g. concurrency sweeps, multi-turn phases, or multi-round burst probes).
+
+```bash
+# Run the baseline concurrency sweep
+gkebnkctl benchmark run -f cluster.yaml --scenario baseline
+
+# Run prefix-cache evaluation followed by real-world Mooncake trace replay
+gkebnkctl benchmark run -f cluster.yaml --scenario prefix-cache,mooncake
+```
+
+### Scenario Catalog
+
+| Key | Scenario Name | Concurrency Sweep | ISL / OSL | Workload Pattern | Key Metric Validated |
+|---|---|---|---|---|---|
+| `baseline` | Baseline | 50, 100, 150, 200 | 500 / 128 | Synthetic chat completions; $rc = \max(c \times 5, 20)$. | TTFT and ITL curve across increasing concurrency. |
+| `high-concurrency` | High Concurrency | 150, 200, 250, 300 | 5000–10000 / 128 | Heavy prompt pairs: (150, 5k), (200, 7k), (250, 9k), (300, 10k). | Proxy connection management under massive payload sizes. |
+| `mixed-workload` | Mixed Workload | 50, 100, 150, 200 | Multi-phase | 3 phases: Warmup ($c=50$), Short (ISL 500), Long (ISL 600 with prefix prompts). | Dynamic queue scheduling and adaptation. |
+| `multi-turn` | Multi-Turn | 50, 100, 150, 200 | 500 / 128 | 4 turns: Turn 1 (no prefix), Turns 2–4 with growing prefix length (500, 1000, 1500). | Chat session persistence and incremental prefix caching. |
+| `prefix-cache` | Prefix Cache | 150, 200, 250, 300 | Heavy pairs | 80% shared prefix (length 4k–8k tokens) across 20 prompt pools. | KV-cache hit rate and TTFT drop on cached prompts. |
+| `bimodal` | Bimodal Distribution | 50, 100, 150, 200 | Bimodal distribution | 70% short prompts (ISL 300 / OSL 64), 30% long prompts (ISL 4000 / OSL 256). | Head-of-line blocking prevention in proxy queues. |
+| `sustained-load` | Sustained Load | 50, 100, 150, 200, 250 | 1500±300 / 128 | Endurance test: $rc = c \times 10$ (up to 2,500 requests per step). | Long-term memory stability and steady-state throughput. |
+| `burst-recovery` | Burst Recovery | Alternating 200 / 25 | Bimodal / 256 | 5 consecutive rounds: Burst phase ($c=200, 400$ reqs) followed by Probe ($c=25, 50$ reqs). | Speed of latency recovery after sudden traffic spikes. |
+| `mooncake` | Mooncake Trace | Open-loop trace | Production trace | Replay of KVCache Mooncake tool-agent production trace with 0.80x time-dilation. | Real-world production traffic resilience. |
+
+> [!TIP]
+> **Cold Cache Resets (`--reset-cache`)**: When running consecutive scenarios like `baseline,prefix-cache`, pass `--reset-cache` to trigger an automated cold-redeploy of the inference backend between scenario keys. This guarantees that KV-cache state does not bleed between runs.
+
+---
+
+## 6. Multi-Proxy Shootout Mode (`--proxies`)
+
+The **Multi-Proxy Shootout** evaluates comparative performance by running identical synthetic or trace workloads against F5 BNK and alternative ingress architectures deployed side-by-side in the same GKE cluster:
+
+```mermaid
+flowchart LR
+    Client([In-VPC GCE Jumphost<br/>aiperf Runner])
+
+    subgraph Proxies["Proxy Architectures Under Test"]
+        BNK["F5 BNK (TMM)<br/>host-device / External VPC"]
+        Envoy["Envoy Gateway<br/>Internal LoadBalancer"]
+        HAProxy["HAProxy Ingress<br/>Internal LoadBalancer"]
+        NGINX["NGINX Ingress<br/>Internal LoadBalancer"]
+        NodePort["Direct Pod IP<br/>(Direct Baseline)"]
+    end
+
+    Backend[("vLLM Model Server<br/>Llama-3.1-8B GPU Pod")]
+
+    Client -->|Benchmark Run 1| BNK --> Backend
+    Client -->|Benchmark Run 2| Envoy --> Backend
+    Client -->|Benchmark Run 3| HAProxy --> Backend
+    Client -->|Benchmark Run 4| NGINX --> Backend
+    Client -->|Benchmark Run 5| NodePort --> Backend
+```
+
+### Running a Shootout
+```bash
+gkebnkctl benchmark run -f cluster.yaml \
+  --proxies f5-bnk,envoy,haproxy,nodeport \
+  --scenario baseline \
+  --model meta-llama/Llama-3.1-8B-Instruct
+```
+
+### How Shootout Works
+1. When `--proxies` includes non-BNK proxies (e.g. `envoy`, `haproxy`), `gkebnkctl` tags the Forge `BenchmarkTarget` with `proxy_expose=internal-nlb` and points to the target Kubernetes Service.
+2. The benchmark engine executes the scenario sweep against each proxy front-end in sequence.
+3. With `--direct-pod-ip <IP>`, an un-proxied `nodeport` baseline run is included to isolate proxy overhead from raw inference execution.
+4. Results are tagged by proxy type (`proxy=f5-bnk`, `proxy=envoy`, etc.) and rendered side-by-side in Forge's comparative analytics view.
+
+---
+
+## 7. GenAI Metrics & Prometheus Scraping
+
+Beyond standard HTTP response codes and raw round-trip latency, `gkebnkctl` captures deep GenAI inference telemetry:
+
+| Metric | Description | Source |
+|---|---|---|
+| `ttft_p50_ms` / `p90` / `p95` / `p99` | Time to First Token percentiles (ms). | `aiperf` streaming timestamps |
+| `itl_p50_ms` / `p95` / `p99` | Inter-Token Latency percentiles (ms per token chunk). | `aiperf` SSE chunk delta |
+| `output_tokens_per_sec` | Total output tokens delivered divided by elapsed duration. | `aiperf` output token count |
+| `prefix_cache_hit_rate` | Ratio of prompt tokens serviced from GPU KV memory cache (0.0 to 1.0). | Scraped Prometheus delta |
+| `prefill_worker_utilization` | Average GPU KV memory cache allocated on prefill workers. | Scraped Prometheus gauge |
+| `decode_worker_utilization` | Average GPU KV memory cache allocated on decode workers. | Scraped Prometheus gauge |
+
+### Configuring Prometheus Scrapes
+```bash
+# Scrape vLLM pods through Kubernetes API pod proxy
+gkebnkctl benchmark run -f cluster.yaml --scenario prefix-cache \
+  --metrics-pod-selector app=vllm \
+  --metrics-namespace default \
+  --metrics-port 8000 \
+  --genai-out /tmp/genai-results.json
+
+# Scrape disaggregated prefill/decode endpoints via Jumphost curl
+gkebnkctl benchmark run -f cluster.yaml --scenario prefix-cache \
+  --metrics-url prefill=http://10.50.0.11:8000/metrics \
+  --metrics-url decode=http://10.50.0.12:8000/metrics
 ```
 
 ---
 
-## 2. Provisioning Jumphost Load Generators (`benchmark setup`)
+## 8. Synthetic Mode (`--synthetic`) for CI/CD
 
-Before running your first benchmark on a newly deployed cluster, install the load-testing toolchain on the GCE jumphost:
+To test benchmark pipelines, Forge linkages, and dashboard reporting without provisioning expensive GPU instances:
 
 ```bash
-# Preview the installation commands without executing over IAP SSH
-gkebnkctl benchmark setup -f cluster.yaml --dry-run
-
-# Install wrk, hey, apache2-utils (ab), ghz, iperf3, and jq on the GCE jumphost
-gkebnkctl benchmark setup -f cluster.yaml
+gkebnkctl benchmark run -f cluster.yaml --synthetic --scenario baseline
 ```
 
-### Installed Toolchain
-
-| Tool | Protocol Coverage | Primary Use Case |
-| :--- | :--- | :--- |
-| `wrk` | HTTP / HTTPS | High-throughput multi-threaded HTTP pipelining and RPS saturation |
-| `hey` | HTTP / HTTPS | Rate-limited (`--rate`) HTTP latency distribution (`p50`, `p90`, `p95`, `p99`) |
-| `ab` | HTTP / HTTPS | ApacheBench baseline single-threaded connection testing |
-| `ghz` | gRPC (HTTP/2) | Protobuf / gRPC unary and streaming load testing across `GRPCRoute` |
-| `iperf3` | TCP / UDP (L4) | Multi-stream L4 bandwidth (Gbps), retransmits, jitter, and packet-loss testing |
+In synthetic mode, `gkebnkctl` simulates a realistic vLLM `Llama-3-8B` inference endpoint (`llm-d-inference-sim`), generating complete TTFT, ITL, and token throughput telemetry while running entirely on standard CPU node pools.
 
 ---
 
-## 3. Running Dataplane Benchmarks (`benchmark run`)
+## 9. Step-by-Step Operator Runbook
 
-`gkebnkctl benchmark run` automatically resolves the GCE jumphost instance, source IP (`10.30.0.200`), and default Gateway VIP (`10.30.0.100`) from `cluster.yaml` and `.gkebnkctl/<cluster>/state.env`.
+### Scenario A: Operator Web UI Driven Session
+1. **Pre-stage Jumphost**:
+   ```bash
+   gkebnkctl benchmark setup -f cluster.yaml --forge-user admin --forge-pass changeme
+   ```
+2. **Start Daemon on Workstation**:
+   ```bash
+   gkebnkctl benchmark daemon -f cluster.yaml --forge-user admin --forge-pass changeme
+   ```
+3. Open `http://localhost:3000` (Forge Web UI), navigate to **Benchmarks** → **Run Benchmark**, select the Jumphost Agent, choose `prefix-cache`, and click **Start**.
 
-### HTTP L7 Throughput & Latency (`wrk` / `hey`)
-
+### Scenario B: Fully Automated CLI Sweep for Comparative Benchmarks
 ```bash
-# Run a 30-second HTTP benchmark with wrk (default tool for HTTP)
+# 1. Verify environment
+gkebnkctl benchmark status -f cluster.yaml
+
+# 2. Run head-to-head proxy shootout
 gkebnkctl benchmark run -f cluster.yaml \
-  --protocol http \
-  --vip 10.30.0.100 \
-  --port 80 \
-  --path / \
-  --duration 30s \
-  --concurrency 64 \
-  --threads 4
-
-# Run a rate-limited HTTP benchmark with hey and emit structured JSON
-gkebnkctl benchmark run -f cluster.yaml \
-  --protocol http \
-  --tool hey \
-  --vip 10.30.0.100 \
-  --host echo.example.com \
-  --duration 60s \
-  --concurrency 50 \
-  --rate 2000 \
-  -o json
+  --proxies f5-bnk,envoy,haproxy \
+  --scenario baseline,prefix-cache \
+  --run-label proxy-shootout \
+  --genai-out /tmp/shootout.json
 ```
-
-### HTTPS TLS Termination Benchmark
-
-```bash
-gkebnkctl benchmark run -f cluster.yaml \
-  --protocol https \
-  --vip 10.30.0.100 \
-  --port 443 \
-  --host secure.example.com \
-  --duration 30s \
-  --concurrency 64
-```
-
-### gRPC HTTP/2 Multiplexing (`ghz`)
-
-Pair with the `grpc-loadbalance` scenario (`10.30.0.102`):
-
-```bash
-# Deploy the gRPC scenario backend + GRPCRoute first
-gkebnkctl scenarios run grpc-loadbalance -f cluster.yaml
-
-# Drive gRPC load from the GCE jumphost
-gkebnkctl benchmark run -f cluster.yaml \
-  --protocol grpc \
-  --tool ghz \
-  --vip 10.30.0.102 \
-  --port 9000 \
-  --proto-service grpc.health.v1.Health/Check \
-  --duration 30s \
-  --concurrency 32
-```
-
-### L4 TCP & UDP Throughput (`iperf3`)
-
-```bash
-# TCP bandwidth test against an L4Route VIP
-gkebnkctl benchmark run -f cluster.yaml \
-  --protocol tcp \
-  --tool iperf3 \
-  --vip 10.30.0.103 \
-  --port 5201 \
-  --duration 30s \
-  --concurrency 4
-
-# UDP datagram throughput and packet-loss test
-gkebnkctl benchmark run -f cluster.yaml \
-  --protocol udp \
-  --tool iperf3 \
-  --vip 10.30.0.104 \
-  --port 5201 \
-  --duration 30s \
-  --payload-size 1400
-```
-
-### Pushing Results to BNK Forge
-
-Append `--push` (or configure `forge.enabled: true` in `cluster.yaml`) to upload run metrics automatically:
-
-```bash
-gkebnkctl benchmark run -f cluster.yaml \
-  --protocol http \
-  --vip 10.30.0.100 \
-  --duration 30s \
-  --concurrency 128 \
-  --suite gke-hostdev-baseline \
-  --push
-```
-
----
-
-## 4. GenAI & LLM Gateway Telemetry Ingestion (`benchmark ingest`)
-
-When benchmarking AI Gateway scenarios (`ai-token-counting`, `ai-semantic-cache`, `ai-inference-e2e`, or the [`examples/vertex-agent-demo/`](../examples/vertex-agent-demo/) stack), `gkebnkctl benchmark ingest` normalizes and uploads LLM-specific performance metrics—**Time to First Token (TTFT)**, **Time Per Output Token (TPOT)**, **Tokens/sec**, and **Semantic Cache Hit Rate**—to BNK Forge.
-
-### Ingest from a JSON Artifact
-
-```bash
-gkebnkctl benchmark ingest -f cluster.yaml \
-  --input artifacts/genai-benchmark.json \
-  --suite vertex-ai-gateway
-```
-
-### Ingest via CLI Flags
-
-```bash
-gkebnkctl benchmark ingest -f cluster.yaml \
-  --model gemini-2.5-flash \
-  --backend vertex-ai-epp \
-  --concurrency 16 \
-  --prompt-tokens 512 \
-  --output-tokens 256 \
-  --ttft-p50 42.5 \
-  --ttft-p95 88.0 \
-  --ttft-p99 124.3 \
-  --tpot-p50 11.2 \
-  --tpot-p95 16.8 \
-  --tpot-p99 22.1 \
-  --tokens-per-sec 1420.5 \
-  --requests-per-sec 5.55 \
-  --total-requests 500 \
-  --failed-requests 0 \
-  --duration-sec 90 \
-  --cache-hit-rate 0.35
-```
-
----
-
-## 5. In-Cluster Benchmark Daemon (`benchmark daemon`)
-
-For continuous regression tracking or long-running soak tests, `gkebnkctl benchmark daemon` deploys an in-cluster Deployment (`f5-utils/gkebnkctl-benchmark-daemon`) that periodically probes configured Gateway VIPs and streams telemetry to BNK Forge.
-
-```bash
-# Preview the daemon Kubernetes manifests
-gkebnkctl benchmark daemon start -f cluster.yaml --dry-run
-
-# Start the in-cluster benchmark daemon (default 5m interval)
-gkebnkctl benchmark daemon start -f cluster.yaml --interval 5m
-
-# Check daemon pod status and recent probe runs
-gkebnkctl benchmark daemon status -f cluster.yaml
-
-# Stream live daemon logs
-gkebnkctl benchmark daemon logs -f cluster.yaml --follow
-
-# Stop and remove the daemon Deployment
-gkebnkctl benchmark daemon stop -f cluster.yaml
-```
-
----
-
-## 6. Inspecting Historical Runs (`benchmark list` & `benchmark status`)
-
-```bash
-# List recent benchmark runs recorded locally and in BNK Forge
-gkebnkctl benchmark list -f cluster.yaml --limit 20
-
-# Inspect detailed latency percentiles and throughput for a specific run ID
-gkebnkctl benchmark status <run-id> -f cluster.yaml -o json
-```
-
----
-
-## 7. BNK Forge Control-Plane Integration (`gkebnkctl forge`)
-
-**BNK Forge** (`bnk-forge`) is the centralized multi-cluster fleet registry and benchmark aggregator for `awsbnkctl`, `azrbnkctl`, and `gkebnkctl`.
-
-### Declarative Configuration in `cluster.yaml`
-
-When `forge.enabled: true` is set in `cluster.yaml`:
-- **Phase 29 (`forge-register`)** automatically registers the GKE cluster during `gkebnkctl up`.
-- **`gkebnkctl down`** automatically unregisters the cluster before deleting infrastructure.
-
-```yaml
-forge:
-  enabled: true
-  url: https://bnk-forge.example.com
-  clusterId: gke-bnk-hostdev-01
-```
-
-You can also supply the Forge URL and API token via environment variables:
-- `BNK_FORGE_URL` — Base URL of the BNK Forge server
-- `BNK_FORGE_TOKEN` — Bearer token for authenticating to BNK Forge
-
-### Manual Lifecycle Commands
-
-```bash
-# Register an existing GKE BNK cluster with BNK Forge
-gkebnkctl forge register -f cluster.yaml --forge-url https://bnk-forge.example.com
-
-# Check registration status, last heartbeat, and cluster metadata
-gkebnkctl forge status -f cluster.yaml
-
-# Trigger a coordinated benchmark suite and wait for completion
-gkebnkctl forge benchmark -f cluster.yaml \
-  --suite standard \
-  --protocol http \
-  --duration 30s \
-  --concurrency 64 \
-  --wait
-
-# Clean up stale benchmark jobs/pods without unregistering the cluster
-gkebnkctl forge cleanup -f cluster.yaml
-
-# Unregister the cluster from BNK Forge
-gkebnkctl forge unregister -f cluster.yaml
-```
-
----
-
-## 8. GKE Tuning Notes for Maximum Throughput
-
-1. **Dual-MTU Separation (`8896` vs `1460`)** — The `external` and `internal` Compute Engine VPCs are provisioned with an `8896` byte jumbo-frame wire MTU so VXLAN encapsulation (`vxlan100`, 50-byte header) never fragments on the underlay, while `bnk.tmmMtu: "1460"` matches Google Cloud's native 1460-byte VPC path MTU inside TMM.
-2. **Source Interface Pinning (`--interface 10.30.0.200`)** — Always drive traffic from the jumphost's secondary interface (`nic1`, `10.30.0.200`) on `bnkhd-ext`. `gkebnkctl benchmark run` and `gkebnkctl test traffic` automatically bind to `JUMPHOST_BNK_EXT_NIC_IP`.
-3. **Node Sizing for Multi-NIC (`tmm-pool`)** — Google Compute Engine requires at least 4 vCPUs (`e2-standard-4` minimum; `e2-standard-8` or `c3-standard-8` recommended) to attach 3 VPC network interfaces (`main`, `external`, `internal`) to each `tmm-pool` node.
