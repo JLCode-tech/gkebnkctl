@@ -555,7 +555,8 @@ func ProbeArchive(path string) (*ReleaseManifest, error) {
 	if fi.IsDir() {
 		for _, candidate := range []string{"manifest.yaml", "release-manifest.yaml"} {
 			manifestFile := filepath.Join(path, candidate)
-			if data, err := os.ReadFile(manifestFile); err == nil { // #nosec G304 -- path is operator-supplied local directory
+			// #nosec G304 -- path is operator-supplied local directory
+			if data, err := os.ReadFile(manifestFile); err == nil {
 				return ParseReleaseManifest(data)
 			}
 		}

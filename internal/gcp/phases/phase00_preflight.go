@@ -47,6 +47,7 @@ func Phase00Preflight(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 		cl.Metadata.Name, cl.Metadata.Project, cl.Metadata.Zone)
 
 	if cl.Bnk.JwtPath != "" {
+		// #nosec G304 -- JwtPath is user-configured license path from cluster.yaml
 		if data, err := os.ReadFile(cl.Bnk.JwtPath); err == nil {
 			if _, chkErr := jwt.CheckPreflight(string(data), os.Stderr); chkErr != nil {
 				fmt.Fprintf(os.Stderr, "[phase 00] note: JWT parsing failed (%v) - skipping claims inspection\n", chkErr)

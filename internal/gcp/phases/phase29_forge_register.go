@@ -54,7 +54,8 @@ func Phase29ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	if st != nil {
 		kubeconfigPath := st.KubeconfigPath()
 		if kubeconfigPath != "" {
-			if b, err := os.ReadFile(kubeconfigPath); err == nil { // #nosec G304 -- workspace managed path
+			// #nosec G304 -- workspace managed path
+			if b, err := os.ReadFile(kubeconfigPath); err == nil {
 				kubeconfigBytes = b
 			}
 		}
