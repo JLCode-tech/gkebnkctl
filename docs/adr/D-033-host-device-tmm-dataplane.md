@@ -83,7 +83,7 @@ create-before-delete, so the window is unavoidable; it is logged loudly at
 - Ingress and egress now both work correctly, simultaneously, on the same egress-steered pod — the primary goal.
 - The new routes only affect TMM-*originated* traffic to the specific node CIDRs they target; the cluster-wide `route-cluster-pods` route and all other traffic are untouched.
 - Phase51 has a hard ordering dependency: it must run after Phase50 (needs `vxlan100` to exist) and after Phase41 (its routes are deliberately more-specific overrides of `route-cluster-pods`, not a replacement for it).
-- Phase51 cannot be fully rendered offline / in `--dry-run`: the VTEP is only knowable by querying a live cluster, so `up --dry-run` only announces intent for this phase (see `hack/ci-local.sh`'s `[phase 51]` assertion, which guards that the phase stays wired into the `up` sequence even though its real effect can't be dry-run-verified).
+- Phase51 cannot be fully rendered offline / in `--dry-run`: the VTEP is only knowable by querying a live cluster, so `up --dry-run` only announces intent for this phase (see `scripts/ci-local.sh`'s `[phase 51]` assertion, which guards that the phase stays wired into the `up` sequence even though its real effect can't be dry-run-verified).
 - Adds one more privileged ephemeral discovery pod per agent-pool node during `up`, mirroring Phase25's existing discovery-pod pattern (no new privilege model introduced).
 
 ## Alternatives considered

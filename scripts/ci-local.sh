@@ -203,8 +203,8 @@ fi
 echo
 
 # 11. Docs spellcheck (cspell)
-echo "-> npx --yes cspell@8 --no-progress --config cspell.json \"docs/**/*.md\" \"README.md\" \"CONTRIBUTING.md\""
-if npx --yes cspell@8 --no-progress --config cspell.json "docs/**/*.md" "README.md" "CONTRIBUTING.md"; then
+echo "-> npx --yes cspell@8 --no-progress --config .github/cspell.json \"docs/**/*.md\" \"README.md\" \".github/CONTRIBUTING.md\""
+if npx --yes cspell@8 --no-progress --config .github/cspell.json "docs/**/*.md" "README.md" ".github/CONTRIBUTING.md"; then
 	printf "%b[PASS]%b cspell docs spellcheck\n" "$GREEN" "$NC"
 	((passed_gates++))
 else

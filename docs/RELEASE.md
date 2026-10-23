@@ -40,7 +40,7 @@ Every release attaches a canonical `checksums.txt` containing SHA256 hashes for 
 ### 1. Run Pre-Release Quality Gates Locally
 ```bash
 # Run all local CI gates
-bash hack/ci-local.sh
+bash scripts/ci-local.sh
 
 # Or run the make target
 make ci-local

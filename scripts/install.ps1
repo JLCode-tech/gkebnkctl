@@ -9,10 +9,10 @@
   binary are then removed, leaving only the installed binary.
 
   Run it directly:
-    irm https://raw.githubusercontent.com/JLCode-tech/gkebnkctl/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/JLCode-tech/gkebnkctl/main/scripts/install.ps1 | iex
 
   Or with a specific version / install args:
-    $env:VERSION='v1.0.0'; irm https://raw.githubusercontent.com/JLCode-tech/gkebnkctl/main/install.ps1 | iex
+    $env:VERSION='v1.0.0'; irm https://raw.githubusercontent.com/JLCode-tech/gkebnkctl/main/scripts/install.ps1 | iex
 #>
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'

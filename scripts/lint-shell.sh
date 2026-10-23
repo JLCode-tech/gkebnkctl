@@ -9,7 +9,7 @@ shopt -s nullglob
 SCRIPTS=()
 while IFS= read -r file; do
   [[ -f "$file" ]] && SCRIPTS+=("$file")
-done < <(git ls-files '*.sh'; find scripts hack -maxdepth 2 -type f -name '*.sh' 2>/dev/null | sort -u)
+done < <(git ls-files '*.sh'; find scripts -maxdepth 2 -type f -name '*.sh' 2>/dev/null | sort -u)
 
 # Deduplicate while preserving order.
 UNIQUE_SCRIPTS=()

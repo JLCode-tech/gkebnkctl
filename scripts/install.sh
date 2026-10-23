@@ -1,7 +1,7 @@
 #!/bin/sh
 # gkebnkctl installer for Linux + macOS.
 #
-#   curl -fsSL https://raw.githubusercontent.com/JLCode-tech/gkebnkctl/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/JLCode-tech/gkebnkctl/main/scripts/install.sh | sh
 #
 # Downloads a release archive for this OS/arch, verifies its checksum, extracts
 # the binary, and hands off to the binary's own `gkebnkctl install` (which copies
@@ -21,7 +21,7 @@ os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$os" in
   linux) os=linux ;;
   darwin) os=darwin ;;
-  *) echo "gkebnkctl: unsupported OS '$os' (Linux/macOS only; on Windows use install.ps1)" >&2; exit 1 ;;
+  *) echo "gkebnkctl: unsupported OS '$os' (Linux/macOS only; on Windows use scripts/install.ps1)" >&2; exit 1 ;;
 esac
 arch=$(uname -m)
 case "$arch" in
