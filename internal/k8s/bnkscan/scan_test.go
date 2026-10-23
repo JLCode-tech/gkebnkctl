@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -147,11 +148,6 @@ var testGVRs = map[string]schema.GroupVersionResource{
 	"SecPolicy":                SecPolicyGVR,
 	"NetPolicy":                NetPolicyGVR,
 	"F5BigPersistenceProfile":  PersistenceProfileGVR,
-	"F5BigDnsCache":            DNSCacheGVR,
-	"F5BigDnsApp":              DNSAppGVR,
-	"F5BigDnsZone":             DNSZoneGVR,
-	"F5BigCnatPolicy":          CGNATPolicyGVR,
-	"F5DiameterEndpoint":       DiameterEndpointGVR,
 	"GatewayClass":             GatewayClassGVR,
 	"Gateway":                  GatewayGVR,
 	"HTTPRoute":                HTTPRouteGVR,
@@ -160,6 +156,18 @@ var testGVRs = map[string]schema.GroupVersionResource{
 	"BNKNetPolicy":             BNKNetPolGVR,
 	"F5SPKVlan":                VlanGVR,
 	"F5SPKEgress":              EgressGVR,
+	"F5BigDnsCache":            DNSCacheGVR,
+	"F5BigDnsApp":              DNSAppGVR,
+	"F5BigDnsZone":             DNSZoneGVR,
+	"F5BigCnatPolicy":          CGNATPolicyGVR,
+	"F5DiameterEndpoint":       DiameterEndpointGVR,
+	"AppPolicy":                AppPolicyGVR,
+	"AITenant":                 AITenantGVR,
+	"AICredential":             AICredentialGVR,
+	"AIProvider":               AIProviderGVR,
+	"AIModel":                  AIModelGVR,
+	"AIGatewayProfile":         AIGatewayProfileGVR,
+	"AIGateway":                AIGatewayGVR,
 }
 
 func newFakeDynamic(t *testing.T, fixture string) *dynamicfake.FakeDynamicClient {
@@ -450,5 +458,197 @@ status:
 	cache := idx.DNSCaches[0]
 	if cache.Name != "edge-resolver" || !cache.Ready {
 		t.Errorf("DNSCache = %+v", cache)
+	}
+}
+
+func TestScan_AIGateway241Chain(t *testing.T) {
+	fixtureAI := fixture24 + `
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: apppolicies.gateway.k8s.f5.com}
+spec: {group: gateway.k8s.f5.com}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: aitenants.inference.k8s.f5.com}
+spec: {group: inference.k8s.f5.com}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: aicredentials.inference.k8s.f5.com}
+spec: {group: inference.k8s.f5.com}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: aiproviders.inference.k8s.f5.com}
+spec: {group: inference.k8s.f5.com}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: aimodels.inference.k8s.f5.com}
+spec: {group: inference.k8s.f5.com}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: aigatewayprofiles.inference.k8s.f5.com}
+spec: {group: inference.k8s.f5.com}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: aigateways.inference.k8s.f5.com}
+spec: {group: inference.k8s.f5.com}
+---
+apiVersion: inference.k8s.f5.com/v1alpha1
+kind: AITenant
+metadata: {name: bedrock-tenant, namespace: default}
+spec: {}
+status:
+  conditions:
+  - {type: Programmed, status: "True"}
+---
+apiVersion: inference.k8s.f5.com/v1alpha1
+kind: AICredential
+metadata: {name: bedrock-cred, namespace: default}
+spec: {}
+status:
+  conditions:
+  - {type: Programmed, status: "True"}
+---
+apiVersion: inference.k8s.f5.com/v1alpha1
+kind: AIProvider
+metadata: {name: bedrock-provider, namespace: default}
+spec: {}
+status:
+  conditions:
+  - {type: Programmed, status: "True"}
+---
+apiVersion: inference.k8s.f5.com/v1alpha1
+kind: AIModel
+metadata: {name: claude-sonnet-4-5, namespace: default}
+spec: {}
+status:
+  conditions:
+  - {type: Programmed, status: "True"}
+---
+apiVersion: inference.k8s.f5.com/v1alpha1
+kind: AIGatewayProfile
+metadata: {name: bedrock-profile, namespace: default}
+spec: {}
+status:
+  conditions:
+  - {type: Programmed, status: "True"}
+---
+apiVersion: inference.k8s.f5.com/v1alpha1
+kind: AIGateway
+metadata: {name: bedrock-gw, namespace: default}
+spec: {}
+status:
+  conditions:
+  - {type: Programmed, status: "True"}
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: AppPolicy
+metadata: {name: bedrock-app-policy, namespace: default}
+spec: {}
+status:
+  conditions:
+  - {type: Programmed, status: "True"}
+`
+	dyn := newFakeDynamic(t, fixtureAI)
+	idx, err := Scan(context.Background(), dyn, k8sfake.NewClientset(controllerDeployment(1)), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.AITenants) != 1 || len(idx.AICredentials) != 1 || len(idx.AIProviders) != 1 ||
+		len(idx.AIModels) != 1 || len(idx.AIGatewayProfiles) != 1 || len(idx.AIGateways) != 1 || len(idx.AppPolicies) != 1 {
+		t.Fatalf("unexpected AI Gateway 2.4.1 chain counts: tenants=%d creds=%d provs=%d models=%d profiles=%d gws=%d apppol=%d",
+			len(idx.AITenants), len(idx.AICredentials), len(idx.AIProviders),
+			len(idx.AIModels), len(idx.AIGatewayProfiles), len(idx.AIGateways), len(idx.AppPolicies))
+	}
+	if !idx.Ready() {
+		t.Errorf("expected Ready()=true, got problems: %v", idx.Problems())
+	}
+	var text strings.Builder
+	WriteReport(&text, idx)
+	for _, want := range []string{
+		"AppPolicy (1)",
+		"AITenant (1)",
+		"AICredential (1)",
+		"AIProvider (1)",
+		"AIModel (1)",
+		"AIGatewayProfile (1)",
+		"ok   default/bedrock-profile",
+		"AIGateway (1)",
+	} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("report missing %q:\n%s", want, text.String())
+		}
+	}
+
+	// Edge case: AIGatewayProfile with Programmed=False must fail Ready() and surface in Problems()
+	unprogFixture := strings.Replace(fixtureAI,
+		"kind: AIGatewayProfile\nmetadata: {name: bedrock-profile, namespace: default}\nspec: {}\nstatus:\n  conditions:\n  - {type: Programmed, status: \"True\"}",
+		"kind: AIGatewayProfile\nmetadata: {name: bedrock-profile, namespace: default}\nspec: {}\nstatus:\n  conditions:\n  - {type: Programmed, status: \"False\", reason: NotPrepared}",
+		1,
+	)
+	dynUnprog := newFakeDynamic(t, unprogFixture)
+	idxUnprog, err := Scan(context.Background(), dynUnprog, k8sfake.NewClientset(controllerDeployment(1)), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idxUnprog.Ready() {
+		t.Errorf("expected Ready()=false when AIGatewayProfile is Programmed=False")
+	}
+	if !strings.Contains(strings.Join(idxUnprog.Problems(), "\n"), "AIGatewayProfile default/bedrock-profile") {
+		t.Errorf("expected AIGatewayProfile problem in Problems(), got %v", idxUnprog.Problems())
+	}
+
+	// Verify BNK 2.4.1 f5-aigateway-console and f5-aigateway-clickhouse in f5-cne-system are detected
+	one := int32(1)
+	cs241 := k8sfake.NewClientset(
+		controllerDeployment(1),
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "f5-aigateway-console", Namespace: DefaultControllerNamespace},
+			Spec:       appsv1.DeploymentSpec{Replicas: &one},
+			Status:     appsv1.DeploymentStatus{AvailableReplicas: 1},
+		},
+		&appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{Name: "f5-aigateway-clickhouse", Namespace: DefaultControllerNamespace},
+			Status:     appsv1.StatefulSetStatus{ReadyReplicas: 1},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "data-f5-aigateway-clickhouse-0", Namespace: DefaultControllerNamespace},
+			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+		},
+	)
+	idx241, err := Scan(context.Background(), dyn, cs241, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx241.AIGatewayPosture == nil {
+		t.Fatalf("expected AIGatewayPosture to be non-nil")
+	}
+	if !idx241.AIGatewayPosture.F5AIGatewayFound || !idx241.AIGatewayPosture.F5AIGatewayReady {
+		t.Errorf("expected F5AIGatewayFound and F5AIGatewayReady for f5-aigateway-console in %s, got %+v", DefaultControllerNamespace, idx241.AIGatewayPosture)
+	}
+	if !idx241.AIGatewayPosture.ClickHouseReady || idx241.AIGatewayPosture.ClickHousePVCsBound != 1 {
+		t.Errorf("expected ClickHouseReady=true and ClickHousePVCsBound=1 for f5-aigateway-clickhouse in %s, got %+v", DefaultControllerNamespace, idx241.AIGatewayPosture)
+	}
+
+	// Verify BNK 2.4.1 cluster with inference CRDs installed (before CR instances exist) sets Enabled=true
+	fixtureCRDOnly := fixture24 + `
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: aigatewayprofiles.inference.k8s.f5.com}
+spec: {group: inference.k8s.f5.com}
+`
+	idxCRDOnly, err := Scan(context.Background(), newFakeDynamic(t, fixtureCRDOnly), k8sfake.NewClientset(controllerDeployment(1)), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idxCRDOnly.AIGatewayPosture == nil || !idxCRDOnly.AIGatewayPosture.Enabled {
+		t.Errorf("expected AIGatewayPosture.Enabled=true when aigatewayprofiles.inference.k8s.f5.com CRD is served without instances, got %+v", idxCRDOnly.AIGatewayPosture)
 	}
 }

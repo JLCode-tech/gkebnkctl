@@ -54,6 +54,8 @@ func Phase38CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 		ExtPCI:          st.Get("TMM_EXT_PCI"),
 		IntPCI:          st.Get("TMM_INT_PCI"),
 		ImageRegistry:   cl.Bnk.ImageRegistry,
+		Telemetry:       cl.Bnk.Telemetry,
+		AIGateway:       cl.Bnk.AIGateway != nil && cl.Bnk.AIGateway.Enabled,
 	})
 	if err != nil {
 		return fmt.Errorf("phase38: rendering CNEInstance: %w", err)

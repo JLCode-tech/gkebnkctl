@@ -2,8 +2,10 @@ package phases
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
@@ -138,9 +140,87 @@ func PhaseDownNetworks(ctx context.Context, cl *intent.Cluster, _ *state.State, 
 		}
 	}
 
+	// Best-effort cleanup of unattached GCE persistent disks created for BNK PVCs
+	// (e.g., VictoriaMetrics, loki, otel, dssm, cwc, aigateway) in this cluster's zone.
+	if err := deleteOrphanedBNKDisks(ctx, clients, project, cl.Metadata.Zone, cl.Metadata.Name); err != nil {
+		return fmt.Errorf("down: orphaned-pvc-disks: %w", err)
+	}
+
 	fmt.Fprintf(os.Stderr, "[down] main-vpc done — shared dataplane VPCs %s/%s left untouched\n",
 		cl.Network.External.VPC, cl.Network.Internal.VPC)
 	return nil
+}
+
+func deleteOrphanedBNKDisks(ctx context.Context, c *gcp.Clients, project, zone, clusterName string) error {
+	if c == nil || c.Disks == nil || project == "" || zone == "" {
+		return nil
+	}
+	disks, err := c.Disks.ListAll(ctx, project, zone)
+	if err != nil {
+		if isNotFound(err) || isPermissionDenied(err) {
+			return nil
+		}
+		return fmt.Errorf("list disks in %s/%s: %w", project, zone, err)
+	}
+	for _, d := range disks {
+		if d == nil || len(d.GetUsers()) > 0 {
+			continue
+		}
+		diskName := d.GetName()
+		if !strings.HasPrefix(diskName, "pvc-") {
+			continue
+		}
+		if !isBNKPVCDisk(d, clusterName) {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "[down] disks: deleting orphaned BNK PVC disk %s\n", diskName)
+		op, derr := c.Disks.Delete(ctx, &computepb.DeleteDiskRequest{
+			Project: project,
+			Zone:    zone,
+			Disk:    diskName,
+		})
+		if derr != nil {
+			if isNotFound(derr) || isPermissionDenied(derr) {
+				continue
+			}
+			return fmt.Errorf("delete disk %s: %w", diskName, derr)
+		}
+		if op != nil {
+			if werr := insertAndWait(ctx, op); werr != nil && !isNotFound(werr) {
+				return fmt.Errorf("waiting for disk %s delete: %w", diskName, werr)
+			}
+		}
+	}
+	return nil
+}
+
+func isBNKPVCDisk(d *computepb.Disk, clusterName string) bool {
+	if d == nil {
+		return false
+	}
+	if labels := d.GetLabels(); clusterName != "" && labels != nil {
+		if labels["goog-gke-cluster"] == clusterName {
+			return true
+		}
+	}
+	desc := d.GetDescription()
+	if desc == "" {
+		return false
+	}
+	var meta map[string]string
+	if err := json.Unmarshal([]byte(desc), &meta); err == nil {
+		switch meta["kubernetes.io/created-for/pvc/namespace"] {
+		case "f5-bnk", "f5-cne-system", "f5-cne-core", "f5-utils", "aigateway":
+			return true
+		}
+		pvcName := meta["kubernetes.io/created-for/pvc/name"]
+		if strings.HasPrefix(pvcName, "data-f5-dssm-db-") ||
+			pvcName == "cluster-wide-controller" ||
+			strings.HasPrefix(pvcName, "data-f5-aigateway-") {
+			return true
+		}
+	}
+	return false
 }
 
 func teardownDataplaneResources(ctx context.Context, project, region, vpc, cluster string, clients *gcp.Clients) error {
@@ -285,9 +365,22 @@ func stripStuckFinalizersWithClient(ctx context.Context, dyn dynamic.Interface) 
 		"f5-spk-staticroutes.k8s.f5net.com",
 		"f5-spk-egresses.k8s.f5net.com",
 		"f5-spk-snatpools.k8s.f5net.com",
+		"f5-big-dns-caches.k8s.f5net.com",
+		"f5-big-persistence-profiles.k8s.f5net.com",
 		"infras.gateway.k8s.f5.com",
 		"gatewaysettings.gateway.k8s.f5.com",
 		"egressgateways.gateway.k8s.f5.com",
+		"l4routes.gateway.k8s.f5.com",
+		"l4globalpolicies.gateway.k8s.f5.com",
+		"apppolicies.gateway.k8s.f5.com",
+		"airoutepolicies.inference.k8s.f5.com",
+		"airoutes.inference.k8s.f5.com",
+		"aigateways.inference.k8s.f5.com",
+		"aigatewayprofiles.inference.k8s.f5.com",
+		"aimodels.inference.k8s.f5.com",
+		"aiproviders.inference.k8s.f5.com",
+		"aicredentials.inference.k8s.f5.com",
+		"aitenants.inference.k8s.f5.com",
 		"analyzers.k8s.f5.com",
 		"cnecontrollers.k8s.f5.com",
 		"cneinstances.k8s.f5.com",
@@ -308,6 +401,7 @@ func stripStuckFinalizersWithClient(ctx context.Context, dyn dynamic.Interface) 
 		"f5-bnk-instance",
 		"f5-utils",
 		"f5-bnk",
+		"aigateway",
 		"bnk-demo",
 		"egress-test",
 	}
@@ -330,6 +424,18 @@ func stripStuckFinalizersWithClient(ctx context.Context, dyn dynamic.Interface) 
 			}
 		}
 	}
+
+	tenantGVR := schema.GroupVersionResource{Group: "inference.k8s.f5.com", Version: "v1alpha1", Resource: "aitenants"}
+	if list, err := dyn.Resource(tenantGVR).List(tctx, metav1.ListOptions{}); err == nil && list != nil {
+		for i := range list.Items {
+			item := list.Items[i]
+			if len(item.GetFinalizers()) == 0 {
+				continue
+			}
+			unstructured.RemoveNestedField(item.Object, "metadata", "finalizers")
+			_, _ = dyn.Resource(tenantGVR).Update(tctx, &item, metav1.UpdateOptions{})
+		}
+	}
 }
 
 func crdsToGVRs(crds []string) []schema.GroupVersionResource {
@@ -347,7 +453,7 @@ func crdsToGVRs(crds []string) []schema.GroupVersionResource {
 			continue
 		}
 		version := "v1"
-		if group == "gateway.k8s.f5.com" {
+		if group == "gateway.k8s.f5.com" || group == "inference.k8s.f5.com" {
 			version = "v1alpha1"
 		}
 		gvrs = append(gvrs, schema.GroupVersionResource{Group: group, Version: version, Resource: resource})

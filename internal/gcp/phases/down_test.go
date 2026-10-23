@@ -250,9 +250,22 @@ func TestStripStuckFinalizersWithClient(t *testing.T) {
 		"f5-spk-staticroutes.k8s.f5net.com",
 		"f5-spk-egresses.k8s.f5net.com",
 		"f5-spk-snatpools.k8s.f5net.com",
+		"f5-big-dns-caches.k8s.f5net.com",
+		"f5-big-persistence-profiles.k8s.f5net.com",
 		"infras.gateway.k8s.f5.com",
 		"gatewaysettings.gateway.k8s.f5.com",
 		"egressgateways.gateway.k8s.f5.com",
+		"l4routes.gateway.k8s.f5.com",
+		"l4globalpolicies.gateway.k8s.f5.com",
+		"apppolicies.gateway.k8s.f5.com",
+		"airoutepolicies.inference.k8s.f5.com",
+		"airoutes.inference.k8s.f5.com",
+		"aigateways.inference.k8s.f5.com",
+		"aigatewayprofiles.inference.k8s.f5.com",
+		"aimodels.inference.k8s.f5.com",
+		"aiproviders.inference.k8s.f5.com",
+		"aicredentials.inference.k8s.f5.com",
+		"aitenants.inference.k8s.f5.com",
 		"analyzers.k8s.f5.com",
 		"cnecontrollers.k8s.f5.com",
 		"cneinstances.k8s.f5.com",
@@ -294,5 +307,62 @@ func TestStripStuckFinalizersWithClient(t *testing.T) {
 	}
 	if len(updated.GetFinalizers()) != 0 {
 		t.Errorf("expected finalizers to be stripped, got %v", updated.GetFinalizers())
+	}
+}
+
+type fakeDisks struct {
+	disks       []*computepb.Disk
+	deleteCalls []string
+}
+
+func (f *fakeDisks) ListAll(_ context.Context, _, _ string) ([]*computepb.Disk, error) {
+	return f.disks, nil
+}
+
+func (f *fakeDisks) Delete(_ context.Context, req *computepb.DeleteDiskRequest, _ ...gax.CallOption) (*compute.Operation, error) {
+	f.deleteCalls = append(f.deleteCalls, req.GetDisk())
+	return nil, nil
+}
+
+func TestPhaseDownNetworks_DeletesOrphanedBNKPVCDisks(t *testing.T) {
+	cl := testCluster()
+	st := testState(t)
+	disks := &fakeDisks{
+		disks: []*computepb.Disk{
+			{
+				Name:        strPtr("pvc-bnk-dssm-0"),
+				Description: strPtr(`{"kubernetes.io/created-for/pvc/name":"data-f5-dssm-db-0","kubernetes.io/created-for/pvc/namespace":"f5-bnk"}`),
+			},
+			{
+				Name:        strPtr("pvc-bnk-cwc"),
+				Description: strPtr(`{"kubernetes.io/created-for/pvc/name":"cluster-wide-controller","kubernetes.io/created-for/pvc/namespace":"f5-utils"}`),
+			},
+			{
+				Name:        strPtr("pvc-attached-disk"),
+				Description: strPtr(`{"kubernetes.io/created-for/pvc/name":"data-f5-dssm-db-1","kubernetes.io/created-for/pvc/namespace":"f5-bnk"}`),
+				Users:       []string{"projects/my-gcp-project/zones/us-central1-a/instances/gke-node-1"},
+			},
+			{
+				Name:        strPtr("pvc-other-app"),
+				Description: strPtr(`{"kubernetes.io/created-for/pvc/name":"postgres-data","kubernetes.io/created-for/pvc/namespace":"other-team"}`),
+			},
+		},
+	}
+	clients := &gcp.Clients{
+		Networks:    &fakeNetworks{existing: map[string]string{}},
+		Subnetworks: &fakeSubnetworks{existing: map[string]string{}},
+		Firewalls:   &fakeFirewalls{existing: map[string]string{}},
+		Routers:     &fakeRouters{existing: map[string]*computepb.Router{}},
+		Disks:       disks,
+	}
+
+	if err := PhaseDownNetworks(context.Background(), cl, st, clients, false); err != nil {
+		t.Fatalf("PhaseDownNetworks: %v", err)
+	}
+	if len(disks.deleteCalls) != 2 {
+		t.Fatalf("expected 2 orphaned BNK PVC disks deleted, got %v", disks.deleteCalls)
+	}
+	if disks.deleteCalls[0] != "pvc-bnk-dssm-0" || disks.deleteCalls[1] != "pvc-bnk-cwc" {
+		t.Errorf("unexpected deleted disks: %v", disks.deleteCalls)
 	}
 }

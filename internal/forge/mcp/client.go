@@ -4,9 +4,7 @@
 // json_response=True).
 //
 // Each Call performs a fresh initialize → notifications/initialized →
-// tools/call cycle, because the server is stateless. That's wasteful for
-// chatty workloads but acceptable for the gkebnkctl→forge handoff, which
-// makes one call per orchestration step.
+// tools/call cycle, because the server is stateless.
 package mcp
 
 import (
@@ -17,13 +15,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 )
 
-// ProtocolVersion is the MCP protocol revision gkebnkctl targets. The
-// forge MCP server (FastMCP) accepts any version it knows; updating this
-// is a deliberate compatibility decision, not a tracking concern.
+// ProtocolVersion is the MCP protocol revision gkebnkctl targets.
 const ProtocolVersion = "2024-11-05"
 
 // Client is a minimal MCP-over-HTTP client.
@@ -34,9 +31,7 @@ type Client struct {
 	idCounter atomic.Int64
 }
 
-// New returns a Client targeting the given MCP endpoint
-// (e.g. "http://localhost:8081/mcp/"). The trailing slash matches
-// FastMCP's default route.
+// New returns a Client targeting the given MCP endpoint (e.g. "http://localhost:8081/mcp/").
 func New(endpoint string, timeout time.Duration) *Client {
 	return &Client{
 		endpoint: endpoint,
@@ -45,7 +40,6 @@ func New(endpoint string, timeout time.Duration) *Client {
 	}
 }
 
-// rpcReq is one JSON-RPC 2.0 request.
 type rpcReq struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int64           `json:"id,omitempty"`
@@ -53,7 +47,6 @@ type rpcReq struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
-// rpcResp is one JSON-RPC 2.0 response.
 type rpcResp struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int64           `json:"id"`
@@ -72,7 +65,6 @@ func (e *rpcErr) Error() string {
 }
 
 // ToolCallResult is the shape of an MCP tools/call result.
-// content is normally a single text block containing JSON.
 type ToolCallResult struct {
 	Content []struct {
 		Type string `json:"type"`
@@ -82,8 +74,6 @@ type ToolCallResult struct {
 }
 
 // Text returns the concatenated text of all text-typed content blocks.
-// Most forge MCP tools return a single JSON-stringified payload in one
-// text block.
 func (r ToolCallResult) Text() string {
 	var b bytes.Buffer
 	for _, c := range r.Content {
@@ -94,138 +84,155 @@ func (r ToolCallResult) Text() string {
 	return b.String()
 }
 
-// CallTool performs init+notification+tools/call and returns the tool's
-// result. Errors are flattened: transport errors, JSON-RPC errors, and
-// MCP-reported tool errors (isError=true) all surface as a Go error.
-//
-// args may be nil to call a tool with no arguments.
-func (c *Client) CallTool(ctx context.Context, name string, args map[string]any) (ToolCallResult, error) {
-	if name == "" {
-		return ToolCallResult{}, errors.New("tool name is required")
+// UnmarshalToolJSON unmarshals the concatenated text blocks of the tool call result as JSON into dst.
+func (r ToolCallResult) UnmarshalToolJSON(dst any) error {
+	return json.Unmarshal([]byte(r.Text()), dst)
+}
+
+// CallTool performs init+notification+tools/call and returns the tool's result.
+func (c *Client) CallTool(ctx context.Context, name string, args any) (ToolCallResult, error) {
+	if c.endpoint == "" {
+		return ToolCallResult{}, errors.New("mcp: endpoint is empty")
 	}
 
-	// 1) initialize
-	initParams := map[string]any{
+	// 1) initialize handshake
+	initParams, _ := json.Marshal(map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": c.clientID, "version": "1"},
-	}
-	if _, err := c.rpc(ctx, "initialize", initParams); err != nil {
-		return ToolCallResult{}, fmt.Errorf("mcp initialize: %w", err)
+		"clientInfo": map[string]string{
+			"name":    c.clientID,
+			"version": "1.0",
+		},
+	})
+	_, sessionID, err := c.post(ctx, "initialize", initParams, true, "")
+	if err != nil {
+		return ToolCallResult{}, fmt.Errorf("mcp init %s: %w", c.endpoint, err)
 	}
 
-	// 2) notifications/initialized (no response expected; fire and ignore)
-	_ = c.notify(ctx, "notifications/initialized", nil)
+	// 2) initialized notification
+	_ = c.notify(ctx, "notifications/initialized", nil, sessionID)
 
 	// 3) tools/call
-	if args == nil {
-		args = map[string]any{}
-	}
-	params := map[string]any{"name": name, "arguments": args}
-	raw, err := c.rpc(ctx, "tools/call", params)
+	toolParams, err := json.Marshal(map[string]any{
+		"name":      name,
+		"arguments": args,
+	})
 	if err != nil {
-		return ToolCallResult{}, fmt.Errorf("mcp tools/call %s: %w", name, err)
+		return ToolCallResult{}, fmt.Errorf("marshal args: %w", err)
 	}
 
-	var out ToolCallResult
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return ToolCallResult{}, fmt.Errorf("decode tool result for %s: %w", name, err)
+	rawResult, _, err := c.post(ctx, "tools/call", toolParams, true, sessionID)
+	if err != nil {
+		return ToolCallResult{}, fmt.Errorf("mcp %s: %w", name, err)
 	}
-	if out.IsError {
-		return out, fmt.Errorf("mcp tool %s reported isError=true: %s", name, out.Text())
+
+	var res ToolCallResult
+	if err := json.Unmarshal(rawResult, &res); err != nil {
+		return ToolCallResult{}, fmt.Errorf("decode tool result: %w", err)
 	}
-	return out, nil
+	if res.IsError {
+		return res, fmt.Errorf("mcp tool %s returned error: %s", name, res.Text())
+	}
+	return res, nil
 }
 
-// UnmarshalToolJSON parses the JSON text the forge MCP tool returned into
-// the caller's target struct. Forge tools wrap their REST result in a
-// JSON-stringified text block; this is the canonical decode helper.
-func (r ToolCallResult) UnmarshalToolJSON(target any) error {
-	t := r.Text()
-	if t == "" {
-		return errors.New("tool returned empty content")
-	}
-	if err := json.Unmarshal([]byte(t), target); err != nil {
-		return fmt.Errorf("decode tool JSON: %w", err)
-	}
-	return nil
+func (c *Client) nextID() int64 {
+	return c.idCounter.Add(1)
 }
 
-func (c *Client) rpc(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	id := c.idCounter.Add(1)
-	body := rpcReq{JSONRPC: "2.0", ID: id, Method: method}
-	if params != nil {
-		p, err := json.Marshal(params)
-		if err != nil {
-			return nil, fmt.Errorf("marshal params: %w", err)
-		}
-		body.Params = p
+func (c *Client) post(ctx context.Context, method string, params json.RawMessage, needResp bool, sessionID string) (json.RawMessage, string, error) {
+	reqObj := rpcReq{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  params,
 	}
-	reqBytes, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+	if needResp {
+		reqObj.ID = c.nextID()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(reqBytes))
+	b, err := json.Marshal(reqObj)
 	if err != nil {
-		return nil, err
+		return nil, sessionID, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
 
-	resp, err := c.http.Do(req)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(b))
 	if err != nil {
-		return nil, fmt.Errorf("http: %w", err)
+		return nil, sessionID, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json, text/event-stream")
+	if sessionID != "" {
+		httpReq.Header.Set("Mcp-Session-Id", sessionID)
+	}
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, sessionID, err
 	}
 	defer resp.Body.Close()
 
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("http %d from MCP endpoint: %s", resp.StatusCode, truncate(string(respBytes), 400))
+	if sid := strings.TrimSpace(resp.Header.Get("Mcp-Session-Id")); sid != "" {
+		sessionID = sid
 	}
 
-	var rr rpcResp
-	if err := json.Unmarshal(respBytes, &rr); err != nil {
-		return nil, fmt.Errorf("decode rpc response: %w (body=%s)", err, truncate(string(respBytes), 200))
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, sessionID, err
 	}
-	if rr.Error != nil {
-		return nil, rr.Error
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, sessionID, fmt.Errorf("http %d: %s", resp.StatusCode, string(rawBody))
 	}
-	return rr.Result, nil
+
+	if !needResp {
+		return nil, sessionID, nil
+	}
+
+	var rpcRespObj rpcResp
+	if err := decodeRPCResponse(rawBody, &rpcRespObj); err != nil {
+		return nil, sessionID, fmt.Errorf("decode json-rpc: %w", err)
+	}
+	if rpcRespObj.Error != nil {
+		return nil, sessionID, rpcRespObj.Error
+	}
+	return rpcRespObj.Result, sessionID, nil
 }
 
-// notify sends a JSON-RPC notification (no id, no response expected).
-// We do a best-effort POST and intentionally do not parse the response —
-// errors are non-fatal because the spec allows transport to ignore them.
-func (c *Client) notify(ctx context.Context, method string, params any) error {
-	body := map[string]any{"jsonrpc": "2.0", "method": method}
-	if params != nil {
-		body["params"] = params
+func decodeRPCResponse(rawBody []byte, dst *rpcResp) error {
+	trimmed := bytes.TrimSpace(rawBody)
+	if len(trimmed) == 0 {
+		return errors.New("empty response body")
 	}
-	reqBytes, err := json.Marshal(body)
-	if err != nil {
-		return err
+	if err := json.Unmarshal(trimmed, dst); err == nil && (dst.JSONRPC != "" || len(dst.Result) > 0 || dst.Error != nil) {
+		return nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(reqBytes))
-	if err != nil {
-		return err
+	// Fallback: parse Server-Sent Events (text/event-stream) lines starting with "data:"
+	var lastValid *rpcResp
+	for _, line := range strings.Split(string(trimmed), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" {
+			continue
+		}
+		var candidate rpcResp
+		if err := json.Unmarshal([]byte(payload), &candidate); err == nil {
+			if len(candidate.Result) > 0 || candidate.Error != nil || candidate.JSONRPC != "" {
+				c := candidate
+				lastValid = &c
+			}
+		}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
+	if lastValid != nil {
+		*dst = *lastValid
+		return nil
 	}
-	_ = resp.Body.Close()
-	return nil
+	return json.Unmarshal(trimmed, dst)
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
+func (c *Client) notify(ctx context.Context, method string, params json.RawMessage, sessionID string) error {
+	_, _, err := c.post(ctx, method, params, false, sessionID)
+	return err
 }

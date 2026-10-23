@@ -194,10 +194,8 @@ func Phase29ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 		}
 		if !link.IsRegistered() || unregErr != nil {
 			// Fallback to REST (handles both registered IDs and pending links by name)
-			restErr := forge.UnregisterREST(ctx, restURL, link, creds)
-			if restErr == nil || !link.IsRegistered() {
-				_ = forge.RemoveLink(workspaceDir)
-			}
+			_ = forge.UnregisterREST(ctx, restURL, link, creds)
+			_ = forge.RemoveLink(workspaceDir)
 		}
 		if st != nil {
 			st.Delete("FORGE_REGISTERED")

@@ -1,7 +1,7 @@
 # Local config (copy cluster.yaml.example -> cluster.yaml and edit)
 cluster.yaml
-# Exception: the committed working example (see examples/host-device/).
-!examples/host-device/cluster.yaml
+# Exception: the committed working examples.
+!examples/*/cluster.yaml
 
 # Post-provision discovery output for the bash seed (regenerate with
 # bash-seed/bin/25-discover.sh). The Go binary's equivalent
@@ -26,7 +26,7 @@ forge_agent_token.json
 # Exception: an obvious, committed placeholder so `gkebnkctl validate` /
 # `up --dry-run` have something to point bnk.jwtPath at without a real
 # secret. Never put real subscription JWT content here.
-!examples/host-device/license.jwt
+!examples/*/license.jwt
 
 # Go build artifacts
 /gkebnkctl
@@ -62,6 +62,7 @@ opencode.json
 opencode.jsonc
 CLAUDE.md
 CLAUDE.local.md
+ACTIVE_CONTEXT.md
 docs/audits/
 docs/design/
 docs/spikes/

@@ -12,6 +12,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -40,7 +41,7 @@ func (r *SSHRunner) Run(ctx context.Context, cmd string, stdin io.Reader) (strin
 	return SSHRunViaIAPWithStdin(ctx, r.Opts.Region, r.Opts.InstanceID, keyPath, cmd, stdin)
 }
 
-// PodExecRunner implements Runner using in-process Kubernetes SPDY pod exec
+// PodExecRunner implements Runner using in-process Kubernetes WebSocket/SPDY pod exec
 // (no external kubectl binary dependency).
 type PodExecRunner struct {
 	Kubeconfig string
@@ -49,7 +50,7 @@ type PodExecRunner struct {
 	Container  string
 }
 
-// Run executes cmd inside the target pod via remotecommand.NewSPDYExecutor.
+// Run executes cmd inside the target pod via remotecommand WebSocket executor (with SPDY fallback).
 func (r *PodExecRunner) Run(ctx context.Context, cmd string, stdin io.Reader) (string, error) {
 	restCfg, clientset, err := loadKubeClient(r.Kubeconfig)
 	if err != nil {
@@ -68,6 +69,11 @@ func (r *PodExecRunner) Run(ctx context.Context, cmd string, stdin io.Reader) (s
 		container = probePodContainer()
 	}
 
+	shellCmd := cmd
+	if stdin != nil {
+		shellCmd = cmd + "; status=$?; exit $status"
+	}
+
 	req := clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(pod).
@@ -75,16 +81,24 @@ func (r *PodExecRunner) Run(ctx context.Context, cmd string, stdin io.Reader) (s
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: container,
-			Command:   []string{"sh", "-c", cmd},
+			Command:   []string{"sh", "-c", shellCmd},
 			Stdin:     stdin != nil,
 			Stdout:    true,
 			Stderr:    true,
 			TTY:       false,
 		}, scheme.ParameterCodec)
 
-	exec, err := remotecommand.NewSPDYExecutor(restCfg, "POST", req.URL())
+	spdyExec, err := remotecommand.NewSPDYExecutor(restCfg, "POST", req.URL())
 	if err != nil {
 		return "", fmt.Errorf("probe-exec spdy executor: %w", err)
+	}
+	exec := spdyExec
+	if wsExec, wsErr := remotecommand.NewWebSocketExecutor(restCfg, "GET", req.URL().String()); wsErr == nil {
+		if fbExec, fbErr := remotecommand.NewFallbackExecutor(wsExec, spdyExec, func(err error) bool {
+			return httpstream.IsUpgradeFailure(err) || httpstream.IsHTTPSProxyError(err)
+		}); fbErr == nil {
+			exec = fbExec
+		}
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -109,13 +123,32 @@ func resolveKubeconfigPath(explicit string) string {
 	patterns := []string{
 		"artifacts/kubeconfig",
 		"artifacts/kubeconfig.yaml",
+		".bnkctl/*/kubeconfig",
+		".awsbnkctl/*/kubeconfig",
+		".azrbnkctl/*/kubeconfig",
 		".gkebnkctl/*/kubeconfig",
+		"workspaces/*/.bnkctl/*/kubeconfig",
+		"workspaces/*/.awsbnkctl/*/kubeconfig",
+		"workspaces/*/.azrbnkctl/*/kubeconfig",
 		"workspaces/*/.gkebnkctl/*/kubeconfig",
 	}
 	for _, pat := range patterns {
-		if matches, _ := filepath.Glob(pat); len(matches) > 0 {
-			return matches[0]
+		matches, _ := filepath.Glob(pat)
+		if len(matches) == 0 {
+			continue
 		}
+		best := matches[0]
+		var bestMod time.Time
+		if fi, err := os.Stat(best); err == nil {
+			bestMod = fi.ModTime()
+		}
+		for _, m := range matches[1:] {
+			if fi, err := os.Stat(m); err == nil && fi.ModTime().After(bestMod) {
+				best = m
+				bestMod = fi.ModTime()
+			}
+		}
+		return best
 	}
 	return ""
 }

@@ -125,6 +125,16 @@ func Scan(ctx context.Context, dyn dynamic.Interface, cs kubernetes.Interface, o
 		{"F5BigDnsZone", "f5-big-dns-zones.k8s.f5net.com", DNSZoneGVR, trueIfPresent("Programmed"), &idx.DNSZones},
 		{"F5BigCnatPolicy", "f5-big-cnat-policies.k8s.f5net.com", CGNATPolicyGVR, trueIfPresent("Programmed"), &idx.CGNATPolicies},
 		{"F5DiameterEndpoint", "f5-diameter-endpoints.k8s.f5net.com", DiameterEndpointGVR, trueIfPresent("Programmed"), &idx.DiameterEndpoints},
+		{"AppPolicy", "apppolicies.gateway.k8s.f5.com", AppPolicyGVR, trueIfPresent("Accepted", "Programmed"), &idx.AppPolicies},
+		{"L4GlobalPolicy", "l4globalpolicies.gateway.k8s.f5.com", L4GlobalPolicyGVR, trueIfPresent("Accepted", "Programmed"), &idx.L4GlobalPolicies},
+		{"AITenant", "aitenants.inference.k8s.f5.com", AITenantGVR, trueIfPresent("Accepted", "Programmed"), &idx.AITenants},
+		{"AICredential", "aicredentials.inference.k8s.f5.com", AICredentialGVR, trueIfPresent("Accepted", "Programmed"), &idx.AICredentials},
+		{"AIProvider", "aiproviders.inference.k8s.f5.com", AIProviderGVR, trueIfPresent("Accepted", "Programmed"), &idx.AIProviders},
+		{"AIModel", "aimodels.inference.k8s.f5.com", AIModelGVR, trueIfPresent("Accepted", "Programmed"), &idx.AIModels},
+		{"AIGatewayProfile", "aigatewayprofiles.inference.k8s.f5.com", AIGatewayProfileGVR, trueIfPresent("Accepted", "Programmed"), &idx.AIGatewayProfiles},
+		{"AIRoute", "airoutes.inference.k8s.f5.com", AIRouteGVR, trueIfPresent("Accepted", "Programmed"), &idx.AIRoutes},
+		{"AIRoutePolicy", "airoutepolicies.inference.k8s.f5.com", AIRoutePolicyGVR, trueIfPresent("Accepted", "Programmed"), &idx.AIRoutePolicies},
+		{"AIGateway", "aigateways.inference.k8s.f5.com", AIGatewayGVR, trueIfPresent("Accepted", "Programmed"), &idx.AIGateways},
 	}
 	for _, s := range cnfSpecs {
 		// Only list if the CRD was confirmed served, or if CRDs couldn't be listed.
@@ -140,6 +150,12 @@ func Scan(ctx context.Context, dyn dynamic.Interface, cs kubernetes.Interface, o
 		}
 		for _, it := range items {
 			*s.dest = append(*s.dest, toObject(it, s.ready))
+		}
+	}
+	for _, dc := range idx.DNSCaches {
+		if dc.Ready {
+			idx.DNSResolverReady = true
+			break
 		}
 	}
 
@@ -184,8 +200,8 @@ func Scan(ctx context.Context, dyn dynamic.Interface, cs kubernetes.Interface, o
 	if cs != nil {
 		dep, err := cs.AppsV1().Deployments(opts.ControllerNamespace).Get(ctx, opts.ControllerName, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
-			altNS := "f5-cne-core"
-			if opts.ControllerNamespace == "f5-cne-core" {
+			altNS := "f5-bnk"
+			if opts.ControllerNamespace == "f5-bnk" {
 				altNS = "f5-cne-system"
 			}
 			if depAlt, errAlt := cs.AppsV1().Deployments(altNS).Get(ctx, opts.ControllerName, metav1.GetOptions{}); errAlt == nil {
@@ -213,9 +229,140 @@ func Scan(ctx context.Context, dyn dynamic.Interface, cs kubernetes.Interface, o
 		}
 	}
 
+	scanAIGatewayPosture(ctx, dyn, cs, servedCRDs, crdsListed, idx)
+
 	idx.MCP = DiscoverMCP(r)
 	sort.Strings(idx.Missing)
 	return idx, nil
+}
+
+func scanAIGatewayPosture(ctx context.Context, dyn dynamic.Interface, cs kubernetes.Interface, servedCRDs map[string]bool, crdsListed bool, idx *Index) {
+	p := &AIGatewayPosture{}
+	for _, dc := range idx.DNSCaches {
+		if dc.Name == "aigw-dns-resolver" {
+			p.AIGWDNSResolverPresent = true
+			if dc.Ready {
+				idx.DNSResolverReady = true
+			}
+		}
+	}
+	if len(idx.AITenants)+len(idx.AICredentials)+len(idx.AIProviders)+len(idx.AIModels)+len(idx.AIGatewayProfiles)+len(idx.AIGateways) > 0 || servedCRDs["aigateways.inference.k8s.f5.com"] || servedCRDs["aigatewayprofiles.inference.k8s.f5.com"] || servedCRDs["aitenants.inference.k8s.f5.com"] {
+		p.Enabled = true
+	}
+	if dyn != nil && (!crdsListed || servedCRDs["cneinstances.k8s.f5.com"]) {
+		func() {
+			defer func() { _ = recover() }()
+			if items, err := listAll(ctx, dyn, CNEInstanceGVR); err == nil {
+				for _, it := range items {
+					if en, ok, _ := unstructured.NestedBool(it.Object, "spec", "aiGateway", "enabled"); ok && en {
+						p.Enabled = true
+					}
+					if mEn, ok, _ := unstructured.NestedBool(it.Object, "spec", "aiGateway", "aiMetrics"); ok && mEn {
+						p.AIMetricsEnabled = true
+					} else if mEn, ok, _ := unstructured.NestedBool(it.Object, "spec", "aiGateway", "aiMetrics", "enabled"); ok && mEn {
+						p.AIMetricsEnabled = true
+					}
+				}
+			}
+		}()
+	}
+	if cs != nil {
+		if scs, err := cs.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{}); err == nil && scs != nil {
+			for _, sc := range scs.Items {
+				if sc.Annotations["storageclass.kubernetes.io/is-default-class"] == "true" ||
+					sc.Annotations["storageclass.beta.kubernetes.io/is-default-class"] == "true" {
+					p.DefaultStorageClass = sc.Name
+					break
+				}
+			}
+		}
+		if _, err := cs.CoreV1().Services("kube-system").Get(ctx, "kube-dns", metav1.GetOptions{}); apierrors.IsNotFound(err) {
+			p.KubeDNSAbsent = true
+		}
+		if ssets, err := cs.AppsV1().StatefulSets(idx.Controller.Namespace).List(ctx, metav1.ListOptions{}); err == nil && ssets != nil {
+			for _, ss := range ssets.Items {
+				if strings.Contains(ss.Name, "dssm-sentinel") && ss.Status.ReadyReplicas > 0 {
+					p.DSSMSentinelReady = true
+					break
+				}
+			}
+		}
+		if !p.DSSMSentinelReady {
+			if pods, err := cs.CoreV1().Pods(idx.Controller.Namespace).List(ctx, metav1.ListOptions{}); err == nil && pods != nil {
+				for _, pod := range pods.Items {
+					if strings.Contains(pod.Name, "dssm-sentinel") && pod.Status.Phase == corev1.PodRunning {
+						p.DSSMSentinelReady = true
+						break
+					}
+				}
+			}
+		}
+		aigwNamespaces := uniqueNonEmptyStrings(idx.Controller.Namespace, "f5-cne-system", "f5-bnk", "aigateway")
+		for _, ns := range aigwNamespaces {
+			for _, depName := range []string{"f5-aigateway-console", "f5-aigateway"} {
+				if dep, err := cs.AppsV1().Deployments(ns).Get(ctx, depName, metav1.GetOptions{}); err == nil && dep != nil {
+					p.Enabled = true
+					p.F5AIGatewayFound = true
+					p.F5AIGatewayDesired = 1
+					if dep.Spec.Replicas != nil {
+						p.F5AIGatewayDesired = *dep.Spec.Replicas
+					}
+					p.F5AIGatewayAvailable = dep.Status.AvailableReplicas
+					p.F5AIGatewayReady = p.F5AIGatewayDesired > 0 && p.F5AIGatewayAvailable >= p.F5AIGatewayDesired
+					break
+				}
+			}
+			if p.F5AIGatewayFound {
+				break
+			}
+		}
+		chNamespaces := uniqueNonEmptyStrings(idx.Controller.Namespace, "f5-cne-system", "f5-bnk", "f5-utils")
+		for _, ns := range chNamespaces {
+			if ssets, err := cs.AppsV1().StatefulSets(ns).List(ctx, metav1.ListOptions{}); err == nil && ssets != nil {
+				for _, ss := range ssets.Items {
+					if strings.Contains(ss.Name, "clickhouse") && ss.Status.ReadyReplicas > 0 {
+						p.ClickHouseReady = true
+						break
+					}
+				}
+			}
+			if pods, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{}); err == nil && pods != nil {
+				for _, pod := range pods.Items {
+					if strings.Contains(pod.Name, "clickhouse") && pod.Status.Phase == corev1.PodRunning {
+						p.ClickHouseReady = true
+						break
+					}
+				}
+			}
+			if pvcs, err := cs.CoreV1().PersistentVolumeClaims(ns).List(ctx, metav1.ListOptions{}); err == nil && pvcs != nil {
+				for _, pvc := range pvcs.Items {
+					if strings.Contains(pvc.Name, "clickhouse") && pvc.Status.Phase == corev1.ClaimBound {
+						p.ClickHousePVCsBound++
+					}
+				}
+			}
+		}
+	}
+	if p.Enabled || p.F5AIGatewayFound || p.AIGWDNSResolverPresent {
+		idx.AIGatewayPosture = p
+	}
+}
+
+func uniqueNonEmptyStrings(items ...string) []string {
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, s := range items {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 // listAll lists a GVR across every namespace.
@@ -273,6 +420,7 @@ func f5CRDGroups(ctx context.Context, dyn dynamic.Interface) ([]string, map[stri
 			LegacyPolicyGroup: BNKNetPolGVR,
 			DataPlaneGroup:    IRuleGVR,
 			FLOGroup:          CNEInstanceGVR,
+			InferenceF5Group:  AIGatewayProfileGVR,
 		} {
 			if _, err := dyn.Resource(gvr).List(ctx, metav1.ListOptions{Limit: 1}); err == nil {
 				seen[g] = true
@@ -423,17 +571,6 @@ func describe(c Condition) string {
 // not an error: FLO has not rendered it yet.
 func scanTMM(ctx context.Context, cs kubernetes.Interface, idx *Index) error {
 	ds, err := cs.AppsV1().DaemonSets(idx.TMM.Namespace).Get(ctx, idx.TMM.Name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		altNS := "f5-cne-core"
-		if idx.TMM.Namespace == "f5-cne-core" {
-			altNS = "f5-cne-system"
-		}
-		if dsAlt, errAlt := cs.AppsV1().DaemonSets(altNS).Get(ctx, idx.TMM.Name, metav1.GetOptions{}); errAlt == nil {
-			ds = dsAlt
-			err = nil
-			idx.TMM.Namespace = altNS
-		}
-	}
 	switch {
 	case apierrors.IsNotFound(err):
 		return nil

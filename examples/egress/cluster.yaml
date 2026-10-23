@@ -1,0 +1,90 @@
+# cluster.yaml — BNK transparent-egress demo cluster.
+#
+# Companion to examples/egress/README.md. Brings up a BNK cluster on GKE
+# to demonstrate transparent egress through the TMM dataplane.
+#
+# Quick start:
+#   gkebnkctl validate examples/egress/cluster.yaml
+#   gkebnkctl up -f examples/egress/cluster.yaml --dry-run
+#   gkebnkctl up -f examples/egress/cluster.yaml
+# then follow examples/egress/README.md to run the demo.
+
+apiVersion: gkebnkctl/v1
+kind: Cluster
+
+metadata:
+  name: bnk-egress
+  project: my-gcp-project
+  zone: us-central1-a
+  labels:
+    purpose: bnk-egress-demo
+
+pattern: host-device
+
+network:
+  main:
+    vpc: bnkhd-vpc
+    subnet: bnkhd-subnet
+    cidr: 10.60.0.0/24
+    podsRangeName: bnkhd-pods
+    podsCidr: 10.66.0.0/16
+    svcsRangeName: bnkhd-svcs
+    svcsCidr: 10.67.0.0/20
+
+  external:
+    vpc: bnkhd-ext
+    subnet: bnkhd-ext
+    cidr: 10.30.0.0/24
+    mtu: 8896
+    podsRangeName: tmm-ext-pods
+    podsCidr: 10.31.0.0/24
+    underlayCidr: 10.30.0.0/16
+
+  internal:
+    vpc: bnkhd-int
+    subnet: bnkhd-int
+    cidr: 10.50.0.0/24
+    mtu: 8896
+    podsRangeName: tmm-int-pods
+    podsCidr: 10.51.0.0/24
+
+  allowInternalCidr: 10.0.0.0/8
+  natGateways: true
+
+cluster:
+  kubernetesVersion: "1.35"
+  defaultPool:
+    machineType: e2-standard-4
+    nodeCount: 3
+  tmmPool:
+    name: tmm-pool
+    machineType: e2-standard-8
+    nodeCount: 1
+    maxPodsPerNode: 8
+  agentPool:
+    name: agent-pool
+    machineType: e2-standard-4
+    nodeCount: 1
+    maxPodsPerNode: 8
+
+bnk:
+  manifestVersion: "2.4.0-3.2882.0"
+  tmmMtu: "1460"
+  jwtPath: ./license.jwt
+  farSecret:
+    source: kubecontext
+    sourceContext: some-other-cluster
+    sourceNamespace: f5-cne-core
+
+egress:
+  testNamespace: bnk-demo
+
+# testing.jumphost simulates an external machine on the egress path for validation.
+testing:
+  jumphost:
+    enabled: true
+    machineType: e2-micro
+
+tags:
+  env: lab
+  purpose: bnk-egress-demo

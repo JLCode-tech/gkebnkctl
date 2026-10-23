@@ -27,49 +27,72 @@ SYMBOLS=(GOOGL AAPL MSFT NVDA AMZN META TSLA)
 # Target MCP pod or internal service URL
 MCP_URL="${MCP_URL:-http://vertex-finance-mcp.bnk-demo.svc.cluster.local:8000/v1/mcp/forecast}"
 
-# ── Helper: Ship model token telemetry to Loki ──────────────────────────────
+# ── Helper: Probe live BNK 2.4.1 AI Gateway and record real usage ────────────
 ship_model_tokens() {
   local symbol="$1"
-  local prompt_tokens=$(( 180 + RANDOM % 70 ))
-  local comp_tokens=$(( 120 + RANDOM % 60 ))
-  local latency=$(( 350 + RANDOM % 400 ))
+  local aigw_host="${AIGW_HOST:-aigw.bnk-demo.internal}"
+  local aigw_url="${AIGW_URL:-https://${VIP}:8443/v1/chat/completions}"
 
-  # Send to vertex-token-shipper if reachable, or port-forward / direct Loki push
-  local payload=$(cat <<EOR
-{
-  "job": "llm-gateway",
-  "model": "gemini-2.5-pro",
-  "status": "200",
-  "prompt_tk": $prompt_tokens,
-  "comp_tk": $comp_tokens,
-  "latency_ms": $latency,
-  "userq": "Analyze and forecast $symbol financial performance",
-  "caller": "vertex-reasoning-engine",
-  "client": "10.0.1.50",
-  "action": "allow",
-  "req_body": "{\"prompt\":\"Analyze and forecast $symbol for the next 30 days based on macroeconomic indicators and quarterly EPS reports.\"}",
-  "resp_body": "{\"forecast\":\"$symbol 30-day forecast: projected target range with confidence 0.88. Key driver: quarterly growth momentum.\"}"
-}
-EOR
-)
-
-  # Push directly to in-cluster Loki via kubectl exec / port-forward / shipper
+  # Execute live request through BNK 2.4.1 AI Gateway from inside the cluster
   kubectl exec -n llm-egress deploy/vertex-token-shipper -- python3 -c "
-import urllib.request, json
-req = urllib.request.Request('http://localhost:9090', data='''$payload'''.encode('utf-8'), headers={'Content-Type': 'application/json'})
+import json, ssl, time, urllib.request, urllib.error
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+req_body = {
+    'model': 'gemini-2.5-pro',
+    'messages': [{'role': 'user', 'content': 'Analyze and forecast $symbol financial performance'}],
+    'max_tokens': 256
+}
+t0 = time.time()
+req = urllib.request.Request(
+    '$aigw_url',
+    data=json.dumps(req_body).encode('utf-8'),
+    headers={'Content-Type': 'application/json', 'Host': '$aigw_host', 'Authorization': 'Bearer $AGENT_TOKEN'}
+)
 try:
-    urllib.request.urlopen(req, timeout=3)
+    with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+        status = resp.status
+        raw = resp.read().decode('utf-8', errors='replace')
+except urllib.error.HTTPError as e:
+    status = e.code
+    raw = e.read().decode('utf-8', errors='replace')
 except Exception as e:
-    pass
+    status = 0
+    raw = str(e)
+lat = int((time.time() - t0) * 1000)
+if status > 0:
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        parsed = {}
+    usage = parsed.get('usage') or {}
+    payload = {
+        'job': 'llm-gateway',
+        'model': parsed.get('model') or 'gemini-2.5-pro',
+        'source': 'aigateway-241',
+        'status': str(status),
+        'prompt_tk': int(usage.get('prompt_tokens') or 0),
+        'comp_tk': int(usage.get('completion_tokens') or 0),
+        'latency_ms': lat,
+        'userq': 'Analyze and forecast $symbol financial performance',
+        'caller': 'vertex-reasoning-engine',
+        'client': '10.0.1.50',
+        'action': 'allow' if status == 200 else 'governed',
+        'req_body': json.dumps(req_body),
+        'resp_body': raw[:2000]
+    }
+    sreq = urllib.request.Request('http://localhost:9090', data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+    urllib.request.urlopen(sreq, timeout=3)
 " >/dev/null 2>&1 || true
 }
 
-# ── Leg A: Vertex AI Model Invocation ─────────────────────────────────────────
+# ── Leg A: Vertex AI Model Invocation via BNK 2.4.1 AI Gateway ───────────────
 generate_model_traffic() {
   local symbol="$1"
-  echo "[Leg A: Vertex Model] Gemini 2.5 Pro Reasoning -> forecast $symbol"
+  echo "[Leg A: BNK 2.4.1 AI Gateway -> Vertex Model] Gemini 2.5 Pro -> forecast $symbol"
   ship_model_tokens "$symbol"
-  echo "  ✓ Model reasoning tokens recorded in LLM Observability"
+  echo "  ✓ Live AI Gateway response recorded in LLM Observability"
 }
 
 # ── Leg B: Governed Tool Requests (via MCP / BNK) ─────────────────────────────

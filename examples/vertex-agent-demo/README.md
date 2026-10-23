@@ -52,9 +52,15 @@ flowchart TD
 
 ```text
 examples/vertex-agent-demo/
-├── README.md                 # GKE & Vertex AI governance guide
-├── cluster.yaml              # GKE cluster definition with host-device multi-networking
-├── license.jwt               # F5 BNK license token placeholder
+├── README.md                 # GKE & Vertex AI governance guide (BNK 2.4.1, K8s 1.35)
+├── cluster.yaml              # GKE cluster definition (K8s 1.35, BNK 2.4.1, FLO v2.30.1-0.0.8, aiGateway)
+├── k8s/bnk-llm-gateway.yaml  # Authentic BNK 2.4.1 7-step inference.k8s.f5.com/v1alpha1 + AppPolicy + DNS/Route
+├── gateway-deployment.yaml   # BNK Gateway & HTTPRoutes
+├── mcp-persistence.yaml      # F5BigPersistenceProfile (MODEL_CONTEXT_PROTOCOL)
+├── mcp-security-policy.yaml  # F5BigCneIrule, NetPolicy, F5BigFwPolicy, SecPolicy
+├── mcp-observability.yaml    # Loki & Fluent Bit observability stack
+├── mcp-vertex-token-shipper.yaml # Vertex AI Gemini 2.5 Pro token shipper
+├── traffic-generator-deployment.yaml # Live dual-leg traffic generator (BNK 2.4.1 AI Gateway + MCP)
 ├── mcp-tool/
 │   ├── mcp-server.py         # FastMCP Python service (forecast & get_account_balance)
 │   ├── deployment.yaml       # K8s Deployment, Service, and Secret
@@ -64,32 +70,41 @@ examples/vertex-agent-demo/
 │   ├── requirements.txt      # Python dependencies
 │   └── README.md             # Agent configuration guide
 └── scripts/
+    ├── setup-llm-gateway.sh  # 7-step BNK 2.4.1 AI Gateway + CNE restart + f5vk_ governance bootstrap
     ├── demo.sh               # Automated deployment and verification script
-    └── traffic-gen.sh        # High-volume traffic generator for rate-limit tests
+    └── traffic-gen.sh        # Live AI Gateway + MCP traffic generator
 ```
 
 ---
 
 ## Step-by-Step Guide
 
-### 1. Validate and Provision the Cluster
+### 1. Validate and Provision the Cluster (K8s 1.35, BNK 2.4.1)
 ```bash
 # Validate the GKE multi-network cluster manifest
 gkebnkctl validate examples/vertex-agent-demo/cluster.yaml
 
-# Provision GKE cluster with F5 BNK
+# Provision GKE cluster with F5 BNK 2.4.1 (FLO v2.30.1-0.0.8)
 gkebnkctl up -f examples/vertex-agent-demo/cluster.yaml
 ```
 
-### 2. Connect Cluster to BNK Forge
-```bash
-# Register cluster into BNK Forge instance
-gkebnkctl bnkforge register -f examples/vertex-agent-demo/cluster.yaml --url http://localhost:8000
-```
-
-### 3. Deploy MCP Tool and Services
+### 2. Deploy MCP Tool, BNK 2.4.1 AI Gateway, and Governance Policies
 ```bash
 kubectl apply -k examples/vertex-agent-demo/mcp-tool
+kubectl apply -f examples/vertex-agent-demo/gateway-deployment.yaml
+kubectl apply -f examples/vertex-agent-demo/mcp-persistence.yaml
+kubectl apply -f examples/vertex-agent-demo/mcp-security-policy.yaml
+./examples/vertex-agent-demo/scripts/setup-llm-gateway.sh
+```
+
+### 3. Connect Cluster to BNK Forge & Inspect Multi-Cluster AI Gateway Fabric
+```bash
+# Scan BNK 2.4.1 AI Gateway dependency chain and MCP posture
+gkebnkctl forge scan -f examples/vertex-agent-demo/cluster.yaml --register-targets
+
+# Query Forge Multi-Cluster AI Gateway & Dependency Fabric
+gkebnkctl forge governance overview -f examples/vertex-agent-demo/cluster.yaml --forge-url http://localhost:8000
+gkebnkctl forge governance test-request -f examples/vertex-agent-demo/cluster.yaml --forge-url http://localhost:8000
 ```
 
 ### 4. Execute Governed Agent Reasoning
@@ -97,7 +112,7 @@ kubectl apply -k examples/vertex-agent-demo/mcp-tool
 python3 examples/vertex-agent-demo/agent/vertex_agent.py --symbol GOOGL --days 30
 ```
 
-### 5. Verify Rate Limiting and Traffic Governance
+### 5. Verify Rate Limiting and Live Traffic Governance
 ```bash
-./examples/vertex-agent-demo/scripts/traffic-gen.sh 50
+./examples/vertex-agent-demo/traffic-gen.sh
 ```

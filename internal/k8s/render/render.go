@@ -15,6 +15,8 @@ package render
 import (
 	"bytes"
 	"fmt"
+	"strconv"
+	"strings"
 	"text/template"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
@@ -57,6 +59,42 @@ type CNEInstanceVars struct {
 	ExtPCI          string
 	IntPCI          string
 	ImageRegistry   string
+	Telemetry       bool
+	AIGateway       bool
+}
+
+func isAIGatewayManifestVersion(manifestVersion string) bool {
+	v := strings.TrimPrefix(strings.TrimSpace(manifestVersion), "v")
+	if v == "" {
+		return false
+	}
+	base := strings.SplitN(v, "-", 2)[0]
+	parts := strings.Split(base, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	maj, err1 := strconv.Atoi(parts[0])
+	min, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	if maj > 2 {
+		return true
+	}
+	if maj < 2 {
+		return false
+	}
+	if min > 4 {
+		return true
+	}
+	if min < 4 {
+		return false
+	}
+	if len(parts) < 3 {
+		return false
+	}
+	patch, err3 := strconv.Atoi(parts[2])
+	return err3 == nil && patch >= 1
 }
 
 // RenderCNEInstance renders templates/cneinstance.yaml.tmpl (Phase38). The
@@ -64,6 +102,9 @@ type CNEInstanceVars struct {
 // are the mandatory host-device contract items (reference/TRIAL-NOTES.md
 // item 3) — do not drop them.
 func RenderCNEInstance(tmpl []byte, v CNEInstanceVars) ([]byte, error) {
+	if isAIGatewayManifestVersion(v.ManifestVersion) {
+		v.AIGateway = true
+	}
 	return Render(tmpl, v)
 }
 
