@@ -52,27 +52,28 @@ By default, `gkebnkctl down -f <cluster.yaml> --yes` deletes the cluster-owned m
 | `bnk status` | Inspect live BNK control-plane and data-plane component readiness |
 | `manifest probe [version]` | Inspect a BNK release manifest (Bill of Materials) from `repo.f5.com` or a local FAR archive without a cluster (`--far <path>`, `--all`) |
 
-## AI benchmarking and BNK Forge
+## AI benchmarking and [BNK Forge](https://github.com/JLCode-tech/bnk-forge)
 
 | Command | Description |
 |---|---|
 | `benchmark` | Runs the default `benchmark run` workflow |
-| `benchmark setup` | Prepare the GCE jumphost (`aiperf >= 0.10.0`) and register the SSH AccessMethod, BenchmarkAgent, and BenchmarkTarget in Forge (`-f/--config`, `--preflight`, `--daemon`) |
+| `benchmark setup` | Prepare the GCE jumphost (`aiperf >= 0.10.0`) and register the SSH AccessMethod, BenchmarkAgent, and BenchmarkTarget in [BNK Forge](https://github.com/JLCode-tech/bnk-forge) (`-f/--config`, `--preflight`, `--daemon`) |
 | `benchmark run` | Drive an `aiperf` run, smoke preset (`--scenarios`), native Forge scenario sweep (`--scenario`), or multi-proxy shootout (`--proxies`); `--prefix-prompt-length`, `--num-prefix-prompts`, `--random-seed` for shared-prefix workloads; `--metrics-pod-selector` / `--metrics-url` scrape vLLM or EPP metrics for prefix-cache hit rate; `--genai-out`, `--synthetic`, `--reset-cache` |
 | `benchmark list` | List native Forge scenarios and built-in smoke presets (`-o json`) |
 | `benchmark status` | Check the benchmark environment, GCE jumphost readiness, `aiperf` version, and Forge linkage (`-f/--config`, `-w/--workspace`) |
 | `benchmark daemon` | Run the persistent Forge benchmark agent daemon over WebSocket with agent-bound token authentication (`--forge-agent-token`, `--heartbeat-interval`) |
-| `forge register` | Register the GKE cluster with BNK Forge via MCP (preferred) or REST (`-f/--file`, `--cluster-name`, `--kubeconfig`, `--project-name`, `--template-id`, `--scan`, `--rest`) |
+| `forge register` | Register the GKE cluster with [BNK Forge](https://github.com/JLCode-tech/bnk-forge) via MCP (preferred) or REST (`-f/--file`, `--cluster-name`, `--kubeconfig`, `--project-name`, `--template-id`, `--scan`, `--rest`) |
 | `forge status` | Show the cluster's Forge registration state (`-f/--file`, `--json`) |
 | `forge unregister` | Remove the cluster's Forge registration (`--purge` also deletes the project shell) |
 | `forge cleanup` | Delete benchmark artifacts associated with a cluster in Forge (`--workspace`, `--dry-run`) |
-| `forge template {list,create}` | List or create GCP Cloud Credential Templates in BNK Forge (`--name`, `--project-id`, `--credentials`, `--default`, `--json`) |
-| `forge scan` | Index the cluster's BNK 2.4 resources, check readiness (`CNEInstance`, `Gateway`, controller), and discover MCP endpoints (`--probe`, `--bearer-env`, `--register-targets`, `--remote`, `-o json`) |
+| `forge template {list,create}` | List or create GCP Cloud Credential Templates in [BNK Forge](https://github.com/JLCode-tech/bnk-forge) (`--name`, `--project-id`, `--credentials`, `--default`, `--json`) |
+| `forge scan` | Index the cluster's BNK 2.4 resources, check **F5 BNK AI Service Plane** readiness, and discover MCP endpoints (`--probe`, `--bearer-env`, `--register-targets`, `--remote`, `-o json`) |
+| `forge governance {overview,bootstrap,test-request,remediate}` | Query and manage the **F5 BNK AI Service Plane** governance fabric, virtual API keys (`f5vk_...`), and LLM routing pools via [BNK Forge](https://github.com/JLCode-tech/bnk-forge) (`-f/--file`, `--forge-url`, `-o json`) |
 | `forge telemetry` | Validate the MCP governance records in Loki against Forge's LLM Observability schema (`--loki-url`, `--query`, `--since`, `--limit`, `--file`, `--show`, `-o json`) |
 | `forge benchmark` | Alias for `benchmark run` |
-| `bnkforge {register,status,unregister}` | Backward-compatibility alias for BNK Forge topology daemon registration (`--url`, `-f/--file`, `--json`) |
+| `bnkforge {register,status,unregister}` | Backward-compatibility alias for [BNK Forge](https://github.com/JLCode-tech/bnk-forge) topology daemon registration (`--url`, `-f/--file`, `--json`) |
 
-Every `forge` command accepts `-f/--file <cluster.yaml>`, `--mcp-url`, `--rest-url`, `--username`, and `--password`. See [`BENCHMARKS.md`](BENCHMARKS.md) for benchmark presets and proxy shootouts, and [`FORGE_INTEGRATION.md`](FORGE_INTEGRATION.md) for Forge integration details.
+Every `forge` command accepts `-f/--file <cluster.yaml>`, `--mcp-url`, `--rest-url`, `--username`, and `--password`. See [`BENCHMARKS.md`](BENCHMARKS.md) for benchmark presets and proxy shootouts, [`FORGE_INTEGRATION.md`](FORGE_INTEGRATION.md) for [BNK Forge](https://github.com/JLCode-tech/bnk-forge) integration details, and the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html) for official F5 platform documentation.
 
 ## Agentic workflow
 

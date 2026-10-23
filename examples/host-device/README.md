@@ -5,7 +5,7 @@ This directory contains the baseline 3-VPC GKE **host-device** configuration (`c
 ## What's Included
 
 - [`cluster.yaml`](cluster.yaml): Complete `gkebnkctl/v1` intent file for a 3-VPC (`main`, `external`, `internal`) GKE Datapath V2 multi-networking cluster with `default-pool`, `tmm-pool`, and `agent-pool`, plus Phase 50 transparent egress and Phase 51 VXLAN return-route configuration.
-- [`license.jwt`](license.jwt): Committed dummy placeholder so `gkebnkctl validate` and `gkebnkctl up --dry-run` run offline in CI without real secret material. Replace with a valid F5 subscription JWT before running a live `gkebnkctl up`.
+- [`license.jwt`](license.jwt): Committed dummy placeholder so `gkebnkctl validate` and `gkebnkctl up --dry-run` run offline in CI without real secret material. Replace with a valid F5 subscription JWT before running a live `gkebnkctl up`. See the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html) for instructions on obtaining F5 licensing (`license.jwt`) and F5 Artifact Registry (`repo.f5.com`) credentials.
 
 ## Quick Start
 
