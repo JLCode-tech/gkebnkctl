@@ -272,7 +272,7 @@ func restLogin(ctx context.Context, base, username, password string) (string, er
 	if err != nil {
 		var herr *restHTTPErr
 		if errors.As(err, &herr) && herr.StatusCode == http.StatusUnauthorized && username == "admin" && password == "changeme" {
-			fallbackBody := map[string]string{"username": "mcp", "password": "mcp-svc-local-token-2026-auth"}
+			fallbackBody := map[string]string{"username": "mcp", "password": "mcp-svc-local-token-2026-auth"} // #nosec G101 -- local default MCP fallback token
 			if fbErr := restPost(ctx, base+"/api/auth/login", "", fallbackBody, &resp); fbErr == nil && resp.Token != "" {
 				return resp.Token, nil
 			}

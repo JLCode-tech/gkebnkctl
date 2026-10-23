@@ -55,3 +55,18 @@ changelog:
       - "merge conflict"
       - Merge pull request
       - Merge remote-tracking branch
+
+release:
+  header: |
+    ## gkebnkctl {{ .Tag }}
+
+    Google Cloud GKE cloud-pinned CLI for deploying, operating, and benchmarking **F5 BIG-IP Next for Kubernetes (BNK)** and **F5 BNK AI Service Plane**.
+    *(Tip: Use the unified multi-cloud [**`bnkctl`**](https://github.com/JLCode-tech/bnkctl) CLI as the preferred entry point across AWS, Azure, and GCP.)*
+  footer: |
+    ---
+    See [`CHANGELOG.md`](https://github.com/JLCode-tech/gkebnkctl/blob/main/CHANGELOG.md) for the full per-version change log.
+
+    Verify the downloaded archive against `checksums.txt`:
+    ```
+    sha256sum -c checksums.txt --ignore-missing
+    ```

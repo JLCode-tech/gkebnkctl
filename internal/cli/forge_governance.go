@@ -336,7 +336,7 @@ func init() {
 				return fmt.Errorf("create virtual key: %w", err)
 			}
 			if govAsJSON {
-				b, _ := json.MarshalIndent(keyRes, "", "  ")
+				b, _ := json.MarshalIndent(keyRes, "", "  ") // #nosec G117 -- intentional CLI JSON output of newly created key
 				fmt.Fprintln(cmd.OutOrStdout(), string(b))
 				return nil
 			}

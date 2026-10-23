@@ -15,6 +15,7 @@ readonly DEFAULT_ALLOWLIST=(
   "GO-2026-5622"
   "GO-2026-5338"
   "GO-2026-5064"
+  "GO-2026-6791"
 )
 
 allowlist=("${DEFAULT_ALLOWLIST[@]}")
