@@ -48,8 +48,8 @@ Watch the IP and access control flip dynamically in Terminal 1.
 
 **The story:** same pod, zero pod changes — one CR flips its egress from a per-node/uncontrolled identity to a single BNK-controlled identity **with policy enforcement**. The `control` pod in the `bnk-egress-control` namespace is never captured, so it's the "unaffected workload" side-by-side beat.
 
-### Optional Forge beats (best story — no terminal)
-With this cluster registered in a localhost Forge:
+### Optional [BNK Forge](https://github.com/JLCode-tech/bnk-forge) beats (best story — no terminal)
+With this cluster registered in a localhost [BNK Forge](https://github.com/JLCode-tech/bnk-forge):
 - Toggle from the UI: **cluster `bnk-egress` → Networking → Egress →** delete / re-create `bnk-egress-demo` (Create Resource / Configuration Builder, paste `egress-toggle.yaml`). The pod's `watch.sh` flips ~10–15s later.
 - Show **Insights** while ON: the **Traffic Flow** egress lane, the **Gateway Topology** egress node, and the **Policy Gateway Map** (`block-test-target → 1.1.1.1/32`).
 

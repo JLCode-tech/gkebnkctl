@@ -48,9 +48,9 @@ By default, scenarios derive their VIP addresses from `network.external.cidr` (`
 | 8 | [`cluster-wide-watch`](#52-cluster-wide-watch) | Architecture & Tenancy | `10.30.0.107` | Cross-namespace `Gateway`, `HTTPRoute`, `ReferenceGrant` |
 | 9 | [`cwc-admin-access`](#53-cwc-admin-access) | Architecture & Tenancy | *(Control Plane)* | `DiagnosticService`, CWC mTLS REST API (`f5-spk-cwc`) |
 | 10 | [`multi-vip`](#54-multi-vip) | Architecture & Tenancy | `.110`, `.111`, `.112` | Multi-address `Gateway` listeners + isolated `HTTPRoute` backends |
-| 11 | [`ai-token-counting`](#61-ai-token-counting) | AI Gateway | `10.30.0.115` | `F5SPKiRule` (LLM token parser), `Gateway`, `HTTPRoute` |
-| 12 | [`ai-semantic-cache`](#62-ai-semantic-cache) | AI Gateway | `10.30.0.116` | `F5SPKiRule` (semantic cache lookup/store), `Gateway`, `HTTPRoute` |
-| 13 | [`ai-inference-e2e`](#63-ai-inference-e2e) | AI Gateway | `10.30.0.117` | Gateway API Inference Extension (`InferencePool`, `InferenceModel`, EPP) |
+| 11 | [`ai-token-counting`](#61-ai-token-counting) | F5 BNK AI Service Plane | `10.30.0.115` | `F5SPKiRule` (LLM token parser), `Gateway`, `HTTPRoute` |
+| 12 | [`ai-semantic-cache`](#62-ai-semantic-cache) | F5 BNK AI Service Plane | `10.30.0.116` | `F5SPKiRule` (semantic cache lookup/store), `Gateway`, `HTTPRoute` |
+| 13 | [`ai-inference-e2e`](#63-ai-inference-e2e) | F5 BNK AI Service Plane | `10.30.0.117` | Gateway API Inference Extension (`InferencePool`, `InferenceModel`, EPP) |
 | 14 | [`egress-snat`](#71-egress-snat) | Egress & SNAT | *(Outbound SNAT)* | `F5SPKEgress`, `F5SPKSnatpool`, VXLAN (`vxlan100`) |
 | 15 | [`core-file-collection`](#81-core-file-collection) | Resilience & Diagnostics | *(Host Volume)* | `f5-tmm` `/var/crash` hostPath permissions & core pattern check |
 
@@ -162,7 +162,9 @@ By default, scenarios derive their VIP addresses from `network.external.cidr` (`
 
 ---
 
-## 6. Category 4: AI Gateway
+## 6. Category 4: F5 BNK AI Service Plane
+
+> For complete documentation on F5 BIG-IP Next for Kubernetes capabilities, see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html).
 
 ### 6.1 `ai-token-counting`
 

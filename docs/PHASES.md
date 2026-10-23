@@ -1,6 +1,6 @@
 # Provisioning & Lifecycle Phases
 
-`gkebnkctl up` executes an idempotent, 21-phase pipeline (`00` through `51`) to provision the GKE infrastructure, optional jumphost, BNK Forge registration, and F5 BIG-IP Next for Kubernetes (BNK).
+`gkebnkctl up` executes an idempotent, 21-phase pipeline (`00` through `51`) to provision the GKE infrastructure, optional jumphost, [BNK Forge](https://github.com/JLCode-tech/bnk-forge) registration, and F5 BIG-IP Next for Kubernetes (BNK). For official F5 platform documentation, see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html).
 
 ---
 
@@ -61,9 +61,9 @@ graph TD
 - Discovers PCI slot addresses (`0000:00:04.0`, `0000:00:05.0`), MAC addresses, interface names, and GKE-assigned `/28` alias CIDRs / self-IPs.
 - Caches discovered hardware topology in `.gkebnkctl/<cluster-name>/state.env`.
 
-### Phase 29: BNK Forge Registration (`forge-register`)
+### Phase 29: [BNK Forge](https://github.com/JLCode-tech/bnk-forge) Registration (`forge-register`)
 - Feature-gated by `forge.enabled: true` in `cluster.yaml` (skipped when `false` or omitted).
-- Generates a self-contained cluster kubeconfig and registers the cluster with BNK Forge over MCP (`forge.mcpUrl`, default `http://localhost:8081/mcp/`) with exponential backoff and automatic REST fallback (`forge.url`, default `http://localhost:8000`).
+- Generates a self-contained cluster kubeconfig and registers the cluster with [BNK Forge](https://github.com/JLCode-tech/bnk-forge) over MCP (`forge.mcpUrl`, default `http://localhost:8081/mcp/`) with exponential backoff and automatic REST fallback (`forge.url`, default `http://localhost:8000`).
 - Persists registration linkage in `.gkebnkctl/<cluster-name>/forge_link.json` (soft-failing to `"status": "pending"` if Forge is unreachable so cluster provisioning never aborts).
 
 ### Phase 30–33: Platform Foundations
@@ -94,7 +94,7 @@ graph TD
 ## Teardown (`gkebnkctl down`)
 
 `gkebnkctl down` executes four ordered teardown steps:
-1. **`Phase29ForgeRegisterDown`**: Deletes cluster-scoped benchmark targets in BNK Forge and unregisters the cluster via MCP/REST when registered.
+1. **`Phase29ForgeRegisterDown`**: Deletes cluster-scoped benchmark targets in [BNK Forge](https://github.com/JLCode-tech/bnk-forge) and unregisters the cluster via MCP/REST when registered.
 2. **`PhaseDownJumphost`**: Deletes the `<cluster>-jumphost` VM and `<cluster>-allow-iap-ssh` firewall rule if `testing.jumphost.enabled: true`.
 3. **`PhaseDownCluster`**: Strips F5 BNK CR finalizers (best-effort) and deletes the GKE cluster and its node pools.
 4. **`PhaseDownNetworks`**:
