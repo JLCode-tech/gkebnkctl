@@ -8,6 +8,11 @@ import (
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
 	gax "github.com/googleapis/gax-go/v2"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 )
@@ -184,10 +189,22 @@ func TestPhaseDownNetworks_TeardownDataplaneResources(t *testing.T) {
 	}
 
 	// Now remove the other cluster's subnet, simulating that we are the last tenant out.
-	// But leave the other cluster's marked routers and firewalls to prove that we sweep them.
+	// Also use full GCP Compute API URLs (https://www.googleapis.com/compute/v1/...) as returned
+	// by live GCP ListAll responses to verify matchesVPC handles full URLs and relative paths.
+	fullVPCURL := "https://www.googleapis.com/compute/v1/" + vpcSelfLink
 	subnets.subnets = []*computepb.Subnetwork{
-		{Name: strPtr("sn-us"), Network: strPtr(vpcSelfLink), Description: strPtr("gkebnkctl-cluster=bnk-hostdev gkebnkctl-managed=true")},
-		{Name: strPtr("sn-unmarked"), Network: strPtr(vpcSelfLink)},
+		{Name: strPtr("sn-us"), Network: strPtr(fullVPCURL), Description: strPtr("gkebnkctl-cluster=bnk-hostdev gkebnkctl-managed=true")},
+		{Name: strPtr("sn-unmarked"), Network: strPtr(fullVPCURL)},
+	}
+	routers.routers = []*computepb.Router{
+		{Name: strPtr("rt-us"), Network: strPtr(fullVPCURL), Description: strPtr("gkebnkctl-cluster=bnk-hostdev gkebnkctl-managed=true")},
+		{Name: strPtr("rt-them"), Network: strPtr(fullVPCURL), Description: strPtr("gkebnkctl-cluster=other-cluster gkebnkctl-managed=true")},
+		{Name: strPtr("rt-unmarked"), Network: strPtr(fullVPCURL)},
+	}
+	firewalls.firewalls = []*computepb.Firewall{
+		{Name: strPtr("fw-us"), Network: strPtr(fullVPCURL), Description: strPtr("gkebnkctl-cluster=bnk-hostdev gkebnkctl-managed=true")},
+		{Name: strPtr("fw-them"), Network: strPtr(fullVPCURL), Description: strPtr("gkebnkctl-cluster=other-cluster gkebnkctl-managed=true")},
+		{Name: strPtr("fw-unmarked"), Network: strPtr(fullVPCURL)},
 	}
 	subnets.deleted = nil
 	routers.deleted = nil
@@ -221,5 +238,131 @@ func TestPhaseDownNetworks_TeardownDataplaneResources(t *testing.T) {
 				t.Errorf("unexpected firewall deleted: %s", name)
 			}
 		}
+	}
+}
+
+func TestStripStuckFinalizersWithClient(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvrVlan := schema.GroupVersionResource{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-spk-vlans"}
+	listKinds := map[schema.GroupVersionResource]string{}
+	for _, gvr := range crdsToGVRs([]string{
+		"f5-spk-vlans.k8s.f5net.com",
+		"f5-spk-staticroutes.k8s.f5net.com",
+		"f5-spk-egresses.k8s.f5net.com",
+		"f5-spk-snatpools.k8s.f5net.com",
+		"f5-big-dns-caches.k8s.f5net.com",
+		"f5-big-persistence-profiles.k8s.f5net.com",
+		"infras.gateway.k8s.f5.com",
+		"gatewaysettings.gateway.k8s.f5.com",
+		"egressgateways.gateway.k8s.f5.com",
+		"l4routes.gateway.k8s.f5.com",
+		"l4globalpolicies.gateway.k8s.f5.com",
+		"apppolicies.gateway.k8s.f5.com",
+		"airoutepolicies.inference.k8s.f5.com",
+		"airoutes.inference.k8s.f5.com",
+		"aigateways.inference.k8s.f5.com",
+		"aigatewayprofiles.inference.k8s.f5.com",
+		"aimodels.inference.k8s.f5.com",
+		"aiproviders.inference.k8s.f5.com",
+		"aicredentials.inference.k8s.f5.com",
+		"aitenants.inference.k8s.f5.com",
+		"analyzers.k8s.f5.com",
+		"cnecontrollers.k8s.f5.com",
+		"cneinstances.k8s.f5.com",
+		"dssms.k8s.f5.com",
+		"f5tmms.k8s.f5.com",
+		"coremonds.k8s.f5.com",
+		"crdconversions.k8s.f5.com",
+		"crdinstallers.k8s.f5.com",
+		"csrcs.k8s.f5.com",
+		"cwcs.k8s.f5.com",
+		"ipamcontrollers.k8s.f5.com",
+		"rabbitmqs.k8s.f5.com",
+	}) {
+		listKinds[gvr] = "UnstructuredList"
+	}
+
+	vlanObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "k8s.f5net.com/v1",
+			"kind":       "F5SPKVlan",
+			"metadata": map[string]any{
+				"name":       "vlan-ext",
+				"namespace":  "f5-cne-system",
+				"finalizers": []any{"f5.com/vlan-finalizer"},
+			},
+		},
+	}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds)
+	if _, err := dyn.Resource(gvrVlan).Namespace("f5-cne-system").Create(context.Background(), vlanObj, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create vlanObj: %v", err)
+	}
+
+	stripStuckFinalizersWithClient(context.Background(), dyn)
+
+	updated, err := dyn.Resource(gvrVlan).Namespace("f5-cne-system").Get(context.Background(), "vlan-ext", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get vlanObj: %v", err)
+	}
+	if len(updated.GetFinalizers()) != 0 {
+		t.Errorf("expected finalizers to be stripped, got %v", updated.GetFinalizers())
+	}
+}
+
+type fakeDisks struct {
+	disks       []*computepb.Disk
+	deleteCalls []string
+}
+
+func (f *fakeDisks) ListAll(_ context.Context, _, _ string) ([]*computepb.Disk, error) {
+	return f.disks, nil
+}
+
+func (f *fakeDisks) Delete(_ context.Context, req *computepb.DeleteDiskRequest, _ ...gax.CallOption) (*compute.Operation, error) {
+	f.deleteCalls = append(f.deleteCalls, req.GetDisk())
+	return nil, nil
+}
+
+func TestPhaseDownNetworks_DeletesOrphanedBNKPVCDisks(t *testing.T) {
+	cl := testCluster()
+	st := testState(t)
+	disks := &fakeDisks{
+		disks: []*computepb.Disk{
+			{
+				Name:        strPtr("pvc-bnk-dssm-0"),
+				Description: strPtr(`{"kubernetes.io/created-for/pvc/name":"data-f5-dssm-db-0","kubernetes.io/created-for/pvc/namespace":"f5-bnk"}`),
+			},
+			{
+				Name:        strPtr("pvc-bnk-cwc"),
+				Description: strPtr(`{"kubernetes.io/created-for/pvc/name":"cluster-wide-controller","kubernetes.io/created-for/pvc/namespace":"f5-utils"}`),
+			},
+			{
+				Name:        strPtr("pvc-attached-disk"),
+				Description: strPtr(`{"kubernetes.io/created-for/pvc/name":"data-f5-dssm-db-1","kubernetes.io/created-for/pvc/namespace":"f5-bnk"}`),
+				Users:       []string{"projects/my-gcp-project/zones/us-central1-a/instances/gke-node-1"},
+			},
+			{
+				Name:        strPtr("pvc-other-app"),
+				Description: strPtr(`{"kubernetes.io/created-for/pvc/name":"postgres-data","kubernetes.io/created-for/pvc/namespace":"other-team"}`),
+			},
+		},
+	}
+	clients := &gcp.Clients{
+		Networks:    &fakeNetworks{existing: map[string]string{}},
+		Subnetworks: &fakeSubnetworks{existing: map[string]string{}},
+		Firewalls:   &fakeFirewalls{existing: map[string]string{}},
+		Routers:     &fakeRouters{existing: map[string]*computepb.Router{}},
+		Disks:       disks,
+	}
+
+	if err := PhaseDownNetworks(context.Background(), cl, st, clients, false); err != nil {
+		t.Fatalf("PhaseDownNetworks: %v", err)
+	}
+	if len(disks.deleteCalls) != 2 {
+		t.Fatalf("expected 2 orphaned BNK PVC disks deleted, got %v", disks.deleteCalls)
+	}
+	if disks.deleteCalls[0] != "pvc-bnk-dssm-0" || disks.deleteCalls[1] != "pvc-bnk-cwc" {
+		t.Errorf("unexpected deleted disks: %v", disks.deleteCalls)
 	}
 }

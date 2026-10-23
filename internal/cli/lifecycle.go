@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -113,6 +114,7 @@ var upPhases = []upPhase{
 	{num: "15", name: "jumphost"},
 	{num: "20", name: "cluster"},
 	{num: "25", name: "discover"},
+	{num: "29", name: "forge-register"},
 	{num: "30", name: "namespaces"},
 	{num: "31", name: "cert-manager"},
 	{num: "32", name: "issuers"},
@@ -142,6 +144,7 @@ var realUpPhases = map[string]func(ctx context.Context, cl *intent.Cluster, st *
 	"15": phases.Phase15Jumphost,
 	"20": phases.Phase20Cluster,
 	"25": phases.Phase25Discover,
+	"29": phases.Phase29ForgeRegister,
 	"30": phases.Phase30Namespaces,
 	"31": phases.Phase31CertManager,
 	"32": phases.Phase32Issuers,
@@ -196,6 +199,33 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 		if fn, ok := realUpPhases[p.num]; ok {
 			if err := fn(ctx, cl, st, gcl, dryRun); err != nil {
 				return fmt.Errorf("up: %w", err)
+			}
+			if !dryRun {
+				ts := time.Now().UTC().Format(time.RFC3339)
+				kv := map[string]string{
+					fmt.Sprintf("PHASE_%s_APPLIED_AT", p.num): ts,
+				}
+				switch p.num {
+				case "20":
+					kv["CLUSTER_CREATED_AT"] = ts
+				case "31":
+					kv["CERT_MANAGER_INSTALLED_AT"] = ts
+				case "36":
+					kv["FLO_INSTALLED_AT"] = ts
+				case "38", "42", "70":
+					kv["CNEINSTANCE_READY_AT"] = ts
+				case "40":
+					kv["LICENSE_APPLIED_AT"] = ts
+				case "50":
+					kv["EGRESS_CONFIGURED_AT"] = ts
+				case "51":
+					kv["INGRESS_VXLAN_ROUTES_APPLIED_AT"] = ts
+				}
+				for k, v := range kv {
+					st.Set(k, v)
+				}
+				_ = st.Save()
+				_ = state.WriteValues(cl.StateDir(), kv)
 			}
 			continue
 		}
@@ -290,6 +320,8 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun, keepData
 	if err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
+
+	_ = phases.Phase29ForgeRegisterDown(ctx, cl, st, dryRun)
 
 	if err := phases.PhaseDownJumphost(ctx, cl, st, gcl); err != nil {
 		return fmt.Errorf("down: %w", err)

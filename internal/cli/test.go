@@ -11,6 +11,7 @@ import (
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/phases"
+	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 	"github.com/JLCode-tech/gkebnkctl/internal/test"
 )
@@ -31,6 +32,7 @@ var (
 	flagTestConnJSON    bool
 
 	flagTestEgressFile string
+	flagTestDryRun     bool
 )
 
 var testCmd = &cobra.Command{
@@ -83,17 +85,21 @@ func init() {
 	testDNSCmd.Flags().DurationVar(&flagTestDNSTimeout, "timeout", 2*time.Second, "Per-query timeout")
 	testDNSCmd.Flags().StringVar(&flagTestDNSEDNSSubnet, "edns-subnet", "", "Client IP to pass in EDNS Client Subnet option")
 	testDNSCmd.Flags().BoolVar(&flagTestDNSJSON, "json", false, "Output results in JSON format")
+	testDNSCmd.Flags().StringVarP(&flagTestEgressFile, "file", "f", "", "Optional path to cluster.yaml")
+	testDNSCmd.Flags().BoolVar(&flagTestDryRun, "dry-run", false, "Simulate test plan without network queries")
 
 	// Connectivity flags
-	testConnCmd.Flags().StringVar(&flagTestConnTarget, "target", "", "Target host:port (required)")
+	testConnCmd.Flags().StringVar(&flagTestConnTarget, "target", "", "Target host:port (required unless --dry-run with -f)")
 	testConnCmd.Flags().StringVar(&flagTestConnProto, "proto", "tcp", "Protocol (tcp or udp)")
 	testConnCmd.Flags().IntVar(&flagTestConnCount, "count", 3, "Number of probes to send")
 	testConnCmd.Flags().DurationVar(&flagTestConnTimeout, "timeout", 3*time.Second, "Per-probe timeout")
 	testConnCmd.Flags().BoolVar(&flagTestConnJSON, "json", false, "Output results in JSON format")
-	_ = testConnCmd.MarkFlagRequired("target")
+	testConnCmd.Flags().StringVarP(&flagTestEgressFile, "file", "f", "", "Optional path to cluster.yaml")
+	testConnCmd.Flags().BoolVar(&flagTestDryRun, "dry-run", false, "Simulate test plan without network queries")
 
 	// Egress flags
 	testEgressCmd.Flags().StringVarP(&flagTestEgressFile, "file", "f", "cluster.yaml", "Path to cluster.yaml")
+	testEgressCmd.Flags().BoolVar(&flagTestDryRun, "dry-run", false, "Simulate egress test without making changes")
 
 	testCmd.AddCommand(testDNSCmd)
 	testCmd.AddCommand(testConnCmd)
@@ -102,6 +108,17 @@ func init() {
 }
 
 func runTestDNS(cmd *cobra.Command, _ []string) error {
+	if flagTestDryRun {
+		fmt.Printf("→ dry-run: DNS Probe Plan for target %s (%s)\n", flagTestDNSTarget, flagTestDNSType)
+		fmt.Printf("  • would query resolver: %s\n", flagTestDNSServer)
+		fmt.Printf("  • would send %d probe iterations with %s timeout\n", flagTestDNSIterations, flagTestDNSTimeout)
+		if flagTestDNSEDNSSubnet != "" {
+			fmt.Printf("  • would attach EDNS client subnet: %s\n", flagTestDNSEDNSSubnet)
+		}
+		fmt.Println("→ dry-run complete: 0 network packets sent")
+		return nil
+	}
+
 	ctx := context.Background()
 	if cmd != nil && cmd.Context() != nil {
 		ctx = cmd.Context()
@@ -148,12 +165,33 @@ func runTestDNS(cmd *cobra.Command, _ []string) error {
 }
 
 func runTestConnectivity(cmd *cobra.Command, _ []string) error {
+	target := flagTestConnTarget
+	if target == "" && flagTestDryRun {
+		target = "10.30.0.1:443"
+		if flagTestEgressFile != "" {
+			if cl, err := intent.Load(flagTestEgressFile); err == nil && cl.ExtGwIP != "" {
+				target = cl.ExtGwIP + ":443"
+			}
+		}
+	}
+	if target == "" {
+		return fmt.Errorf("required flag(s) \"target\" not set")
+	}
+
+	if flagTestDryRun {
+		fmt.Printf("→ dry-run: Connectivity Probe Plan for target %s (%s)\n", target, flagTestConnProto)
+		fmt.Printf("  • would probe target: %s\n", target)
+		fmt.Printf("  • would send %d probes with %s timeout\n", flagTestConnCount, flagTestConnTimeout)
+		fmt.Println("→ dry-run complete: 0 network packets sent")
+		return nil
+	}
+
 	ctx := context.Background()
 	if cmd != nil && cmd.Context() != nil {
 		ctx = cmd.Context()
 	}
 	cfg := test.ConnectivityConfig{
-		Target:  flagTestConnTarget,
+		Target:  target,
 		Proto:   flagTestConnProto,
 		Count:   flagTestConnCount,
 		Timeout: flagTestConnTimeout,
@@ -189,6 +227,15 @@ func runTestEgress(cmd *cobra.Command, _ []string) error {
 	cl, err := intent.Load(flagTestEgressFile)
 	if err != nil {
 		return fmt.Errorf("load %s: %w", flagTestEgressFile, err)
+	}
+
+	if flagTestDryRun {
+		st, _ := state.Load(cl.StateDir())
+		if st != nil {
+			st.MarkReadOnly()
+		}
+		fmt.Printf("Running Phase 50 Egress verification [dry-run] against cluster %s...\n", cl.Metadata.Name)
+		return phases.Phase50Egress(ctx, cl, st, nil, true)
 	}
 
 	clients, err := gcp.NewClients(ctx, cl.Metadata.Project)

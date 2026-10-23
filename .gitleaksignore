@@ -2,3 +2,5 @@
 # CI's security-audit scans full git history, so a finding persists in the commit
 # that introduced it even after the working tree is fixed; ignore by fingerprint.
 9ea92ab47ec343140e2caa58f5f757cb220a80e7:internal/jumphost/staging_test.go:private-key:293
+# Synthetic test JWT fixture in jwt_test.go (not a real credential).
+b1a2e288a6b633d6197d358bf7bd4b6c5bc78ec6:internal/jwt/jwt_test.go:jwt:13

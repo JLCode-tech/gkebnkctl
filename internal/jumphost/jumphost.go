@@ -24,6 +24,99 @@ import (
 // DefaultSSHUser is the default Linux username on Debian/Ubuntu jumphost instances.
 const DefaultSSHUser = "debian"
 
+// DefaultProbePod is the default in-cluster netshoot probe pod name.
+const DefaultProbePod = "test-probe"
+
+// DefaultProbeNamespace is the default namespace for the in-cluster probe pod.
+const DefaultProbeNamespace = "default"
+
+type probeOptsCtxKey struct{}
+
+func withProbeOptions(ctx context.Context, opts ProbeOptions) context.Context {
+	return context.WithValue(ctx, probeOptsCtxKey{}, opts)
+}
+
+func probeOptionsFromCtx(ctx context.Context) (ProbeOptions, bool) {
+	if ctx == nil {
+		return ProbeOptions{}, false
+	}
+	opts, ok := ctx.Value(probeOptsCtxKey{}).(ProbeOptions)
+	return opts, ok
+}
+
+func isNamedPodRunning(pod, ns string) bool {
+	return isNamedPodRunningInProcess(pod, ns)
+}
+
+func findTMMProbePod() string {
+	return findTMMProbePodInProcess()
+}
+
+func probePodName() string {
+	if pod := os.Getenv("GKEBNKCTL_PROBE_POD"); pod != "" {
+		return pod
+	}
+	if isNamedPodRunning(DefaultProbePod, DefaultProbeNamespace) {
+		return DefaultProbePod
+	}
+	if tmmPod := findTMMProbePod(); tmmPod != "" {
+		return tmmPod
+	}
+	return DefaultProbePod
+}
+
+func probePodNamespace() string {
+	if ns := os.Getenv("GKEBNKCTL_PROBE_NAMESPACE"); ns != "" {
+		return ns
+	}
+	if strings.HasPrefix(probePodName(), "f5-tmm") {
+		return "f5-cne-system"
+	}
+	return DefaultProbeNamespace
+}
+
+func probePodContainer() string {
+	if c := os.Getenv("GKEBNKCTL_PROBE_CONTAINER"); c != "" {
+		return c
+	}
+	if strings.HasPrefix(probePodName(), "f5-tmm") {
+		return "debug"
+	}
+	return ""
+}
+
+// IsProbePodRunning checks if the in-cluster probe pod is available and running using in-process client-go.
+func IsProbePodRunning(_ context.Context) bool {
+	pod := probePodName()
+	ns := probePodNamespace()
+	return isNamedPodRunningInProcess(pod, ns)
+}
+
+// ProbePodIP returns the IP address of the in-cluster probe pod if running, or "" if unavailable.
+func ProbePodIP(ctx context.Context) string {
+	pod := probePodName()
+	ns := probePodNamespace()
+	return probePodIPInProcess(ctx, pod, ns)
+}
+
+func execInProbe(ctx context.Context, cmdStr string) (string, error) {
+	runner := &PodExecRunner{
+		Namespace: probePodNamespace(),
+		PodName:   probePodName(),
+		Container: probePodContainer(),
+	}
+	return runner.Run(ctx, cmdStr, nil)
+}
+
+func execInProbeWithStdin(ctx context.Context, cmdStr string, stdin io.Reader) (string, error) {
+	runner := &PodExecRunner{
+		Namespace: probePodNamespace(),
+		PodName:   probePodName(),
+		Container: probePodContainer(),
+	}
+	return runner.Run(ctx, cmdStr, stdin)
+}
+
 // ProbeOptions configures a jumphost curl probe run.
 type ProbeOptions struct {
 	// Project is the GCP project ID.
@@ -119,8 +212,50 @@ func prepareIAPKey(ctx context.Context, region, instanceID string) (keyPath, pub
 	return keyFile.Name(), pubFile.Name(), cleanupFn, nil
 }
 
-// RunCurlProbes mints an ephemeral SSH key, pushes it, then runs opts.Iterations curls
-// from the jumphost via the IAP tunnel. Returns per-iteration results.
+// iapProject resolves the GCP project from ProbeOptions in ctx or standard environment variables.
+func iapProject(ctx context.Context) string {
+	if opts, ok := probeOptionsFromCtx(ctx); ok && opts.Project != "" {
+		return opts.Project
+	}
+	for _, k := range []string{"GKEBNKCTL_GCP_PROJECT", "GCP_PROJECT", "CLOUDSDK_CORE_PROJECT"} {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// iapZone resolves the GCP zone from ProbeOptions in ctx, environment variables, or a zone-shaped region argument.
+func iapZone(ctx context.Context, region string) string {
+	if opts, ok := probeOptionsFromCtx(ctx); ok && opts.Zone != "" {
+		return opts.Zone
+	}
+	for _, k := range []string{"GKEBNKCTL_GCP_ZONE", "GCP_ZONE", "CLOUDSDK_COMPUTE_ZONE"} {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	if strings.Count(region, "-") >= 2 {
+		return region
+	}
+	return ""
+}
+
+// iapTunnelFlags returns additional --zone and --project flags for gcloud compute start-iap-tunnel.
+func iapTunnelFlags(ctx context.Context, region string) string {
+	var flags string
+	if zone := iapZone(ctx, region); zone != "" {
+		flags += " --zone=" + zone
+	}
+	if project := iapProject(ctx); project != "" {
+		flags += " --project=" + project
+	}
+	return flags
+}
+
+// RunCurlProbes runs opts.Iterations curls. If an in-cluster probe pod is available
+// (or GKEBNKCTL_PROBE_IN_CLUSTER is set), curls execute via kubectl exec on the probe pod;
+// otherwise it opens an IAP tunnel to the jumphost.
 func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error) {
 	if opts.Iterations <= 0 {
 		opts.Iterations = 5
@@ -130,6 +265,35 @@ func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error
 	}
 	if opts.User == "" {
 		opts.User = DefaultSSHUser
+	}
+	ctx = withProbeOptions(ctx, opts)
+
+	useProbe := os.Getenv("GKEBNKCTL_FORCE_IAP") != "1" && (os.Getenv("GKEBNKCTL_PROBE_IN_CLUSTER") != "" || IsProbePodRunning(ctx))
+	if useProbe {
+		results := make([]ProbeResult, 0, opts.Iterations)
+		remoteCmd := BuildCurlCmd("", opts.VIP, opts.Hostname, int(opts.Timeout.Seconds()))
+		for i := 1; i <= opts.Iterations; i++ {
+			out, perr := execInProbe(ctx, remoteCmd)
+			res := ProbeResult{Iteration: i}
+			if perr != nil {
+				res.Err = perr.Error()
+			}
+			parts := strings.Fields(out)
+			if len(parts) >= 2 {
+				var code int
+				var secs float64
+				_, _ = fmt.Sscanf(parts[0], "%d", &code)
+				_, _ = fmt.Sscanf(parts[1], "%f", &secs)
+				res.HTTPCode = code
+				res.Seconds = secs
+			} else if len(parts) == 1 {
+				var code int
+				_, _ = fmt.Sscanf(parts[0], "%d", &code)
+				res.HTTPCode = code
+			}
+			results = append(results, res)
+		}
+		return results, nil
 	}
 
 	keyPath, pubKeyPath, cleanup, err := prepareIAPKey(ctx, opts.Region, opts.InstanceID)
@@ -157,6 +321,9 @@ func PushSSHPublicKey(ctx context.Context, region, instanceID, pubKeyPath string
 	args := []string{
 		"compute", "os-login", "ssh-keys", "add",
 		"--key-file=" + pubKeyPath,
+	}
+	if project := iapProject(ctx); project != "" {
+		args = append(args, "--project="+project)
 	}
 	// #nosec G204 -- args constructed internally
 	cmd := exec.CommandContext(ctx, "gcloud", args...)
@@ -186,7 +353,7 @@ func BuildCurlCmd(sourceIP, vip, host string, timeoutSecs int) string {
 
 // SSHCurlViaIAP opens an IAP tunnel to the jumphost and runs a single curl.
 func SSHCurlViaIAP(ctx context.Context, region, instanceID, keyPath, sourceIP, vip, host string, timeout time.Duration) (int, float64, error) {
-	proxy := fmt.Sprintf(`ProxyCommand=gcloud compute start-iap-tunnel %s 22 --listen-on-stdin`, instanceID)
+	proxy := fmt.Sprintf(`ProxyCommand=gcloud compute start-iap-tunnel %s 22 --listen-on-stdin%s`, instanceID, iapTunnelFlags(ctx, region))
 	remoteCmd := BuildCurlCmd(sourceIP, vip, host, int(timeout.Seconds()))
 	args := []string{
 		"-o", proxy,
@@ -245,7 +412,7 @@ func buildCurlBodyCmd(sourceIP, vip, host string, timeoutSecs int) string {
 
 // SSHCurlBodyViaIAP opens an IAP tunnel to the jumphost and runs a single body-capturing curl.
 func SSHCurlBodyViaIAP(ctx context.Context, region, instanceID, keyPath, sourceIP, vip, host string, timeout time.Duration) (body string, code int, err error) {
-	proxy := fmt.Sprintf(`ProxyCommand=gcloud compute start-iap-tunnel %s 22 --listen-on-stdin`, instanceID)
+	proxy := fmt.Sprintf(`ProxyCommand=gcloud compute start-iap-tunnel %s 22 --listen-on-stdin%s`, instanceID, iapTunnelFlags(ctx, region))
 	remoteCmd := buildCurlBodyCmd(sourceIP, vip, host, int(timeout.Seconds()))
 	args := []string{
 		"-o", proxy,
@@ -278,7 +445,7 @@ func SSHCurlBodyViaIAP(ctx context.Context, region, instanceID, keyPath, sourceI
 	return bodyStr, httpCode, nil
 }
 
-// RunCurlBodyProbes runs opts.Iterations body-capturing curls from the jumphost.
+// RunCurlBodyProbes runs opts.Iterations body-capturing curls from the jumphost or probe pod.
 func RunCurlBodyProbes(ctx context.Context, opts ProbeOptions) ([]BodyProbeResult, error) {
 	if opts.Iterations <= 0 {
 		opts.Iterations = 5
@@ -288,6 +455,38 @@ func RunCurlBodyProbes(ctx context.Context, opts ProbeOptions) ([]BodyProbeResul
 	}
 	if opts.User == "" {
 		opts.User = DefaultSSHUser
+	}
+	ctx = withProbeOptions(ctx, opts)
+
+	useProbe := os.Getenv("GKEBNKCTL_FORCE_IAP") != "1" && (os.Getenv("GKEBNKCTL_PROBE_IN_CLUSTER") != "" || IsProbePodRunning(ctx))
+	if useProbe {
+		results := make([]BodyProbeResult, 0, opts.Iterations)
+		remoteCmd := buildCurlBodyCmd("", opts.VIP, opts.Hostname, int(opts.Timeout.Seconds()))
+		for i := 1; i <= opts.Iterations; i++ {
+			raw, perr := execInProbe(ctx, remoteCmd)
+			res := BodyProbeResult{Iteration: i}
+			if perr != nil {
+				res.Err = perr.Error()
+			}
+			lastNL := strings.LastIndex(raw, "\n")
+			if lastNL >= 0 {
+				res.Body = strings.TrimSpace(raw[:lastNL])
+				codeStr := strings.TrimSpace(raw[lastNL+1:])
+				var httpCode int
+				if _, parseErr := fmt.Sscanf(codeStr, "%d", &httpCode); parseErr == nil {
+					res.HTTPCode = httpCode
+				}
+			} else if raw != "" {
+				var httpCode int
+				if _, parseErr := fmt.Sscanf(strings.TrimSpace(raw), "%d", &httpCode); parseErr == nil {
+					res.HTTPCode = httpCode
+				} else {
+					res.Body = strings.TrimSpace(raw)
+				}
+			}
+			results = append(results, res)
+		}
+		return results, nil
 	}
 
 	keyPath, pubKeyPath, cleanup, err := prepareIAPKey(ctx, opts.Region, opts.InstanceID)
@@ -316,7 +515,7 @@ func SSHRunViaIAP(ctx context.Context, region, instanceID, keyPath, remoteCmd st
 
 // SSHRunViaIAPWithStdin is SSHRunViaIAP with the local ssh process's stdin attached to the given reader.
 func SSHRunViaIAPWithStdin(ctx context.Context, region, instanceID, keyPath, remoteCmd string, stdin io.Reader) (string, error) {
-	proxy := fmt.Sprintf(`ProxyCommand=gcloud compute start-iap-tunnel %s 22 --listen-on-stdin`, instanceID)
+	proxy := fmt.Sprintf(`ProxyCommand=gcloud compute start-iap-tunnel %s 22 --listen-on-stdin%s`, instanceID, iapTunnelFlags(ctx, region))
 	args := []string{
 		"-o", proxy,
 		"-o", "StrictHostKeyChecking=no",
@@ -359,8 +558,36 @@ func buildHTTPResponderStopCmd(port int) string {
 	return fmt.Sprintf(`sudo systemctl stop %s 2>/dev/null; sudo systemctl reset-failed %s 2>/dev/null; true`, unit, unit)
 }
 
-// StartHTTPResponder starts a backgrounded python3 HTTP server on the jumphost.
+// buildProbeHTTPResponderCmd returns the command that writes marker and runs python3 http.server inside a probe container.
+func buildProbeHTTPResponderCmd(port int, marker string) string {
+	q := shellSingleQuote(marker)
+	dir := fmt.Sprintf("/tmp/gkebnkctl-extpool-%d", port)
+	return fmt.Sprintf(
+		`mkdir -p %s && printf '%%s' %s > %s/index.html && pkill -f '\[p\]ython3 -m http.server %d' 2>/dev/null || true; nohup python3 -m http.server %d --directory %s </dev/null >/dev/null 2>&1 & sleep 1; curl -s -o /dev/null -w '%%{http_code}' http://127.0.0.1:%d/`,
+		dir, q, dir, port, port, dir, port,
+	)
+}
+
+// buildProbeHTTPResponderStopCmd returns the command that stops python3 http.server inside a probe container.
+func buildProbeHTTPResponderStopCmd(port int) string {
+	return fmt.Sprintf(`pkill -f '\[p\]ython3 -m http.server %d' 2>/dev/null || true`, port)
+}
+
+// StartHTTPResponder starts a backgrounded python3 HTTP server on the jumphost or in-cluster probe pod.
 func StartHTTPResponder(ctx context.Context, opts ProbeOptions, port int, marker string) error {
+	ctx = withProbeOptions(ctx, opts)
+	useProbe := os.Getenv("GKEBNKCTL_FORCE_IAP") != "1" && (os.Getenv("GKEBNKCTL_PROBE_IN_CLUSTER") != "" || IsProbePodRunning(ctx))
+	if useProbe {
+		out, runErr := execInProbe(ctx, buildProbeHTTPResponderCmd(port, marker))
+		if runErr != nil {
+			return fmt.Errorf("starting HTTP responder on :%d: %w (probe stdout: %q)", port, runErr, out)
+		}
+		if strings.TrimSpace(out) != "200" {
+			return fmt.Errorf("HTTP responder on :%d did not return 200 (probe stdout: %q)", port, out)
+		}
+		return nil
+	}
+
 	keyPath, _, cleanup, err := prepareIAPKey(ctx, opts.Region, opts.InstanceID)
 	if err != nil {
 		return err
@@ -377,8 +604,15 @@ func StartHTTPResponder(ctx context.Context, opts ProbeOptions, port int, marker
 	return nil
 }
 
-// StopHTTPResponder kills any python3 http.server on port via the IAP tunnel.
+// StopHTTPResponder kills any python3 http.server on port via the IAP tunnel or in-cluster probe pod.
 func StopHTTPResponder(ctx context.Context, opts ProbeOptions, port int) error {
+	ctx = withProbeOptions(ctx, opts)
+	useProbe := os.Getenv("GKEBNKCTL_FORCE_IAP") != "1" && (os.Getenv("GKEBNKCTL_PROBE_IN_CLUSTER") != "" || IsProbePodRunning(ctx))
+	if useProbe {
+		_, _ = execInProbe(ctx, buildProbeHTTPResponderStopCmd(port))
+		return nil
+	}
+
 	keyPath, _, cleanup, err := prepareIAPKey(ctx, opts.Region, opts.InstanceID)
 	if err != nil {
 		return err

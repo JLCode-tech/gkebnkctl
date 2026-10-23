@@ -74,7 +74,7 @@ func runBNKForgeRegister(cmd *cobra.Command, _ []string) error {
 	}
 
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "✓ Registered cluster %s with BNK Forge (%s)\n", cl.Metadata.Name, flagForgeURL)
+	fmt.Fprintf(out, "[ok] Registered cluster %s with BNK Forge (%s)\n", cl.Metadata.Name, flagForgeURL)
 	return nil
 }
 
@@ -91,7 +91,7 @@ func runBNKForgeUnregister(cmd *cobra.Command, _ []string) error {
 	}
 
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "✓ Unregistered cluster %s from BNK Forge\n", cl.Metadata.Name)
+	fmt.Fprintf(out, "[ok] Unregistered cluster %s from BNK Forge\n", cl.Metadata.Name)
 	return nil
 }
 

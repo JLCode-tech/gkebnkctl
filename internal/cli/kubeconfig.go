@@ -41,7 +41,7 @@ func init() {
 	kubeconfigCmd.Flags().BoolVar(&flagKubeconfigExport, "export", false, "Print kubeconfig YAML to stdout")
 	kubeconfigCmd.Flags().BoolVar(&flagKubeconfigWriteGlobal, "write-global", false, "Safely write to ~/.kube/config (backed up to ~/.kube/config.gkebnkctl-bak)")
 	kubeconfigCmd.Flags().BoolVar(&flagKubeconfigRestoreGlobal, "restore-global", false, "Restore ~/.kube/config from backup")
-	kubeconfigCmd.Flags().StringVarP(&flagKubeconfigOut, "out", "o", "", "Custom output path for kubeconfig file")
+	kubeconfigCmd.Flags().StringVar(&flagKubeconfigOut, "out", "", "Custom output path for kubeconfig file")
 
 	rootCmd.AddCommand(kubeconfigCmd)
 }

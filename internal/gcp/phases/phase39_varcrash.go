@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -28,7 +29,7 @@ type varCrashTarget struct {
 // image digests carry a crashagent that hard-dies without /var/crash and
 // s6-tears-down the main service (reference/TRIAL-NOTES.md item 5).
 var varCrashTargets = []varCrashTarget{
-	{Namespace: "f5-bnk", Deployment: "f5-cne-controller"},
+	{Namespace: "f5-cne-system", Deployment: "f5-cne-controller"},
 	{Namespace: "f5-utils", Deployment: "f5-crdconversion"},
 }
 
@@ -103,13 +104,15 @@ func patchVarCrash(ctx context.Context, client kubernetes.Interface, ns, deploy 
 	if len(d.Spec.Template.Spec.Containers) == 0 {
 		return fmt.Errorf("deployment %s/%s has no containers to mount /var/crash into", ns, deploy)
 	}
-	container := d.Spec.Template.Spec.Containers[0].Name
-
-	fmt.Fprintf(os.Stderr, "[phase 39] patching %s/%s (container=%s) with /var/crash emptyDir\n", ns, deploy, container)
+	var containerPatches []string
+	for _, c := range d.Spec.Template.Spec.Containers {
+		containerPatches = append(containerPatches, fmt.Sprintf(`{"name":%q,"volumeMounts":[{"name":%q,"mountPath":"/var/crash"}]}`, c.Name, varCrashVolumeName))
+	}
+	fmt.Fprintf(os.Stderr, "[phase 39] patching %s/%s with /var/crash emptyDir\n", ns, deploy)
 	patch := fmt.Sprintf(`{"spec":{"template":{"spec":{
   "volumes":[{"name":%q,"emptyDir":{}}],
-  "containers":[{"name":%q,"volumeMounts":[{"name":%q,"mountPath":"/var/crash"}]}]
-}}}}`, varCrashVolumeName, container, varCrashVolumeName)
+  "containers":[%s]
+}}}}`, varCrashVolumeName, strings.Join(containerPatches, ","))
 
 	if _, err := client.AppsV1().Deployments(ns).Patch(ctx, deploy, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("patching deployment %s/%s: %w", ns, deploy, err)

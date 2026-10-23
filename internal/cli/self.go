@@ -88,9 +88,9 @@ func runSelfUpdate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("download update: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, execPath); err != nil {
+	if err := self.ReplaceExecutable(tmpPath, execPath); err != nil {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("replace binary %s: %w", execPath, err)
+		return err
 	}
 
 	fmt.Printf("✓ Successfully updated gkebnkctl to %s\n", rel.TagName)

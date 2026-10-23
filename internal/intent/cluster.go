@@ -8,6 +8,7 @@
 package intent
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -15,10 +16,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/JLCode-tech/gkebnkctl/internal/manifest"
 	"github.com/JLCode-tech/gkebnkctl/internal/netcalc"
 )
 
@@ -27,10 +30,11 @@ import (
 // letter and end with a letter or digit.
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,38}[a-z0-9]$`)
 
-// PatternHostDevice is the only pattern this seed supports. Kept as a named
-// constant (rather than a bare literal) for forward-compat with awsbnkctl's
-// pattern: field, which supports several values.
-const PatternHostDevice = "host-device"
+const (
+	PatternHostDevice    = "host-device"
+	PatternExternalOnly  = "external-only"
+	PatternDualInterface = "dual-interface"
+)
 
 // APIVersion and Kind are the only accepted values for their respective
 // cluster.yaml fields.
@@ -80,6 +84,8 @@ type Cluster struct {
 	// cluster-svcs F5SPKStaticRoute template.
 	MainSvcsDest      string `yaml:"-"`
 	MainSvcsPrefixLen int    `yaml:"-"`
+	// SourcePath is the filesystem path the cluster was loaded from.
+	SourcePath string `yaml:"-"`
 }
 
 // Metadata carries the cluster identity fields.
@@ -182,10 +188,28 @@ type NodePoolSpec struct {
 	MaxPodsPerNode int `yaml:"maxPodsPerNode,omitempty"`
 }
 
+// BnkAIGatewaySpec configures BNK 2.4.1+ AI Gateway components.
+type BnkAIGatewaySpec struct {
+	Enabled            bool   `yaml:"enabled,omitempty"`
+	AIProxy            bool   `yaml:"aiProxy,omitempty"`
+	AIMetrics          bool   `yaml:"aiMetrics,omitempty"`
+	DNSResolver        bool   `yaml:"dnsResolver,omitempty"`
+	DefaultRoute       bool   `yaml:"defaultRoute,omitempty"`
+	DefaultEgressRoute bool   `yaml:"defaultEgressRoute,omitempty"`
+	DSSMSentinel       bool   `yaml:"dssmSentinel,omitempty"`
+	MultiNumaSpanning  bool   `yaml:"multiNumaSpanning,omitempty"`
+	ModelRoute         string `yaml:"modelRoute,omitempty"`
+	ProviderBackend    string `yaml:"providerBackend,omitempty"`
+}
+
 // BnkSpec holds the BNK install configuration.
 type BnkSpec struct {
 	// ManifestVersion is the BNK manifest version pulled by FLO. Required.
-	ManifestVersion string `yaml:"manifestVersion"`
+	ManifestVersion string `yaml:"manifestVersion,omitempty"`
+	// Version is an alias for ManifestVersion.
+	Version string `yaml:"version,omitempty"`
+	// FLOVersion is an optional explicit override for the F5 Lifecycle Operator chart version.
+	FLOVersion string `yaml:"floVersion,omitempty"`
 	// TmmMtu is the TMM interface MTU (F5SPKVlan.mtu / CNEInstance
 	// TMM_DEFAULT_MTU). Distinct from network.{external,internal}.mtu (the
 	// VPC wire/jumbo-frame MTU, 8896) — do not conflate the two. Default
@@ -197,9 +221,73 @@ type BnkSpec struct {
 	JwtPath string `yaml:"jwtPath"`
 	// FarSecret configures how the far-secret pull credential is sourced.
 	FarSecret FarSecretSpec `yaml:"farSecret,omitempty"`
+	// FARArchive is the path to F5's FAR pull credentials JSON or tar.gz file (used by bnk upgrade / Helm OCI).
+	FARArchive string `yaml:"farArchive,omitempty"`
+	// JWT is the path to the F5 subscription JWT. Alias for JwtPath.
+	JWT string `yaml:"jwt,omitempty"`
 	// ImageRegistry is the container registry prefix where BNK/FLO images are pulled from.
 	// Default "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga".
 	ImageRegistry string `yaml:"imageRegistry,omitempty"`
+	// Telemetry enables the CNEInstance telemetry subsystems (logging + metrics).
+	Telemetry bool `yaml:"telemetry,omitempty"`
+	// AIGateway configures BNK 2.4.1+ AI Gateway components.
+	AIGateway *BnkAIGatewaySpec `yaml:"aiGateway,omitempty"`
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler for BnkSpec so tmmMtu accepts
+// both integer (9000) and string ("9000") YAML scalars while still enforcing
+// KnownFields(true).
+func (b *BnkSpec) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i < len(value.Content)-1; i += 2 {
+			k := value.Content[i]
+			v := value.Content[i+1]
+			if k.Value == "tmmMtu" && v.Kind == yaml.ScalarNode && v.Value != "" {
+				if _, err := strconv.Atoi(strings.TrimSpace(v.Value)); err != nil {
+					return fmt.Errorf("bnk.tmmMtu %q is not a valid integer: %w", v.Value, err)
+				}
+				v.Value = strings.TrimSpace(v.Value)
+				v.Tag = "!!str"
+			}
+		}
+	}
+	type rawBnkSpec BnkSpec
+	rawBytes, err := yaml.Marshal(value)
+	if err != nil {
+		return err
+	}
+	var raw rawBnkSpec
+	dec := yaml.NewDecoder(bytes.NewReader(rawBytes))
+	dec.KnownFields(true)
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+	if raw.ManifestVersion == "" && raw.Version != "" {
+		raw.ManifestVersion = raw.Version
+	}
+	*b = BnkSpec(raw)
+	return nil
+}
+
+// Is24 reports whether the configured BNK manifest version uses the 2.4+ Gateway API / Infra CR model.
+func (b BnkSpec) Is24() bool {
+	v := strings.TrimPrefix(strings.TrimSpace(b.ManifestVersion), "v")
+	return !strings.HasPrefix(v, "2.3")
+}
+
+// FLOVersion resolves the FLO chart version paired with bnk.manifestVersion.
+func (c *Cluster) FLOVersion() string {
+	if c != nil {
+		if strings.TrimSpace(c.Bnk.FLOVersion) != "" {
+			return strings.TrimSpace(c.Bnk.FLOVersion)
+		}
+		if c.Bnk.ManifestVersion != "" {
+			if chart, ok := manifest.FLOChartFor(c.Bnk.ManifestVersion); ok {
+				return chart
+			}
+		}
+	}
+	return manifest.DefaultFLOChart()
 }
 
 // FarSecretSpec configures the far-secret pull-credential source.
@@ -211,13 +299,13 @@ type FarSecretSpec struct {
 	// SourceContext is the kube context to copy far-secret FROM. Required
 	// iff source == "kubecontext".
 	SourceContext string `yaml:"sourceContext,omitempty"`
-	// SourceNamespace is the source namespace for the copy. Default "f5-bnk".
+	// SourceNamespace is the source namespace for the copy. Default "f5-cne-core".
 	SourceNamespace string `yaml:"sourceNamespace,omitempty"`
 	// DockerConfigFile is the path to a docker-config JSON. Runtime input,
 	// gitignored. Required iff source == "dockerconfig".
 	DockerConfigFile string `yaml:"dockerConfigFile,omitempty"`
 	// Namespaces are the namespaces to install far-secret into. Default
-	// [f5-bnk, f5-utils].
+	// [f5-cne-core, f5-cne-system, f5-bnk-instance, f5-utils, default].
 	Namespaces []string `yaml:"namespaces,omitempty"`
 }
 
@@ -274,10 +362,9 @@ func Load(path string) (*Cluster, error) {
 		return nil, fmt.Errorf("validating cluster.yaml %s: %w", path, err)
 	}
 	if err := deriveComputed(&c); err != nil {
-		// Should be unreachable — validate() already proved every CIDR
-		// referenced here parses. Surfaced defensively rather than panicking.
 		return nil, fmt.Errorf("deriving cluster.yaml %s: %w", path, err)
 	}
+	c.SourcePath = path
 	return &c, nil
 }
 
@@ -317,12 +404,21 @@ func applyDefaults(c *Cluster, baseDir string) {
 	// the example but operator-set; a zero value is left for validate() to
 	// reject as a missing required field.
 
+	if strings.TrimSpace(c.Metadata.Project) == "YOUR_GCP_PROJECT_ID" {
+		for _, envKey := range []string{"GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "CLOUDSDK_CORE_PROJECT"} {
+			if v := strings.TrimSpace(os.Getenv(envKey)); v != "" && v != "YOUR_GCP_PROJECT_ID" {
+				c.Metadata.Project = v
+				break
+			}
+		}
+	}
+
 	if c.ClusterSpec.KubernetesVersion == "" {
 		c.ClusterSpec.KubernetesVersion = "1.35"
 	}
 	applyPoolDefaults(&c.ClusterSpec.DefaultPool, "", "e2-standard-4", 3, 0)
 	applyPoolDefaults(&c.ClusterSpec.TmmPool, "tmm-pool", "e2-standard-8", 1, 8)
-	applyPoolDefaults(&c.ClusterSpec.AgentPool, "agent-pool", "e2-standard-4", 1, 8)
+	applyPoolDefaults(&c.ClusterSpec.AgentPool, "agent-pool", "e2-standard-4", 1, 32)
 
 	if c.Bnk.TmmMtu == "" {
 		c.Bnk.TmmMtu = "1460"
@@ -330,14 +426,24 @@ func applyDefaults(c *Cluster, baseDir string) {
 	if c.Bnk.ImageRegistry == "" {
 		c.Bnk.ImageRegistry = "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga"
 	}
+	if c.Bnk.JwtPath == "" && c.Bnk.JWT != "" {
+		c.Bnk.JwtPath = c.Bnk.JWT
+	}
+	if c.Bnk.JWT == "" && c.Bnk.JwtPath != "" {
+		c.Bnk.JWT = c.Bnk.JwtPath
+	}
 	if c.Bnk.JwtPath != "" && !filepath.IsAbs(c.Bnk.JwtPath) {
 		c.Bnk.JwtPath = filepath.Join(baseDir, c.Bnk.JwtPath)
+		c.Bnk.JWT = c.Bnk.JwtPath
+	}
+	if c.Bnk.FARArchive != "" && !filepath.IsAbs(c.Bnk.FARArchive) {
+		c.Bnk.FARArchive = filepath.Join(baseDir, c.Bnk.FARArchive)
 	}
 	if c.Bnk.FarSecret.SourceNamespace == "" {
-		c.Bnk.FarSecret.SourceNamespace = "f5-bnk"
+		c.Bnk.FarSecret.SourceNamespace = "f5-cne-core"
 	}
 	if len(c.Bnk.FarSecret.Namespaces) == 0 {
-		c.Bnk.FarSecret.Namespaces = []string{"f5-bnk", "f5-utils"}
+		c.Bnk.FarSecret.Namespaces = []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance", "f5-utils", "default"}
 	}
 	if c.Bnk.FarSecret.DockerConfigFile != "" && !filepath.IsAbs(c.Bnk.FarSecret.DockerConfigFile) {
 		c.Bnk.FarSecret.DockerConfigFile = filepath.Join(baseDir, c.Bnk.FarSecret.DockerConfigFile)
@@ -459,8 +565,20 @@ func validate(c *Cluster) error {
 	if _, err := os.Stat(c.Bnk.JwtPath); err != nil {
 		return fmt.Errorf("bnk.jwtPath %q: %w", c.Bnk.JwtPath, err)
 	}
-	if err := validateFarSecret(c.Bnk.FarSecret); err != nil {
-		return err
+	if c.Bnk.FARArchive != "" {
+		if _, err := os.Stat(c.Bnk.FARArchive); err != nil {
+			return fmt.Errorf("bnk.farArchive %q: %w", c.Bnk.FARArchive, err)
+		}
+	}
+	if c.Bnk.FarSecret.Source != "" || c.Bnk.FARArchive == "" {
+		if err := validateFarSecret(c.Bnk.FarSecret); err != nil {
+			return err
+		}
+	}
+	if c.AI != nil {
+		if err := validateSynthetic(c.AI.Synthetic); err != nil {
+			return err
+		}
 	}
 
 	warnCIDROverlaps(c)
@@ -604,11 +722,18 @@ type ForgeSpec struct {
 	Environment string `yaml:"environment,omitempty"`
 	// ProjectType is the forge project type. Default "cloud-gcp".
 	ProjectType string `yaml:"projectType,omitempty"`
+	// ProjectName is the name of the forge project to register the cluster into.
+	// Defaults to "gkebnkctl-" + workspace.
+	ProjectName string `yaml:"projectName,omitempty"`
+	// CloudProvider is the forge cloud provider identifier. Default "gcp".
+	CloudProvider string `yaml:"cloudProvider,omitempty"`
 	// AgentToken is the Forge benchmark agent JWT token (role 'agent').
 	// Resolution order: CLI flag > GKEBNKCTL_FORGE_AGENT_TOKEN / AWSBNKCTL_FORGE_AGENT_TOKEN env > this field.
 	AgentToken string `yaml:"agent_token,omitempty"`
 	// AgentTokenCamel is a fallback alias for camelCase YAML configs (agentToken).
 	AgentTokenCamel string `yaml:"agentToken,omitempty"`
+	// CredentialTemplateID is the optional Forge credential template ID attached to the project.
+	CredentialTemplateID int `yaml:"credentialTemplateId,omitempty"`
 }
 
 // DefaultForgeRESTURL is the fallback REST base when forge.url is not set.
@@ -725,48 +850,50 @@ func (f *ForgeSpec) ResolveProjectType() string {
 	return "cloud-gcp"
 }
 
-// AISpec captures optional AI / LLM configuration.
-type AISpec struct {
-	Synthetic *SyntheticSpec `yaml:"synthetic,omitempty"`
-}
-
-// SyntheticSpec configures synthetic inference simulation.
-type SyntheticSpec struct {
-	Enabled         bool   `yaml:"enabled"`
-	ServedModelName string `yaml:"servedModelName,omitempty"`
-	Image           string `yaml:"image,omitempty"`
-}
-
-// SyntheticAIEnabled reports whether synthetic AI inference simulation is enabled.
-func (c *Cluster) SyntheticAIEnabled() bool {
-	return c != nil && c.AI != nil && c.AI.Synthetic != nil && c.AI.Synthetic.Enabled
-}
-
-// UsesSyntheticAI reports whether the AI scenario runs the simulator.
-func (c *Cluster) UsesSyntheticAI() bool {
-	return c != nil && c.SyntheticAIEnabled()
-}
-
-// SimulatorTags labels benchmark results with what the simulator stands in for.
-func (c *Cluster) SimulatorTags() map[string]string {
-	if !c.UsesSyntheticAI() {
-		return nil
+// ResolveProjectName returns the forge project name, defaulting to "gkebnkctl-" + clusterName.
+func (f *ForgeSpec) ResolveProjectName(clusterName string) string {
+	if f != nil && f.ProjectName != "" {
+		return f.ProjectName
 	}
-	m := "meta-llama/Meta-Llama-3-8B-Instruct"
-	if c.AI.Synthetic.ServedModelName != "" {
-		m = c.AI.Synthetic.ServedModelName
+	if clusterName == "" {
+		return "gkebnkctl"
 	}
-	return map[string]string{"model_server": "llm-d-inference-sim", "sim_model": m}
+	return "gkebnkctl-" + clusterName
+}
+
+// ResolveCloudProvider returns the forge cloud provider identifier.
+func (f *ForgeSpec) ResolveCloudProvider() string {
+	if f != nil && f.CloudProvider != "" {
+		return f.CloudProvider
+	}
+	return "gcp"
+}
+
+// HasInternalInterface reports whether the topology provisions a second data plane interface.
+func (c *Cluster) HasInternalInterface() bool {
+	return c != nil && (c.Pattern == PatternDualInterface || c.Network.Internal.CIDR != "")
+}
+
+// IsReservedGatewayVIPOffset returns true if the host offset falls in the BNK Gateway VIP plan (.100 to .119).
+func IsReservedGatewayVIPOffset(offset int) bool {
+	return offset >= 100 && offset <= 119
 }
 
 // DefaultVIP derives the default BNK Gateway VIP from the external network CIDR.
-// Convention: <network.external.cidr network>.100 — e.g. 10.31.0.0/24 → 10.31.0.100.
-// Returns an error when network.external.cidr is not set.
+// When PodsCIDR is configured (e.g. GKE multi-networking with host-device), VIPs
+// belong to the secondary pod range (defaulting to offset 10, e.g. 10.81.1.10).
+// Otherwise, it derives from External.CIDR (defaulting to offset 100).
+// Returns an error when neither network.external.podsCidr nor network.external.cidr is set.
 func (c *Cluster) DefaultVIP() (string, error) {
-	if c.Network.External.CIDR == "" {
+	cidr := c.Network.External.PodsCIDR
+	offset := byte(10)
+	if cidr == "" {
+		cidr = c.Network.External.CIDR
+		offset = 100
+	}
+	if cidr == "" {
 		return "", errors.New("network.external.cidr not set; pass --vip explicitly")
 	}
-	cidr := c.Network.External.CIDR
 	slash := strings.IndexByte(cidr, '/')
 	if slash < 0 {
 		return "", fmt.Errorf("invalid external CIDR %q: missing '/'", cidr)
@@ -779,6 +906,27 @@ func (c *Cluster) DefaultVIP() (string, error) {
 	if ip4 == nil {
 		return "", fmt.Errorf("external CIDR %q is not IPv4", cidr)
 	}
-	vip := net.IPv4(ip4[0], ip4[1], ip4[2], 100)
+	vip := net.IPv4(ip4[0], ip4[1], ip4[2], offset)
 	return vip.String(), nil
+}
+
+// SelfIPPoolPrefix is the CIDR prefix length for TMM self-IP pools.
+const SelfIPPoolPrefix = 27
+
+const selfIPPoolMask = byte(1<<(32-SelfIPPoolPrefix) - 1)
+
+// SelfIPPoolRange returns the rangeStart/rangeEnd of the self-IP pool for
+// selfIP: the /SelfIPPoolPrefix block that contains it, minus its last address.
+func SelfIPPoolRange(selfIP string) (start, end string, err error) {
+	ip := net.ParseIP(selfIP).To4()
+	if ip == nil {
+		return "", "", fmt.Errorf("self IP %q is not an IPv4 address", selfIP)
+	}
+	first := ip[3] &^ selfIPPoolMask
+	if first == 0 {
+		return "", "", fmt.Errorf("self IP %s falls in the first /%d of its subnet", selfIP, SelfIPPoolPrefix)
+	}
+	start = net.IPv4(ip[0], ip[1], ip[2], first).String()
+	end = net.IPv4(ip[0], ip[1], ip[2], first+selfIPPoolMask-1).String()
+	return start, end, nil
 }

@@ -150,15 +150,16 @@ func TestScenario_ChildCounts(t *testing.T) {
 		key   string
 		count int
 	}{
-		{"baseline", 4},         // DEFAULT_SWEEP = {50,100,150,200}
-		{"high-concurrency", 4}, // HEAVY_CONC_ISL = 4 pairs
-		{"mixed-workload", 9},   // 1 warmup + 4 short + 4 long
-		{"multi-turn", 16},      // 4 turns × 4 sweep = 16
-		{"prefix-cache", 4},     // HEAVY_CONC_ISL = 4 pairs
-		{"bimodal", 4},          // DEFAULT_SWEEP
-		{"sustained-load", 5},   // sweep {50,100,150,200,250}
-		{"burst-recovery", 10},  // 5 rounds × 2 (burst+probe)
-		{"mooncake", 1},         // single trace variant
+		{"inferencex-agentx-mvp", 4}, // rates {2,4,8,16}
+		{"baseline", 4},              // DEFAULT_SWEEP = {50,100,150,200}
+		{"high-concurrency", 4},      // HEAVY_CONC_ISL = 4 pairs
+		{"mixed-workload", 9},        // 1 warmup + 4 short + 4 long
+		{"multi-turn", 16},           // 4 turns × 4 sweep = 16
+		{"prefix-cache", 4},          // HEAVY_CONC_ISL = 4 pairs
+		{"bimodal", 4},               // DEFAULT_SWEEP
+		{"sustained-load", 5},        // sweep {50,100,150,200,250}
+		{"burst-recovery", 10},       // 5 rounds × 2 (burst+probe)
+		{"mooncake", 1},              // single trace variant
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {
@@ -767,5 +768,48 @@ func TestExpandForgeScenario_Poisson(t *testing.T) {
 	prefix, _ := expandForgeScenario("poisson-rate-prefix", jumphost.AiperfConfig{})
 	if p := prefix[0].Config; p.RequestRate != 1 || p.PrefixPromptLength != 4000 || p.NumPrefixPrompts != 20 || p.BenchmarkDuration != 300 {
 		t.Errorf("prefix 1 rps step = %+v", p)
+	}
+}
+
+func TestExpandForgeScenario_AgentXMvp_Values(t *testing.T) {
+	children, err := expandForgeScenario("inferencex-agentx-mvp", defaultBaseCfg())
+	if err != nil {
+		t.Fatalf("expandForgeScenario(inferencex-agentx-mvp): %v", err)
+	}
+	if len(children) != 4 {
+		t.Fatalf("expected 4 children, got %d", len(children))
+	}
+	expectedLadder := []int{8, 16, 32, 64}
+	for i, expC := range expectedLadder {
+		ch := children[i]
+		expectedLabel := "c" + itoa(expC)
+		if ch.VariantLabel != expectedLabel {
+			t.Errorf("[%d] VariantLabel = %q, want %q", i, ch.VariantLabel, expectedLabel)
+		}
+		cfg := ch.Config
+		if cfg.Concurrency != expC {
+			t.Errorf("[%d] Concurrency = %d, want %d", i, cfg.Concurrency, expC)
+		}
+		if cfg.Scenario != "inferencex-agentx-mvp" {
+			t.Errorf("[%d] Scenario = %q, want %q", i, cfg.Scenario, "inferencex-agentx-mvp")
+		}
+		if cfg.PublicDataset != "semianalysis_cc_traces_weka_with_subagents" {
+			t.Errorf("[%d] PublicDataset = %q, want %q", i, cfg.PublicDataset, "semianalysis_cc_traces_weka_with_subagents")
+		}
+		if cfg.BenchmarkDuration != 900 {
+			t.Errorf("[%d] BenchmarkDuration = %v, want 900", i, cfg.BenchmarkDuration)
+		}
+		if cfg.RandomSeed != 20260707 {
+			t.Errorf("[%d] RandomSeed = %d, want 20260707", i, cfg.RandomSeed)
+		}
+		if !cfg.Streaming {
+			t.Errorf("[%d] Streaming = false, want true", i)
+		}
+		if !cfg.UseServerTokenCount {
+			t.Errorf("[%d] UseServerTokenCount = false, want true", i)
+		}
+		if cfg.Timeout < 40*time.Minute {
+			t.Errorf("[%d] Timeout = %v, want >= 40m", i, cfg.Timeout)
+		}
 	}
 }

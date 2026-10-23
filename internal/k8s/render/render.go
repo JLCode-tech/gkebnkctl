@@ -15,7 +15,11 @@ package render
 import (
 	"bytes"
 	"fmt"
+	"strconv"
+	"strings"
 	"text/template"
+
+	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 )
 
 // Render executes a Go text/template given in tmpl with data as the
@@ -55,6 +59,42 @@ type CNEInstanceVars struct {
 	ExtPCI          string
 	IntPCI          string
 	ImageRegistry   string
+	Telemetry       bool
+	AIGateway       bool
+}
+
+func isAIGatewayManifestVersion(manifestVersion string) bool {
+	v := strings.TrimPrefix(strings.TrimSpace(manifestVersion), "v")
+	if v == "" {
+		return false
+	}
+	base := strings.SplitN(v, "-", 2)[0]
+	parts := strings.Split(base, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	maj, err1 := strconv.Atoi(parts[0])
+	min, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	if maj > 2 {
+		return true
+	}
+	if maj < 2 {
+		return false
+	}
+	if min > 4 {
+		return true
+	}
+	if min < 4 {
+		return false
+	}
+	if len(parts) < 3 {
+		return false
+	}
+	patch, err3 := strconv.Atoi(parts[2])
+	return err3 == nil && patch >= 1
 }
 
 // RenderCNEInstance renders templates/cneinstance.yaml.tmpl (Phase38). The
@@ -62,6 +102,9 @@ type CNEInstanceVars struct {
 // are the mandatory host-device contract items (reference/TRIAL-NOTES.md
 // item 3) — do not drop them.
 func RenderCNEInstance(tmpl []byte, v CNEInstanceVars) ([]byte, error) {
+	if isAIGatewayManifestVersion(v.ManifestVersion) {
+		v.AIGateway = true
+	}
 	return Render(tmpl, v)
 }
 
@@ -92,6 +135,39 @@ func RenderVlansRoutes(tmpl []byte, v VlansRoutesVars) ([]byte, error) {
 	return Render(tmpl, v)
 }
 
+// InfraVars is the Vars struct for templates/infra.yaml.tmpl (BNK 2.4).
+type InfraVars struct {
+	TmmMtu               string
+	ExtSelfIP            string
+	IntSelfIP            string
+	ExtGwIP              string
+	IntGwIP              string
+	ListenerStart        string
+	ListenerEnd          string
+	VxlanPort            int
+	ExtUnderlayDest      string
+	ExtUnderlayPrefixLen int
+	MainPodsDest         string
+	MainPodsPrefixLen    int
+	MainSvcsDest         string
+	MainSvcsPrefixLen    int
+	TmmPodGW             string
+}
+
+// RenderInfra renders templates/infra.yaml.tmpl (Phase41 on BNK 2.4).
+func RenderInfra(tmpl []byte, v InfraVars) ([]byte, error) {
+	if v.TmmMtu == "" {
+		v.TmmMtu = "1460"
+	}
+	if v.ListenerStart == "" {
+		v.ListenerStart = "10.30.0.100"
+	}
+	if v.ListenerEnd == "" {
+		v.ListenerEnd = "10.30.0.199"
+	}
+	return Render(tmpl, v)
+}
+
 // LicenseCRVars is the Vars struct for templates/license-cr.yaml.tmpl.
 type LicenseCRVars struct {
 	// JWT is the raw, whitespace-trimmed license token — never base64, never
@@ -111,8 +187,8 @@ type NamespacesVars struct {
 }
 
 // RenderNamespaces renders templates/namespaces.yaml.tmpl (Phase30):
-// the f5-bnk, f5-utils, and egress test namespaces. f5-bnk and f5-utils
-// are static; TestNamespace is templated to support custom egress namespaces.
+// the cert-manager, f5-cne-core, f5-cne-system, f5-bnk-instance, f5-utils, and
+// egress test namespaces. TestNamespace is templated to support custom egress namespaces.
 func RenderNamespaces(tmpl []byte, v NamespacesVars) ([]byte, error) {
 	return Render(tmpl, v)
 }
@@ -131,6 +207,28 @@ type EgressVars struct {
 // RenderEgress renders templates/egress.yaml.tmpl (Phase50): the
 // F5SPKEgress pseudo-CNI vxlan CR + the egress-client test pod.
 func RenderEgress(tmpl []byte, v EgressVars) ([]byte, error) {
+	return Render(tmpl, v)
+}
+
+// EgressGatewayVars is the Vars struct for templates/egress-gateway.yaml.tmpl (BNK 2.4).
+type EgressGatewayVars struct {
+	TestNamespace    string
+	GatewayClassName string
+	NetworkRef       string
+	AgentPoolName    string
+}
+
+// RenderEgressGateway renders templates/egress-gateway.yaml.tmpl (Phase50 on BNK 2.4).
+func RenderEgressGateway(tmpl []byte, v EgressGatewayVars) ([]byte, error) {
+	if v.TestNamespace == "" {
+		v.TestNamespace = "egress-test"
+	}
+	if v.GatewayClassName == "" {
+		v.GatewayClassName = "f5-gateway-class"
+	}
+	if v.NetworkRef == "" {
+		v.NetworkRef = InfraIntNetwork
+	}
 	return Render(tmpl, v)
 }
 
@@ -177,4 +275,101 @@ type IngressVxlanRoutesVars struct {
 // case rather than SSA-ing zero objects.
 func RenderIngressVxlanRoutes(tmpl []byte, v IngressVxlanRoutesVars) ([]byte, error) {
 	return Render(tmpl, v)
+}
+
+const (
+	InfraName         = "infra"
+	InfraExtNetwork   = "external"
+	InfraIntNetwork   = "internal"
+	InfraListenerPool = "listener-pool"
+	InfraEgressSubnet = "192.168.0.0/16"
+	InfraEgressPort   = 4789
+	InfraRouteVNet    = "vnet"
+	InfraRouteDefault = "default"
+	TMMK8sRoutesEnv   = "TMM_K8S_ROUTES"
+)
+
+// InfraTunnelNetwork is the Infra network the egress tunnel terminates on:
+// int-vlan when the pattern has an internal interface, ext-vlan otherwise.
+func InfraTunnelNetwork(hasInternal bool) string {
+	if hasInternal {
+		return InfraIntNetwork
+	}
+	return InfraExtNetwork
+}
+
+// CNEControllerServiceAccount is the ServiceAccount the F5 cne-controller runs as.
+const CNEControllerServiceAccount = "f5-cne-controller"
+
+// CNEControllerRBACName is the ClusterRole/ClusterRoleBinding gkebnkctl adds
+// so the controller can read EndpointSlices (see templates/cne-controller-rbac.yaml.tmpl).
+func CNEControllerRBACName(cl *intent.Cluster) string {
+	return cl.Metadata.Name + "-cne-controller-endpointslices"
+}
+
+// CNEControllerRBACVars holds the substitution variables for
+// templates/cne-controller-rbac.yaml.tmpl.
+type CNEControllerRBACVars struct {
+	Name           string // <cluster>-cne-controller-endpointslices
+	LabName        string // cl.Metadata.Name
+	InstanceNS     string // f5-cne-system
+	ServiceAccount string // f5-cne-controller
+}
+
+// RenderCNEControllerRBAC renders the EndpointSlice + NAD ClusterRole + binding for
+// the cne-controller ServiceAccount.
+func RenderCNEControllerRBAC(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
+	return RenderCNEControllerRBACNamespace(tmpl, cl, "f5-cne-system")
+}
+
+// RenderCNEControllerRBACNamespace renders the RBAC with an explicit namespace.
+func RenderCNEControllerRBACNamespace(tmpl []byte, cl *intent.Cluster, ns string) ([]byte, error) {
+	if cl == nil || cl.Metadata.Name == "" {
+		return nil, fmt.Errorf("render cne-controller rbac: cluster name is required")
+	}
+	if ns == "" {
+		ns = "f5-cne-system"
+	}
+	return renderTemplateString(string(tmpl), CNEControllerRBACVars{
+		Name:           CNEControllerRBACName(cl),
+		LabName:        cl.Metadata.Name,
+		InstanceNS:     ns,
+		ServiceAccount: CNEControllerServiceAccount,
+	})
+}
+
+func renderTemplateString(tmplStr string, data interface{}) ([]byte, error) {
+	t, err := template.New("tmpl").Parse(tmplStr)
+	if err != nil {
+		return nil, fmt.Errorf("parsing template: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("executing template: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// FLOValuesVars holds the substitution variables for flo-values.yaml.tmpl.
+type FLOValuesVars struct {
+	CAIssuer      string // <cluster>-ca-cluster-issuer
+	FARSecretName string // far-secret
+	JWT           string // raw JWT token contents
+	ClusterName   string // cl.Metadata.Name
+}
+
+// FLOValuesVarsFromCluster derives the FLO values template variables from the cluster intent.
+func FLOValuesVarsFromCluster(cl *intent.Cluster, jwt string) FLOValuesVars {
+	return FLOValuesVars{
+		CAIssuer:      cl.Metadata.Name + "-ca-cluster-issuer",
+		FARSecretName: "far-secret",
+		JWT:           jwt,
+		ClusterName:   cl.Metadata.Name,
+	}
+}
+
+// RenderFLOValues renders the FLO values template with vars derived from the cluster intent.
+func RenderFLOValues(tmpl []byte, cl *intent.Cluster, jwt string) ([]byte, error) {
+	vars := FLOValuesVarsFromCluster(cl, jwt)
+	return renderTemplateString(string(tmpl), vars)
 }

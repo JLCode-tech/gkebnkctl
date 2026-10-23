@@ -42,13 +42,13 @@ func deploymentFixture(ns, name, container string) *appsv1.Deployment {
 }
 
 // TestPhase39VarCrashPatches_PatchesBothDeployments proves both
-// f5-cne-controller (f5-bnk) and f5-crdconversion (f5-utils) get the var-crash emptyDir +
+// f5-cne-controller (f5-cne-system) and f5-crdconversion (f5-utils) get the var-crash emptyDir +
 // volumeMount, using the container[0] name looked up dynamically.
 func TestPhase39VarCrashPatches_PatchesBothDeployments(t *testing.T) {
 	cl := testCluster()
 	st := testState(t)
 	k8sClient := fakek8s.NewClientset(
-		deploymentFixture("f5-bnk", "f5-cne-controller", "cne-controller"),
+		deploymentFixture("f5-cne-system", "f5-cne-controller", "cne-controller"),
 		deploymentFixture("f5-utils", "f5-crdconversion", "crdconversion"),
 	)
 	clients := &gcp.Clients{K8s: k8sClient}
@@ -89,20 +89,20 @@ func TestPhase39VarCrashPatches_PatchesBothDeployments(t *testing.T) {
 // check — a Deployment that already has the var-crash volume is not
 // re-patched.
 func TestPatchVarCrash_SkipsWhenVolumeAlreadyPresent(t *testing.T) {
-	d := deploymentFixture("f5-bnk", "f5-cne-controller", "cne-controller")
+	d := deploymentFixture("f5-cne-system", "f5-cne-controller", "cne-controller")
 	d.Spec.Template.Spec.Volumes = []corev1.Volume{
 		{Name: varCrashVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 	}
 	k8sClient := fakek8s.NewClientset(d)
 
-	if err := patchVarCrash(context.Background(), k8sClient, "f5-bnk", "f5-cne-controller"); err != nil {
+	if err := patchVarCrash(context.Background(), k8sClient, "f5-cne-system", "f5-cne-controller"); err != nil {
 		t.Fatalf("patchVarCrash: %v", err)
 	}
 	// No error is the meaningful assertion — a second Patch attempt against
 	// a fixture with no volumeMounts set would be harmless either way, but
 	// asserting the container's VolumeMounts stayed nil proves the patch
 	// path was never reached.
-	got, _ := k8sClient.AppsV1().Deployments("f5-bnk").Get(context.Background(), "f5-cne-controller", metav1.GetOptions{})
+	got, _ := k8sClient.AppsV1().Deployments("f5-cne-system").Get(context.Background(), "f5-cne-controller", metav1.GetOptions{})
 	if len(got.Spec.Template.Spec.Containers[0].VolumeMounts) != 0 {
 		t.Error("expected no volumeMounts to be added — the volume-presence skip should have short-circuited before the patch")
 	}
@@ -112,7 +112,7 @@ func TestPatchVarCrash_SkipsWhenVolumeAlreadyPresent(t *testing.T) {
 // (FLO still reconciling) is a warn+skip, not an error.
 func TestPatchVarCrash_DeploymentNotFoundIsNonFatal(t *testing.T) {
 	k8sClient := fakek8s.NewClientset()
-	if err := patchVarCrash(context.Background(), k8sClient, "f5-bnk", "f5-cne-controller"); err != nil {
+	if err := patchVarCrash(context.Background(), k8sClient, "f5-cne-system", "f5-cne-controller"); err != nil {
 		t.Fatalf("patchVarCrash: expected nil error for a not-yet-existing deployment, got: %v", err)
 	}
 }

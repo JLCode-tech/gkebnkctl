@@ -36,7 +36,8 @@ var DiscoverStateKeys = []string{
 	"TMM_NODE_NAME", "AGENT_NODE_NAME",
 	"TMM_EXT_IFACE", "TMM_EXT_PCI", "TMM_INT_IFACE", "TMM_INT_PCI",
 	"TMM_EXT_ALIAS_CIDR", "TMM_INT_ALIAS_CIDR", "TMM_EXT_SELFIP", "TMM_INT_SELFIP",
-	"TMM_POD_CIDR", "TMM_POD_GW", "AGENT_EXT_IFACE",
+	"TMM_POD_CIDR", "TMM_POD_GW", "AGENT_EXT_IFACE", "AGENT_EXT_IP",
+	"JUMPHOST_INSTANCE_NAME", "JUMPHOST_INSTANCE_ID", "JUMPHOST_EXT_IP", "JUMPHOST_BNK_EXT_ENI_IP",
 }
 
 // ifaceDumpScript is run inside the discovery pod's host network/PID
@@ -237,6 +238,13 @@ func Phase25Discover(ctx context.Context, cl *intent.Cluster, st *state.State, c
 	st.Set("TMM_POD_CIDR", podCIDR)
 	st.Set("TMM_POD_GW", podGW)
 	st.Set("AGENT_EXT_IFACE", agentExtIface)
+	st.Set("AGENT_EXT_IP", agentExtNIC.GetNetworkIP())
+	if !cl.Testing.Jumphost.Enabled {
+		st.Set("JUMPHOST_INSTANCE_NAME", agentNode)
+		st.Set("JUMPHOST_INSTANCE_ID", agentNode)
+		st.Set("JUMPHOST_EXT_IP", agentExtNIC.GetNetworkIP())
+		st.Set("JUMPHOST_BNK_EXT_ENI_IP", agentExtNIC.GetNetworkIP())
+	}
 
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("phase25: saving state: %w", err)

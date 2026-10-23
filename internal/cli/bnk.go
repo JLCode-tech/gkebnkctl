@@ -32,22 +32,26 @@ var (
 
 var bnkCmd = &cobra.Command{
 	Use:   "bnk",
-	Short: "BNK runtime helpers (resync pool members, manage data plane, …)",
+	Short: "BNK runtime helpers (resync pool members, manage data plane, ...)",
 	Long: `gkebnkctl bnk provides runtime helpers for BNK (F5 BIG-IP Next for Kubernetes)
 cluster management.
 
 Subcommands:
-  resync       Force the F5 cne-controller to re-resolve stale TMM pool members`,
+  heal         Detect and repair cluster plumbing (multus-token-watch, tmm-log-stream, pod-manager, cwc, dssm-probe, controller-endpointslices, tmm-k8s-routes, epp-namespaces, test-namespace)
+  resync       Force the F5 cne-controller to re-resolve stale TMM pool members
+  migrate-2.4  Translate 2.3.x CRs into the 2.4 Infra / GatewaySettings model
+  upgrade      In-place FLO + CNEInstance upgrade to BNK 2.4
+  mcp-session  Pin MCP sessions: F5BigPersistenceProfile MODEL_CONTEXT_PROTOCOL + NetPolicy`,
 }
 
 var bnkResyncCmd = &cobra.Command{
 	Use:   "resync [httproute-name]",
 	Short: "Force F5 cne-controller to re-resolve stale TMM pool members",
 	Long: `gkebnkctl bnk resync forces the F5 cne-controller to re-push pool members
-for the targeted HTTPRoute(s) by toggling each backendRef weight ±1.
+for the targeted HTTPRoute(s) by toggling each backendRef weight +/-1.
 
 This is necessary because the cne-controller only reconciles pool members at
-HTTPRoute spec-reconcile time — it does NOT watch EndpointSlice changes. When
+HTTPRoute spec-reconcile time -- it does NOT watch EndpointSlice changes. When
 a backend pod is rescheduled or replaced, TMM retains the old pod IP and returns HTTP 500.
 
 Target selection (exactly one required):
@@ -60,13 +64,13 @@ Watch mode (--watch):
   Stays running and watches EndpointSlices for the Services referenced by
   the targeted HTTPRoutes' backendRefs. When a backend pod is replaced
   (slice change), the affected routes are auto-resynced after a short
-  --debounce window — the VIP self-heals instead of serving HTTP 500
+  --debounce window -- the VIP self-heals instead of serving HTTP 500
   until an operator notices.
 
 Kubeconfig / Connection selection:
   --config/-f <cluster.yaml>   connect via GCP ADC / cluster metadata, or state kubeconfig
   --kubeconfig <path>          explicit path (takes precedence over --config)
-  (neither)                    standard kubectl lookup: $KUBECONFIG → ~/.kube/config`,
+  (neither)                    standard kubectl lookup: $KUBECONFIG -> ~/.kube/config`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runBnkResync,
 }
@@ -78,7 +82,7 @@ func init() {
 	bnkResyncCmd.Flags().BoolVar(&flagBnkResyncDryRun, "dry-run", false, "print what would be patched without making any API writes")
 	bnkResyncCmd.Flags().BoolVar(&flagBnkResyncWatch, "watch", false, "stay running and auto-resync targeted HTTPRoutes whenever a referenced backend Service's EndpointSlice changes")
 	bnkResyncCmd.Flags().DurationVar(&flagBnkResyncDebounce, "debounce", 2*time.Second, "with --watch: batch window after the first EndpointSlice event before the queued resyncs fire")
-	bnkResyncCmd.Flags().StringVar(&flagBnkResyncKubeconfig, "kubeconfig", "", "explicit kubeconfig path (takes precedence over --config; default: $KUBECONFIG → ~/.kube/config)")
+	bnkResyncCmd.Flags().StringVar(&flagBnkResyncKubeconfig, "kubeconfig", "", "explicit kubeconfig path (takes precedence over --config; default: $KUBECONFIG -> ~/.kube/config)")
 	bnkResyncCmd.Flags().StringVarP(&flagBnkResyncConfig, "config", "f", "", "path to cluster.yaml; connects via GCP ADC or state kubeconfig (overridden by --kubeconfig)")
 
 	bnkCmd.AddCommand(bnkResyncCmd)

@@ -156,7 +156,7 @@ bnk:
   farSecret:
     source: kubecontext
     sourceContext: some-context
-    namespaces: [f5-bnk, f5-utils]
+    namespaces: [f5-cne-core, f5-cne-system, f5-utils]
 
 ai:
   synthetic:
@@ -190,8 +190,8 @@ ai:
 	if flagBenchModel != "custom-llama" {
 		t.Errorf("flagBenchModel = %q, want 'custom-llama'", flagBenchModel)
 	}
-	if flagBenchVIP != "10.30.0.100" {
-		t.Errorf("flagBenchVIP = %q, want '10.30.0.100'", flagBenchVIP)
+	if flagBenchVIP != "10.31.0.10" {
+		t.Errorf("flagBenchVIP = %q, want '10.31.0.10'", flagBenchVIP)
 	}
 	if flagBenchZone != "us-central1-a" {
 		t.Errorf("flagBenchZone = %q, want 'us-central1-a'", flagBenchZone)

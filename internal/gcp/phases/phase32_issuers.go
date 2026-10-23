@@ -19,20 +19,39 @@ const (
 	extCAWaitTimeout    = 120 * time.Second
 )
 
+func renderClusterCAIssuer(clusterName string) []byte {
+	if clusterName == "" {
+		return nil
+	}
+	return []byte(fmt.Sprintf(`apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: %s-ca-cluster-issuer
+spec:
+  ca:
+    secretName: ext-ca
+`, clusterName))
+}
+
 // Phase32Issuers applies the selfsigned-cluster-issuer + ext-ca Certificate +
-// ext-ca-cluster-issuer, then waits (best-effort/tolerant, matching Phase31's
-// cert-manager wait — see docs/SPEC-go-tracer.md §3) for the ext-ca
+// ext-ca-cluster-issuer + <cluster>-ca-cluster-issuer, then waits (best-effort/tolerant,
+// matching Phase31's cert-manager wait — see docs/SPEC-go-tracer.md §3) for the ext-ca
 // Certificate to report Ready.
 func Phase32Issuers(ctx context.Context, cl *intent.Cluster, _ *state.State, clients *gcp.Clients, dryRun bool) error {
 	fmt.Fprintf(os.Stderr, "[phase 32] issuers: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
-		fmt.Fprintln(os.Stderr, "[phase 32] would apply selfsigned-cluster-issuer, ext-ca Certificate, ext-ca-cluster-issuer")
+		fmt.Fprintf(os.Stderr, "[phase 32] would apply selfsigned-cluster-issuer, ext-ca Certificate, ext-ca-cluster-issuer, %s-ca-cluster-issuer\n", cl.Metadata.Name)
 		return nil
 	}
 
 	if err := applyEmbeddedManifest(ctx, clients, issuersManifestPath, false); err != nil {
 		return fmt.Errorf("phase32: %w", err)
+	}
+	if cl != nil && cl.Metadata.Name != "" {
+		if err := applyManifestBytes(ctx, clients, renderClusterCAIssuer(cl.Metadata.Name), false); err != nil {
+			return fmt.Errorf("phase32: applying %s-ca-cluster-issuer: %w", cl.Metadata.Name, err)
+		}
 	}
 
 	if clients.Dynamic == nil {

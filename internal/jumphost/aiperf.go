@@ -72,6 +72,18 @@ type AiperfConfig struct {
 	WarmupDuration    float64
 	BenchmarkDuration float64
 	NumDatasetEntries int
+
+	// ── Native scenario / AgentX MVP fields ─────────────────────────────────
+	// Scenario maps to aiperf --scenario (e.g. "inferencex-agentx-mvp").
+	Scenario string
+	// PublicDataset maps to aiperf --public-dataset (e.g. "semianalysis_cc_traces_weka_with_subagents").
+	PublicDataset string
+	// UseServerTokenCount maps to aiperf --use-server-token-count.
+	UseServerTokenCount bool
+	// MaxContextLength maps to aiperf --max-context-length.
+	MaxContextLength int
+	// UnsafeOverride maps to aiperf --unsafe-override.
+	UnsafeOverride bool
 }
 
 // aiperfMetricDist is the distribution shape used for most aiperf 0.10.0 metrics.
@@ -351,7 +363,7 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 	// Closed-loop defaults apply only when no rate or duration drives the run:
 	// a forced --concurrency 1 would cap an open-loop run at one in flight, and
 	// a forced --request-count would end a timed step early.
-	openLoop := cfg.RequestRate > 0 || cfg.BenchmarkDuration > 0
+	openLoop := cfg.RequestRate > 0 || cfg.BenchmarkDuration > 0 || cfg.Scenario != ""
 	if cfg.Concurrency <= 0 && !openLoop {
 		cfg.Concurrency = 1
 	}
@@ -418,7 +430,23 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 		args = append(args, "--random-seed", fmt.Sprintf("%d", cfg.RandomSeed))
 	}
 
-	if cfg.SeqDist != "" {
+	// When Scenario is set, emit --scenario (and scenario-specific options) and omit
+	// the synthetic prompt flags.
+	if cfg.Scenario != "" {
+		args = append(args, "--scenario", shellSingleQuote(cfg.Scenario))
+		if cfg.PublicDataset != "" {
+			args = append(args, "--public-dataset", shellSingleQuote(cfg.PublicDataset))
+		}
+		if cfg.UseServerTokenCount {
+			args = append(args, "--use-server-token-count")
+		}
+		if cfg.MaxContextLength > 0 {
+			args = append(args, "--max-context-length", fmt.Sprintf("%d", cfg.MaxContextLength))
+		}
+		if cfg.UnsafeOverride {
+			args = append(args, "--unsafe-override")
+		}
+	} else if cfg.SeqDist != "" {
 		args = append(args, "--seq-dist", shellSingleQuote(cfg.SeqDist))
 	} else {
 		args = append(args,
@@ -427,19 +455,19 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 		)
 	}
 
-	if cfg.ISLStddev > 0 {
+	if cfg.Scenario == "" && cfg.ISLStddev > 0 {
 		args = append(args, "--synthetic-input-tokens-stddev", fmt.Sprintf("%d", cfg.ISLStddev))
 	}
 
-	if cfg.PrefixPromptLength > 0 {
+	if cfg.Scenario == "" && cfg.PrefixPromptLength > 0 {
 		args = append(args, "--prefix-prompt-length", fmt.Sprintf("%d", cfg.PrefixPromptLength))
 	}
 
-	if cfg.NumPrefixPrompts > 0 {
+	if cfg.Scenario == "" && cfg.NumPrefixPrompts > 0 {
 		args = append(args, "--num-prefix-prompts", fmt.Sprintf("%d", cfg.NumPrefixPrompts))
 	}
 
-	if cfg.NumDatasetEntries > 0 {
+	if cfg.Scenario == "" && cfg.NumDatasetEntries > 0 {
 		args = append(args, "--num-dataset-entries", fmt.Sprintf("%d", cfg.NumDatasetEntries))
 	}
 
@@ -464,9 +492,14 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 
 	aiperfInvocation := strings.Join(args, " ")
 
+	envPrefix := ""
+	if cfg.Scenario != "" {
+		envPrefix = "export AIPERF_DATASET_CONFIGURATION_TIMEOUT=1800 AIPERF_SERVICE_PROFILE_CONFIGURE_TIMEOUT=1800 AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID=1; "
+	}
 	return fmt.Sprintf(
-		"rm -rf %s; %s >/tmp/aiperf.stderr 2>&1; cat %s/profile_export_aiperf.json",
+		"rm -rf %s; %s%s >/tmp/aiperf.stderr 2>&1; cat %s/profile_export_aiperf.json",
 		shellSingleQuote(artifactDir),
+		envPrefix,
 		aiperfInvocation,
 		shellSingleQuote(artifactDir),
 	)
@@ -652,14 +685,24 @@ func parseAiperfJSON(raw string) (*AiperfResult, error) {
 	return result, nil
 }
 
-// FitTimeoutToDuration raises Timeout so a timed (open-loop) step keeps its SSH
-// session for warmup + duration + aiperf's 30 s grace period, plus start-up and
-// export; it never cuts a timed step short.
+// FitTimeoutToDuration raises Timeout so a timed (open-loop) or scenario step keeps its SSH
+// session for warmup + duration + aiperf's 30 s grace period, plus start-up, dataset preparation,
+// and export; it never cuts a timed step short.
 func (c *AiperfConfig) FitTimeoutToDuration() {
-	if c.BenchmarkDuration <= 0 {
+	if c.BenchmarkDuration <= 0 && c.Scenario == "" {
 		return
 	}
-	need := time.Duration(c.WarmupDuration+c.BenchmarkDuration+30)*time.Second + 5*time.Minute
+	baseDuration := c.BenchmarkDuration
+	if baseDuration <= 0 && c.Scenario != "" {
+		baseDuration = 900
+	}
+	extra := 5 * time.Minute
+	if c.Scenario != "" {
+		// Scenarios like AgentX MVP download and prepare datasets on the jumphost,
+		// which may take significant time on first run.
+		extra = 35 * time.Minute
+	}
+	need := time.Duration(c.WarmupDuration+baseDuration+30)*time.Second + extra
 	if c.Timeout < need {
 		c.Timeout = need
 	}

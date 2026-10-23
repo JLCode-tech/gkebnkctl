@@ -13,7 +13,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-ingress-vxlan-10-66-4-0
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: 10.66.4.0
   prefixLen: 24
@@ -24,7 +24,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-ingress-vxlan-10-66-5-0
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: 10.66.5.0
   prefixLen: 24

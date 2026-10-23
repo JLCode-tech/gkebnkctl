@@ -5,3 +5,12 @@ title = "gkebnkctl gitleaks config"
 
 [extend]
 useDefault = true
+
+[allowlist]
+description = "internal manifests, test templates, and example configs containing public keys, placeholders, or dummy secrets."
+paths = [
+  '''internal/k8s/manifests/templates/.*''',
+  '''internal/forge/.*''',
+  '''examples/.*''',
+  '''cluster\.yaml''',
+]

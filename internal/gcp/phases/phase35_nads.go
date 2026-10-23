@@ -17,7 +17,7 @@ import (
 const nadsTemplatePath = "templates/nads-hostdevice.yaml.tmpl"
 
 // Phase35NADs renders and applies the tmm-ext/tmm-int host-device
-// NetworkAttachmentDefinitions in f5-bnk, using the iface names + self-IPs
+// NetworkAttachmentDefinitions in f5-cne-system, using the iface names + self-IPs
 // Phase25Discover wrote to state. Needs a live cluster (Phase25's discovered
 // values only exist once the tmm-pool nodes are up) — docs/SPEC-go-tracer.md
 // §3 Phase35.
@@ -25,7 +25,7 @@ func Phase35NADs(ctx context.Context, cl *intent.Cluster, st *state.State, clien
 	fmt.Fprintf(os.Stderr, "[phase 35] NADs: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
-		fmt.Fprintln(os.Stderr, "[phase 35] would apply host-device NADs tmm-ext, tmm-int in f5-bnk (needs live cluster)")
+		fmt.Fprintln(os.Stderr, "[phase 35] would apply host-device NADs tmm-ext, tmm-int in f5-cne-system (needs live cluster)")
 		return nil
 	}
 

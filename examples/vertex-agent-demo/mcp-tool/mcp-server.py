@@ -38,9 +38,10 @@ def calculate_forecast(symbol: str, days: int = 30) -> Dict[str, Any]:
         "NVDA": 128.00,
     }.get(symbol.upper(), 100.0)
 
-    drift = random.uniform(-0.02, 0.05)
+    seed = abs(hash(f"{symbol.upper()}:{days}"))
+    drift = ((seed % 70) - 20) / 1000.0
     projected = round(base_price * ((1 + drift) ** (days / 30)), 2)
-    volatility = round(random.uniform(0.12, 0.28), 3)
+    volatility = round(0.12 + ((seed % 160) / 1000.0), 3)
 
     return {
         "symbol": symbol.upper(),

@@ -31,7 +31,7 @@ func newStaticRoute(name, dest string, prefixLen int64) *unstructured.Unstructur
 	return &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "k8s.f5net.com/v1",
 		"kind":       staticRouteKind,
-		"metadata":   map[string]interface{}{"name": name, "namespace": "f5-bnk"},
+		"metadata":   map[string]interface{}{"name": name, "namespace": "f5-cne-system"},
 		"spec": map[string]interface{}{
 			"destination": dest,
 			"prefixLen":   prefixLen,
@@ -62,7 +62,7 @@ func driftTestClients(objs ...runtime.Object) *gcp.Clients {
 
 func routeNames(t *testing.T, clients *gcp.Clients) []string {
 	t.Helper()
-	list, err := clients.Dynamic.Resource(staticRouteGVR).Namespace("f5-bnk").
+	list, err := clients.Dynamic.Resource(staticRouteGVR).Namespace("f5-cne-system").
 		List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		t.Fatalf("listing routes: %v", err)
@@ -141,7 +141,7 @@ func TestReconcileStaticRouteDrift_IgnoresNonRouteKinds(t *testing.T) {
 	vlan := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "k8s.f5net.com/v1",
 		"kind":       "F5SPKVlan",
-		"metadata":   map[string]interface{}{"name": "external", "namespace": "f5-bnk"},
+		"metadata":   map[string]interface{}{"name": "external", "namespace": "f5-cne-system"},
 		"spec":       map[string]interface{}{"destination": "10.66.0.0", "prefixLen": int64(16)},
 	}}
 
@@ -160,7 +160,7 @@ func TestStaticRouteDestKey_NumericTypesAgree(t *testing.T) {
 	fromAPI := newStaticRoute("a", "10.66.4.0", 24)
 	fromManifest := &unstructured.Unstructured{Object: map[string]interface{}{
 		"kind":     staticRouteKind,
-		"metadata": map[string]interface{}{"name": "b", "namespace": "f5-bnk"},
+		"metadata": map[string]interface{}{"name": "b", "namespace": "f5-cne-system"},
 		"spec":     map[string]interface{}{"destination": "10.66.4.0", "prefixLen": float64(24)},
 	}}
 

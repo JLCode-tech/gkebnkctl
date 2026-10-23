@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/forge/mcp"
@@ -14,6 +15,9 @@ import (
 // DefaultMCPURL is the localhost endpoint for the forge MCP server's
 // Streamable HTTP transport, matching FastMCP's default.
 const DefaultMCPURL = "http://localhost:8081/mcp/"
+
+// DefaultForgeRESTURL is the fallback REST base when forge.url is not set.
+const DefaultForgeRESTURL = "http://localhost:8000"
 
 // DefaultTimeout is the per-MCP-call timeout. Tool calls proxy to forge's
 // REST backend so 30s leaves plenty of headroom for GCP API roundtrips.
@@ -27,11 +31,21 @@ type Client struct {
 }
 
 // NewClient constructs a Client targeting the given MCP endpoint.
-// Pass "" to use [DefaultMCPURL], or the GKEBNKCTL_FORGE_MCP_URL env var
+// Pass "" to use [DefaultMCPURL], or the GKEBNKCTL_FORGE_MCP_URL / BNKCTL_FORGE_MCP_URL env var
 // when set.
 func NewClient(endpoint string) *Client {
 	if endpoint == "" {
-		endpoint = os.Getenv("GKEBNKCTL_FORGE_MCP_URL")
+		for _, k := range []string{
+			"BNKCTL_FORGE_MCP_URL",
+			"GKEBNKCTL_FORGE_MCP_URL",
+			"AWSBNKCTL_FORGE_MCP_URL",
+			"AZRBNKCTL_FORGE_MCP_URL",
+		} {
+			if v := os.Getenv(k); v != "" {
+				endpoint = v
+				break
+			}
+		}
 	}
 	if endpoint == "" {
 		endpoint = DefaultMCPURL
@@ -112,6 +126,7 @@ func (r *CreateProjectResponse) UnmarshalJSON(b []byte) error {
 
 	var flat struct {
 		ProjectID int    `json:"project_id"`
+		ID        int    `json:"id"`
 		Name      string `json:"name"`
 	}
 	if err := json.Unmarshal(b, &flat); err != nil {
@@ -119,6 +134,8 @@ func (r *CreateProjectResponse) UnmarshalJSON(b []byte) error {
 	}
 	if flat.ProjectID != 0 {
 		r.Project.ID = flat.ProjectID
+	} else if flat.ID != 0 {
+		r.Project.ID = flat.ID
 	}
 	if r.Project.Name == "" && flat.Name != "" {
 		r.Project.Name = flat.Name
@@ -154,18 +171,102 @@ func (c *Client) CreateProject(ctx context.Context, req CreateProjectRequest) (C
 	}
 	var out CreateProjectResponse
 	if err := r.UnmarshalToolJSON(&out); err != nil {
+		if strings.Contains(r.Text(), "already exists") || strings.Contains(r.Text(), "PROJECT_CONFLICT") {
+			if existing, findErr := c.FindProjectByName(ctx, req.Name); findErr == nil {
+				return existing, nil
+			}
+		}
 		return CreateProjectResponse{}, err
 	}
 	if out.Project.ID == 0 {
+		if strings.Contains(r.Text(), "already exists") || strings.Contains(r.Text(), "PROJECT_CONFLICT") {
+			if existing, findErr := c.FindProjectByName(ctx, req.Name); findErr == nil {
+				return existing, nil
+			}
+		}
 		return out, fmt.Errorf("create_project succeeded but no project ID in response: %s", r.Text())
 	}
 	return out, nil
 }
 
+// ListProjectsResponse captures the list_projects MCP tool response.
+type ListProjectsResponse struct {
+	Projects []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"projects"`
+}
+
+// UnmarshalJSON handles both {"projects": [...]} envelopes and bare [...] arrays.
+func (r *ListProjectsResponse) UnmarshalJSON(b []byte) error {
+	type projectItem struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+	var env struct {
+		Projects []projectItem `json:"projects"`
+	}
+	if err := json.Unmarshal(b, &env); err == nil && env.Projects != nil {
+		r.Projects = make([]struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		}, len(env.Projects))
+		for i, p := range env.Projects {
+			r.Projects[i].ID = p.ID
+			r.Projects[i].Name = p.Name
+		}
+		return nil
+	}
+	var arr []projectItem
+	if err := json.Unmarshal(b, &arr); err == nil {
+		r.Projects = make([]struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		}, len(arr))
+		for i, p := range arr {
+			r.Projects[i].ID = p.ID
+			r.Projects[i].Name = p.Name
+		}
+		return nil
+	}
+	return fmt.Errorf("decode list_projects: %s", string(b))
+}
+
+// ListProjects returns all projects visible in forge.
+func (c *Client) ListProjects(ctx context.Context) (ListProjectsResponse, error) {
+	res, err := c.mcp.CallTool(ctx, "list_projects", map[string]any{})
+	if err != nil {
+		return ListProjectsResponse{}, err
+	}
+	var out ListProjectsResponse
+	if err := res.UnmarshalToolJSON(&out); err != nil {
+		return ListProjectsResponse{}, err
+	}
+	return out, nil
+}
+
+// FindProjectByName queries list_projects MCP tool and matches by name.
+func (c *Client) FindProjectByName(ctx context.Context, name string) (CreateProjectResponse, error) {
+	data, err := c.ListProjects(ctx)
+	if err != nil {
+		return CreateProjectResponse{}, err
+	}
+	for _, p := range data.Projects {
+		if p.Name == name || strings.EqualFold(p.Name, name) {
+			var resp CreateProjectResponse
+			resp.Success = true
+			resp.Project.ID = p.ID
+			resp.Project.Name = p.Name
+			return resp, nil
+		}
+	}
+	return CreateProjectResponse{}, fmt.Errorf("project %q not found", name)
+}
+
 // DeleteProject removes a project. force bypasses the active/only-project
 // safety check on forge's side.
 func (c *Client) DeleteProject(ctx context.Context, projectID int, force bool) error {
-	args := map[string]any{"project_id": projectID, "force": force}
+	args := map[string]any{"project_id": projectID, "force": force, "confirm": true}
 	_, err := c.mcp.CallTool(ctx, "delete_project", args)
 	return err
 }
@@ -188,8 +289,9 @@ type CreateClusterRequest struct {
 // CreateClusterResponse captures the fields gkebnkctl reads.
 type CreateClusterResponse struct {
 	Cluster struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
+		ProjectID int    `json:"project_id"`
 	} `json:"cluster"`
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
@@ -205,17 +307,24 @@ func (r *CreateClusterResponse) UnmarshalJSON(b []byte) error {
 	*r = CreateClusterResponse(a)
 
 	var flat struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
+		ClusterID int    `json:"cluster_id"`
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
+		ProjectID int    `json:"project_id"`
 	}
 	if err := json.Unmarshal(b, &flat); err != nil {
 		return err
 	}
-	if flat.ID != 0 {
+	if flat.ClusterID != 0 {
+		r.Cluster.ID = flat.ClusterID
+	} else if flat.ID != 0 {
 		r.Cluster.ID = flat.ID
 	}
 	if r.Cluster.Name == "" && flat.Name != "" {
 		r.Cluster.Name = flat.Name
+	}
+	if flat.ProjectID != 0 {
+		r.Cluster.ProjectID = flat.ProjectID
 	}
 	return nil
 }
@@ -285,9 +394,75 @@ func (c *Client) ScanCluster(ctx context.Context, clusterID int) (string, error)
 	return r.Text(), nil
 }
 
+// ListClustersResponse captures clusters returned by the list_clusters MCP tool.
+type ListClustersResponse struct {
+	Clusters []struct {
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
+		ProjectID int    `json:"project_id"`
+	} `json:"clusters"`
+}
+
+// UnmarshalJSON handles both {"clusters": [...]} envelopes and bare [...] arrays.
+func (r *ListClustersResponse) UnmarshalJSON(b []byte) error {
+	type clusterItem struct {
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
+		ProjectID int    `json:"project_id"`
+	}
+	var env struct {
+		Clusters []clusterItem `json:"clusters"`
+	}
+	if err := json.Unmarshal(b, &env); err == nil && env.Clusters != nil {
+		r.Clusters = make([]struct {
+			ID        int    `json:"id"`
+			Name      string `json:"name"`
+			ProjectID int    `json:"project_id"`
+		}, len(env.Clusters))
+		for i, cl := range env.Clusters {
+			r.Clusters[i].ID = cl.ID
+			r.Clusters[i].Name = cl.Name
+			r.Clusters[i].ProjectID = cl.ProjectID
+		}
+		return nil
+	}
+	var arr []clusterItem
+	if err := json.Unmarshal(b, &arr); err == nil {
+		r.Clusters = make([]struct {
+			ID        int    `json:"id"`
+			Name      string `json:"name"`
+			ProjectID int    `json:"project_id"`
+		}, len(arr))
+		for i, cl := range arr {
+			r.Clusters[i].ID = cl.ID
+			r.Clusters[i].Name = cl.Name
+			r.Clusters[i].ProjectID = cl.ProjectID
+		}
+		return nil
+	}
+	return fmt.Errorf("decode list_clusters: %s", string(b))
+}
+
+// ListClusters queries forge's list_clusters MCP tool for a project.
+func (c *Client) ListClusters(ctx context.Context, projectID int) (ListClustersResponse, error) {
+	args := map[string]any{}
+	if projectID > 0 {
+		args["project_id"] = projectID
+	}
+	r, err := c.mcp.CallTool(ctx, "list_clusters", args)
+	if err != nil {
+		return ListClustersResponse{}, err
+	}
+	var out ListClustersResponse
+	if err := r.UnmarshalToolJSON(&out); err != nil {
+		return ListClustersResponse{}, err
+	}
+	return out, nil
+}
+
 // DeleteCluster removes the cluster registration from forge.
 func (c *Client) DeleteCluster(ctx context.Context, clusterID int) error {
-	args := map[string]any{"cluster_id": clusterID}
+	args := map[string]any{"cluster_id": clusterID, "confirm": true}
 	_, err := c.mcp.CallTool(ctx, "delete_cluster", args)
 	return err
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"google.golang.org/protobuf/proto"
@@ -37,6 +38,7 @@ func Phase15Jumphost(ctx context.Context, cl *intent.Cluster, st *state.State, c
 		fmt.Fprintf(os.Stderr, "[phase 15] dry-run: would create IAP firewall rule %s on %s\n", fwName, cl.Network.External.VPC)
 		fmt.Fprintf(os.Stderr, "[phase 15] dry-run: would create jumphost instance %s (%s) in %s\n", name, instanceType, cl.Network.External.Subnet)
 		st.Set("JUMPHOST_INSTANCE_NAME", name)
+		st.Set("JUMPHOST_INSTANCE_ID", name)
 		st.Set("JUMPHOST_FIREWALL_NAME", fwName)
 		return nil
 	}
@@ -52,6 +54,17 @@ func Phase15Jumphost(ctx context.Context, cl *intent.Cluster, st *state.State, c
 		return fmt.Errorf("phase15: instance: %w", err)
 	}
 	st.Set("JUMPHOST_INSTANCE_NAME", name)
+	st.Set("JUMPHOST_INSTANCE_ID", name)
+	if inst, err := clients.Instances.Get(ctx, &computepb.GetInstanceRequest{
+		Project:  cl.Metadata.Project,
+		Zone:     cl.Metadata.Zone,
+		Instance: name,
+	}); err == nil && len(inst.GetNetworkInterfaces()) > 0 {
+		if ip := inst.GetNetworkInterfaces()[0].GetNetworkIP(); ip != "" {
+			st.Set("JUMPHOST_EXT_IP", ip)
+			st.Set("JUMPHOST_BNK_EXT_ENI_IP", ip)
+		}
+	}
 
 	return st.Save()
 }
@@ -147,8 +160,18 @@ func zoneToRegion(zone string) string {
 func PhaseDownJumphost(ctx context.Context, cl *intent.Cluster, st *state.State, clients *gcp.Clients) error {
 	fmt.Fprintf(os.Stderr, "[phase 15 down] jumphost: cluster=%s\n", cl.Metadata.Name)
 
+	if !cl.Testing.Jumphost.Enabled {
+		fmt.Fprintln(os.Stderr, "[phase 15 down] skipped: jumphost disabled")
+		st.Delete("JUMPHOST_INSTANCE_NAME")
+		st.Delete("JUMPHOST_INSTANCE_ID")
+		st.Delete("JUMPHOST_EXT_IP")
+		st.Delete("JUMPHOST_BNK_EXT_ENI_IP")
+		st.Delete("JUMPHOST_FIREWALL_NAME")
+		return st.Save()
+	}
+
 	name := st.Get("JUMPHOST_INSTANCE_NAME")
-	if name == "" {
+	if name == "" || strings.HasPrefix(name, "gke-") {
 		name = cl.Metadata.Name + "-jumphost"
 	}
 
@@ -191,6 +214,9 @@ func PhaseDownJumphost(ctx context.Context, cl *intent.Cluster, st *state.State,
 	}
 
 	st.Delete("JUMPHOST_INSTANCE_NAME")
+	st.Delete("JUMPHOST_INSTANCE_ID")
+	st.Delete("JUMPHOST_EXT_IP")
+	st.Delete("JUMPHOST_BNK_EXT_ENI_IP")
 	st.Delete("JUMPHOST_FIREWALL_NAME")
 	return st.Save()
 }

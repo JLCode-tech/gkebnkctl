@@ -21,6 +21,7 @@ import (
 
 const (
 	egressTemplatePath           = "templates/egress.yaml.tmpl"
+	egressGatewayTemplatePath    = "templates/egress-gateway.yaml.tmpl"
 	agentRouteSetterTemplatePath = "templates/agent-route-setter.yaml.tmpl"
 	egressClientPodName          = "egress-client"
 	egressClientPodTimeout       = 120 * time.Second
@@ -36,7 +37,8 @@ const (
 	egressTraceURL          = "https://1.1.1.1/cdn-cgi/trace"
 )
 
-// Phase50Egress renders and applies the F5SPKEgress pseudo-CNI vxlan CR, the
+// Phase50Egress renders and applies the BNK 2.4 GatewaySettings + EgressGateway
+// (or legacy BNK 2.3 F5SPKEgress pseudo-CNI vxlan CR), the
 // bnk-agent-route-setter DaemonSet, and the egress-client test pod, then
 // waits for egress-client to be Ready (docs/SPEC-go-tracer.md §3 Phase50).
 // Needs a live cluster.
@@ -51,7 +53,7 @@ func Phase50Egress(ctx context.Context, cl *intent.Cluster, st *state.State, cli
 	fmt.Fprintf(os.Stderr, "[phase 50] egress: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
-		fmt.Fprintf(os.Stderr, "[phase 50] would apply F5SPKEgress/egress-agents + bnk-agent-route-setter DS + egress-client pod in %s (needs live cluster)\n", cl.Egress.TestNamespace)
+		fmt.Fprintf(os.Stderr, "[phase 50] would apply GatewaySettings/EgressGateway (or F5SPKEgress) + bnk-agent-route-setter DS + egress-client pod in %s (needs live cluster)\n", cl.Egress.TestNamespace)
 		return nil
 	}
 
@@ -76,7 +78,6 @@ func Phase50Egress(ctx context.Context, cl *intent.Cluster, st *state.State, cli
 	return nil
 }
 
-// applyEgress renders templates/egress.yaml.tmpl (F5SPKEgress +
 func getAgentExtIface(st *state.State) string {
 	if st != nil {
 		if iface := st.Get("AGENT_EXT_IFACE"); iface != "" {
@@ -86,27 +87,46 @@ func getAgentExtIface(st *state.State) string {
 	return "eth1"
 }
 
-// applyEgress renders templates/egress.yaml.tmpl (F5SPKEgress +
-// egress-client pod) against cluster.yaml + Phase25-discovered
-// AGENT_EXT_IFACE, then applies it.
+// applyEgress renders BNK 2.4 GatewaySettings + EgressGateway + egress-client pod
+// (or legacy BNK 2.3 templates/egress.yaml.tmpl F5SPKEgress + egress-client pod),
+// then applies it.
 func applyEgress(ctx context.Context, clients *gcp.Clients, cl *intent.Cluster, st *state.State) error {
-	tmplBytes, err := manifests.FS.ReadFile(egressTemplatePath)
-	if err != nil {
-		return fmt.Errorf("phase50: reading embedded egress template: %w", err)
-	}
-	rendered, err := render.RenderEgress(tmplBytes, render.EgressVars{
-		TestNamespace: cl.Egress.TestNamespace,
-		VxlanKey:      cl.Egress.VxlanKey,
-		VxlanMtu:      cl.Egress.VxlanMtu,
-		AgentExtIface: getAgentExtIface(st),
-		VxlanPort:     cl.Egress.VxlanPort,
-		AgentPoolName: cl.ClusterSpec.AgentPool.Name,
-	})
-	if err != nil {
-		return fmt.Errorf("phase50: rendering egress: %w", err)
+	var rendered []byte
+	if cl != nil && strings.HasPrefix(cl.Bnk.ManifestVersion, "2.3") {
+		tmplBytes, err := manifests.FS.ReadFile(egressTemplatePath)
+		if err != nil {
+			return fmt.Errorf("phase50: reading embedded egress template: %w", err)
+		}
+		rendered, err = render.RenderEgress(tmplBytes, render.EgressVars{
+			TestNamespace: cl.Egress.TestNamespace,
+			VxlanKey:      cl.Egress.VxlanKey,
+			VxlanMtu:      cl.Egress.VxlanMtu,
+			AgentExtIface: getAgentExtIface(st),
+			VxlanPort:     cl.Egress.VxlanPort,
+			AgentPoolName: cl.ClusterSpec.AgentPool.Name,
+		})
+		if err != nil {
+			return fmt.Errorf("phase50: rendering egress: %w", err)
+		}
+	} else {
+		tmplBytes, err := manifests.FS.ReadFile(egressGatewayTemplatePath)
+		if err != nil {
+			return fmt.Errorf("phase50: reading embedded egress-gateway template: %w", err)
+		}
+		gwcName := cl.Metadata.Name + "-gatewayclass"
+		networkRef := render.InfraTunnelNetwork(cl.Network.Internal.CIDR != "")
+		rendered, err = render.RenderEgressGateway(tmplBytes, render.EgressGatewayVars{
+			TestNamespace:    cl.Egress.TestNamespace,
+			GatewayClassName: gwcName,
+			NetworkRef:       networkRef,
+			AgentPoolName:    cl.ClusterSpec.AgentPool.Name,
+		})
+		if err != nil {
+			return fmt.Errorf("phase50: rendering egress-gateway: %w", err)
+		}
 	}
 	if err := applyManifestBytes(ctx, clients, rendered, true); err != nil {
-		return fmt.Errorf("phase50: applying F5SPKEgress/egress-client: %w", err)
+		return fmt.Errorf("phase50: applying egress CR/egress-client: %w", err)
 	}
 	return nil
 }
@@ -274,6 +294,6 @@ func logEgressVerification(r egressVerifyResult) {
 			r.pktsInBefore, r.pktsInAfter, r.egressIP)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[phase 50] verify: FAIL (non-fatal) — pkts_in delta=%d, trace ip=%q; check: kubectl get f5spkegress,f5spkvlan -n f5-bnk; kubectl logs -n f5-bnk %s -c tmm\n",
+	fmt.Fprintf(os.Stderr, "[phase 50] verify: FAIL (non-fatal) — pkts_in delta=%d, trace ip=%q; check: kubectl get f5spkegress,f5spkvlan -n f5-cne-system; kubectl logs -n f5-cne-system %s -c tmm\n",
 		r.pktsInAfter-r.pktsInBefore, r.egressIP, r.tmmPod)
 }

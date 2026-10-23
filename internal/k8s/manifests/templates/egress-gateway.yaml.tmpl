@@ -1,0 +1,45 @@
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
+metadata:
+  name: default-egress
+  namespace: {{ .TestNamespace }}
+spec:
+  egressConfigs:
+  - name: default-egress
+    networkRef:
+      name: {{ .NetworkRef }}
+    sourceNATConfig:
+      type: Automap
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: EgressGateway
+metadata:
+  name: default-egress
+  namespace: {{ .TestNamespace }}
+spec:
+  gatewayClassName: {{ .GatewayClassName }}
+  infrastructure:
+    parametersRef:
+      name: default-egress
+      sectionName: default-egress
+  sourceSelector:
+    selectionMode: NamespaceSelector
+    namespaces:
+      matchNames:
+      - {{ .TestNamespace }}
+{{- if ne .TestNamespace "default" }}
+      - default
+{{- end }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: egress-client
+  namespace: {{ .TestNamespace }}
+spec:
+  nodeSelector:
+    cloud.google.com/gke-nodepool: {{ .AgentPoolName }}
+  containers:
+  - name: netshoot
+    image: nicolaka/netshoot
+    command: ["sleep", "infinity"]

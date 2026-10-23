@@ -8,7 +8,7 @@ apiVersion: k8s.f5net.com/v3
 kind: F5SPKEgress
 metadata:
   name: egress-agents
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   egressSnatpoolMode: UNIQUE_SNAT_ADDRESS
   maxTmmReplicas: 1
@@ -17,6 +17,20 @@ spec:
     appPodInterface: eth0
     namespaces:
     - egress-test
+    - default
+    - gkebnkctl-scn-httproute-e2e
+    - gkebnkctl-scn-traffic-split
+    - gkebnkctl-scn-egress
+    - gkebnkctl-scn-multivip
+    - gkebnkctl-scn-extpool
+    - gkebnkctl-scn-proxyl4
+    - gkebnkctl-scn-cwatch
+    - gkebnkctl-scn-tcpl4
+    - gkebnkctl-scn-udpl4
+    - gkebnkctl-scn-grpc
+    - gkebnkctl-scn-aiinference
+    - gkebnkctl-scn-aisemcache
+    - gkebnkctl-scn-aitokens
     vxlan:
       create: true
       key: 100

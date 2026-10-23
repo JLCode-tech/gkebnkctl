@@ -23,6 +23,7 @@ func installSeams(
 	errOn map[string]error,
 ) (restore func()) {
 	t.Helper()
+	t.Setenv("GKEBNKCTL_FORCE_IAP", "1")
 
 	origMint := *jumphost.PrepareIAPKeyFn
 	origSSH := *jumphost.SSHRunViaIAPFn
@@ -222,6 +223,7 @@ type stdinRunRecord struct {
 
 func installStdinSeams(t *testing.T, mint *mintRecord, pushes *pushRecord, runs *stdinRunRecord, runErr error) (restore func()) {
 	t.Helper()
+	t.Setenv("GKEBNKCTL_FORCE_IAP", "1")
 
 	origMint := *jumphost.PrepareIAPKeyFn
 	origStdin := *jumphost.SSHRunViaIAPStdinFn

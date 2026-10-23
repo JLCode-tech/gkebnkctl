@@ -390,7 +390,38 @@ func poissonAgenticVariants() []forgeScenarioChild {
 	})
 }
 
+// agentxConcurrencyLadder is the session concurrency sweep for InferenceX AgentX MVP.
+var agentxConcurrencyLadder = []int{8, 16, 32, 64}
+
+func agentxMvpVariants() []forgeScenarioChild {
+	children := make([]forgeScenarioChild, len(agentxConcurrencyLadder))
+	for i, c := range agentxConcurrencyLadder {
+		children[i] = forgeScenarioChild{
+			VariantLabel: fmt.Sprintf("c%d", c),
+			Config: jumphost.AiperfConfig{
+				Scenario:            "inferencex-agentx-mvp",
+				PublicDataset:       "semianalysis_cc_traces_weka_with_subagents",
+				EndpointType:        "chat",
+				Streaming:           true,
+				UseServerTokenCount: true,
+				BenchmarkDuration:   900,
+				RandomSeed:          20260707,
+				Concurrency:         c,
+			},
+		}
+	}
+	return children
+}
+
 var forgeScenarioRegistry = []forgeScenario{
+	{
+		Key:           "inferencex-agentx-mvp",
+		Name:          "InferenceX AgentX MVP (Weka traces)",
+		Description:   "SemiAnalysis AgentX MVP benchmark: multi-turn Claude Code agentic traces with subagent trees, 128k context, and realistic inter-turn timing.",
+		Tags:          []string{"trace", "agentic", "subagents", "prefix-cache"},
+		TraceDriven:   true,
+		buildVariants: agentxMvpVariants,
+	},
 	{
 		Key:           "baseline",
 		Name:          "Baseline",
@@ -515,6 +546,8 @@ func expandForgeScenario(key string, base jumphost.AiperfConfig) ([]forgeScenari
 		} else {
 			if base.Model != "" {
 				cfg.Model = base.Model
+			} else if cfg.Model == "" {
+				cfg.Model = syntheticModel
 			}
 			if base.Tokenizer != "" {
 				cfg.Tokenizer = base.Tokenizer

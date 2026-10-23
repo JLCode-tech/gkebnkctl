@@ -94,6 +94,15 @@ func (s *State) Get(key string) string {
 	return s.data[key]
 }
 
+// All returns a copy of all key-value pairs in state.
+func (s *State) All() map[string]string {
+	out := make(map[string]string, len(s.data))
+	for k, v := range s.data {
+		out[k] = v
+	}
+	return out
+}
+
 // Set stores key=value in memory. Call Save to persist.
 func (s *State) Set(key, value string) {
 	s.data[key] = value
@@ -168,3 +177,24 @@ func (s *State) path() string {
 
 // Dir returns the directory this State writes to (for tests / inspection).
 func (s *State) Dir() string { return s.dir }
+
+// KubeconfigPath returns the path where kubeconfig is saved for this cluster.
+func (s *State) KubeconfigPath() string {
+	if custom := s.Get("KUBECONFIG_PATH"); custom != "" {
+		return custom
+	}
+	return filepath.Join(s.dir, "kubeconfig")
+}
+
+// WriteValues loads state.env from dir (or starts empty if missing), merges kv,
+// and saves atomically.
+func WriteValues(dir string, kv map[string]string) error {
+	st, err := Load(dir)
+	if err != nil {
+		return err
+	}
+	for k, v := range kv {
+		st.Set(k, v)
+	}
+	return st.Save()
+}

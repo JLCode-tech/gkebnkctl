@@ -74,8 +74,8 @@ bnk:
   farSecret:
     source: kubecontext
     sourceContext: some-other-cluster
-    sourceNamespace: f5-bnk
-    namespaces: [f5-bnk, f5-utils]
+    sourceNamespace: f5-cne-core
+    namespaces: [f5-cne-core, f5-utils]
 
 egress:
   testNamespace: egress-test
@@ -293,8 +293,8 @@ func TestValidate_JwtPathMustExist(t *testing.T) {
 func TestValidate_FarSecretDockerConfigRequiresFile(t *testing.T) {
 	dir := t.TempDir()
 	body := strings.Replace(validYAML,
-		"farSecret:\n    source: kubecontext\n    sourceContext: some-other-cluster\n    sourceNamespace: f5-bnk\n    namespaces: [f5-bnk, f5-utils]",
-		"farSecret:\n    source: dockerconfig\n    sourceNamespace: f5-bnk\n    namespaces: [f5-bnk, f5-utils]",
+		"farSecret:\n    source: kubecontext\n    sourceContext: some-other-cluster\n    sourceNamespace: f5-cne-core\n    namespaces: [f5-cne-core, f5-utils]",
+		"farSecret:\n    source: dockerconfig\n    sourceNamespace: f5-cne-core\n    namespaces: [f5-cne-core, f5-utils]",
 		1)
 	path := writeCluster(t, dir, body)
 	_, err := Load(path)
@@ -309,8 +309,8 @@ func TestValidate_FarSecretDockerConfigRequiresFile(t *testing.T) {
 func TestLoad_DockerConfigFileMustExist(t *testing.T) {
 	dir := t.TempDir()
 	body := strings.Replace(validYAML,
-		"farSecret:\n    source: kubecontext\n    sourceContext: some-other-cluster\n    sourceNamespace: f5-bnk\n    namespaces: [f5-bnk, f5-utils]",
-		"farSecret:\n    source: dockerconfig\n    dockerConfigFile: ./nonexistent.json\n    sourceNamespace: f5-bnk\n    namespaces: [f5-bnk, f5-utils]",
+		"farSecret:\n    source: kubecontext\n    sourceContext: some-other-cluster\n    sourceNamespace: f5-cne-core\n    namespaces: [f5-cne-core, f5-utils]",
+		"farSecret:\n    source: dockerconfig\n    dockerConfigFile: ./nonexistent.json\n    sourceNamespace: f5-cne-core\n    namespaces: [f5-cne-core, f5-utils]",
 		1)
 	path := writeCluster(t, dir, body)
 	_, err := Load(path)
@@ -393,10 +393,10 @@ bnk:
 	if c.Bnk.ImageRegistry != "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga" {
 		t.Errorf("Bnk.ImageRegistry = %q, want default GAR registry", c.Bnk.ImageRegistry)
 	}
-	if c.Bnk.FarSecret.SourceNamespace != "f5-bnk" {
-		t.Errorf("FarSecret.SourceNamespace = %q, want f5-bnk", c.Bnk.FarSecret.SourceNamespace)
+	if c.Bnk.FarSecret.SourceNamespace != "f5-cne-core" {
+		t.Errorf("FarSecret.SourceNamespace = %q, want f5-cne-core", c.Bnk.FarSecret.SourceNamespace)
 	}
-	wantNS := []string{"f5-bnk", "f5-utils"}
+	wantNS := []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance", "f5-utils", "default"}
 	if len(c.Bnk.FarSecret.Namespaces) != len(wantNS) {
 		t.Fatalf("FarSecret.Namespaces = %v, want %v", c.Bnk.FarSecret.Namespaces, wantNS)
 	}
@@ -472,24 +472,26 @@ func quoteIfEmpty(s string) string {
 
 func TestDefaultVIP(t *testing.T) {
 	cases := []struct {
-		cidr    string
-		want    string
-		wantErr bool
+		cidr     string
+		podsCidr string
+		want     string
+		wantErr  bool
 	}{
-		{"10.31.0.0/24", "10.31.0.100", false},
-		{"192.168.1.0/24", "192.168.1.100", false},
-		{"", "", true},
-		{"bad-cidr", "", true},
+		{"10.31.0.0/24", "", "10.31.0.100", false},
+		{"192.168.1.0/24", "", "192.168.1.100", false},
+		{"10.81.0.0/24", "10.81.1.0/24", "10.81.1.10", false},
+		{"", "", "", true},
+		{"bad-cidr", "", "", true},
 	}
 	for _, tc := range cases {
-		c := &Cluster{Network: Network{External: DataplaneSpec{CIDR: tc.cidr}}}
+		c := &Cluster{Network: Network{External: DataplaneSpec{CIDR: tc.cidr, PodsCIDR: tc.podsCidr}}}
 		got, err := c.DefaultVIP()
 		if (err != nil) != tc.wantErr {
-			t.Errorf("DefaultVIP(%q) err = %v, wantErr = %v", tc.cidr, err, tc.wantErr)
+			t.Errorf("DefaultVIP(%q, %q) err = %v, wantErr = %v", tc.cidr, tc.podsCidr, err, tc.wantErr)
 			continue
 		}
 		if got != tc.want {
-			t.Errorf("DefaultVIP(%q) = %q, want %q", tc.cidr, got, tc.want)
+			t.Errorf("DefaultVIP(%q, %q) = %q, want %q", tc.cidr, tc.podsCidr, got, tc.want)
 		}
 	}
 }
@@ -544,5 +546,43 @@ func TestSyntheticAIEnabled(t *testing.T) {
 	c.AI = &AISpec{Synthetic: &SyntheticSpec{Enabled: true, ServedModelName: "llama3"}}
 	if !c.SyntheticAIEnabled() {
 		t.Error("SyntheticAIEnabled() = false, want true")
+	}
+}
+
+func TestLoad_TmmMtuIntAndString(t *testing.T) {
+	dir := t.TempDir()
+	intBody := strings.Replace(validYAML, `tmmMtu: "1460"`, `tmmMtu: 9000`, 1)
+	pathInt := writeCluster(t, dir, intBody)
+	clInt, err := Load(pathInt)
+	if err != nil {
+		t.Fatalf("Load with int tmmMtu failed: %v", err)
+	}
+	if clInt.Bnk.TmmMtu != "9000" {
+		t.Errorf("Bnk.TmmMtu = %q, want 9000", clInt.Bnk.TmmMtu)
+	}
+
+	strBody := strings.Replace(validYAML, `tmmMtu: "1460"`, `tmmMtu: "8896"`, 1)
+	pathStr := writeCluster(t, dir, strBody)
+	clStr, err := Load(pathStr)
+	if err != nil {
+		t.Fatalf("Load with string tmmMtu failed: %v", err)
+	}
+	if clStr.Bnk.TmmMtu != "8896" {
+		t.Errorf("Bnk.TmmMtu = %q, want 8896", clStr.Bnk.TmmMtu)
+	}
+
+	badBody := strings.Replace(validYAML, `tmmMtu: "1460"`, `tmmMtu: "not-an-int"`, 1)
+	pathBad := writeCluster(t, dir, badBody)
+	if _, err := Load(pathBad); err == nil {
+		t.Fatal("Load with invalid string tmmMtu should fail")
+	}
+}
+
+func TestBnkSpec_Is24(t *testing.T) {
+	if !(BnkSpec{ManifestVersion: "2.4.0-3.2882.0"}).Is24() {
+		t.Error("expected 2.4.0-3.2882.0 to be Is24() == true")
+	}
+	if (BnkSpec{ManifestVersion: "2.3.2-3.2598.3-0.0.392"}).Is24() {
+		t.Error("expected 2.3.2-3.2598.3-0.0.392 to be Is24() == false")
 	}
 }

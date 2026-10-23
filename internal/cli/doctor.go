@@ -13,6 +13,7 @@ var (
 	flagDoctorProject string
 	flagDoctorRegion  string
 	flagDoctorStrict  bool
+	flagDoctorBackend string
 )
 
 var doctorCmd = &cobra.Command{
@@ -27,7 +28,8 @@ var doctorCmd = &cobra.Command{
 
 Example:
   gkebnkctl doctor
-  gkebnkctl doctor --project my-gcp-project --region us-central1 --strict`,
+  gkebnkctl doctor --project my-gcp-project --region us-central1 --strict
+  gkebnkctl doctor --backend k8s`,
 	RunE: runDoctor,
 }
 
@@ -35,6 +37,7 @@ func init() {
 	doctorCmd.Flags().StringVar(&flagDoctorProject, "project", "", "GCP project ID to verify")
 	doctorCmd.Flags().StringVar(&flagDoctorRegion, "region", "", "GCP region to check quotas for (e.g. us-central1)")
 	doctorCmd.Flags().BoolVar(&flagDoctorStrict, "strict", false, "Fail with non-zero exit if any warnings are raised")
+	doctorCmd.Flags().StringVar(&flagDoctorBackend, "backend", "", "Run doctor checks against a specific backend (e.g. k8s)")
 	rootCmd.AddCommand(doctorCmd)
 }
 
@@ -52,6 +55,9 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	}
 
 	results := doctor.Run(ctx, cfg)
+	if flagDoctorBackend != "" {
+		results = append(results, runBackendChecks(ctx, flagDoctorBackend)...)
+	}
 	if err := doctor.PrintResults(out, results); err != nil {
 		return err
 	}
@@ -65,6 +71,6 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("doctor detected warnings with --strict enabled")
 	}
 
-	fmt.Fprintln(out, "✓ Environment ready for gkebnkctl provisioning.")
+	fmt.Fprintln(out, "[ok] Environment ready for gkebnkctl provisioning.")
 	return nil
 }

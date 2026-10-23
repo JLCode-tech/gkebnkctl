@@ -141,6 +141,20 @@ func isCRDEstablished(obj map[string]interface{}) bool {
 	return UnstructuredConditionIsTrue(obj, "Established")
 }
 
+// WaitForCRDExists polls CustomResourceDefinition until it is visible in the API server.
+func WaitForCRDExists(ctx context.Context, dyn dynamic.Interface, crdName string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		_, err := dyn.Resource(CRDGVR).Get(ctx, crdName, metav1.GetOptions{})
+		if err != nil {
+			return false, nil //nolint:nilerr
+		}
+		return true, nil
+	})
+}
+
 // WaitForPodReady polls a Pod in ns/name until all its containers report
 // Ready (PodReady condition == True).
 func WaitForPodReady(ctx context.Context, clientset kubernetes.Interface, ns, name string, timeout time.Duration) error {
@@ -221,4 +235,60 @@ func DeploymentReplicaStatus(ctx context.Context, clientset kubernetes.Interface
 		return 0, 0, fmt.Errorf("get deployment %s/%s: %w", ns, name, err)
 	}
 	return d.Status.AvailableReplicas, d.Status.Replicas, nil
+}
+
+// WaitForDaemonSetRollout polls apps/v1 DaemonSet in ns/name until the
+// controller has observed the latest template generation and every scheduled
+// pod is updated, ready and available.
+func WaitForDaemonSetRollout(ctx context.Context, clientset kubernetes.Interface, ns, name string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		ds, err := clientset.AppsV1().DaemonSets(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return false, nil //nolint:nilerr
+		}
+		st := ds.Status
+		if st.ObservedGeneration < ds.Generation || st.DesiredNumberScheduled == 0 {
+			return false, nil
+		}
+		return st.UpdatedNumberScheduled == st.DesiredNumberScheduled &&
+			st.NumberReady == st.DesiredNumberScheduled &&
+			st.NumberAvailable == st.DesiredNumberScheduled, nil
+	})
+}
+
+// WaitForNamespaceGone polls until namespace ns no longer exists (for cleanup).
+func WaitForNamespaceGone(ctx context.Context, clientset kubernetes.Interface, ns string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		_, err := clientset.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
+		if err != nil {
+			return true, nil
+		}
+		return false, nil
+	})
+}
+
+// WaitForPodSucceeded polls a Pod in ns/name until its Phase is Succeeded.
+func WaitForPodSucceeded(ctx context.Context, clientset kubernetes.Interface, ns, name string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		pod, err := clientset.CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return false, nil //nolint:nilerr
+		}
+		switch pod.Status.Phase {
+		case corev1.PodSucceeded:
+			return true, nil
+		case corev1.PodFailed:
+			return false, fmt.Errorf("pod %s/%s entered Failed phase", ns, name)
+		}
+		return false, nil
+	})
 }

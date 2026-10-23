@@ -36,9 +36,14 @@ const farSecretName = "far-secret"
 func Phase33FarSecret(ctx context.Context, cl *intent.Cluster, _ *state.State, clients *gcp.Clients, dryRun bool) error {
 	fmt.Fprintf(os.Stderr, "[phase 33] far-secret (source=%s): cluster=%s\n", cl.Bnk.FarSecret.Source, cl.Metadata.Name)
 
+	targetNS := cl.Bnk.FarSecret.Namespaces
+	if len(targetNS) == 0 {
+		targetNS = []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance", "f5-utils", "default"}
+	}
+
 	if dryRun {
 		fmt.Fprintf(os.Stderr, "[phase 33] would provision far-secret (source=%s) into namespaces %v\n",
-			cl.Bnk.FarSecret.Source, cl.Bnk.FarSecret.Namespaces)
+			cl.Bnk.FarSecret.Source, targetNS)
 		return nil
 	}
 
@@ -56,7 +61,7 @@ func Phase33FarSecret(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 		if err != nil {
 			return fmt.Errorf("phase33: building clientset for source context %s: %w", cl.Bnk.FarSecret.SourceContext, err)
 		}
-		for _, ns := range cl.Bnk.FarSecret.Namespaces {
+		for _, ns := range targetNS {
 			if err := copyFarSecretFromContext(ctx, srcClient, cl.Bnk.FarSecret.SourceNamespace, clients.K8s, ns); err != nil {
 				return fmt.Errorf("phase33: copying far-secret into %s: %w", ns, err)
 			}
@@ -67,7 +72,7 @@ func Phase33FarSecret(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 		if err != nil {
 			return fmt.Errorf("phase33: reading dockerConfigFile %s: %w", cl.Bnk.FarSecret.DockerConfigFile, err)
 		}
-		for _, ns := range cl.Bnk.FarSecret.Namespaces {
+		for _, ns := range targetNS {
 			if err := createFarSecretFromDockerConfig(ctx, clients.K8s, ns, dockerCfg); err != nil {
 				return fmt.Errorf("phase33: creating far-secret in %s: %w", ns, err)
 			}

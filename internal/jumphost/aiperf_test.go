@@ -706,3 +706,52 @@ func TestBuildMooncakeCmd_DefaultDilation(t *testing.T) {
 		t.Errorf("BuildMooncakeCmd with TraceDilation=0 should default to 0.8; cmd=%q", cmd)
 	}
 }
+
+func TestBuildAiperfCmd_AgentXMvpScenario(t *testing.T) {
+	opts := jumphost.AiperfRunOptions{
+		ProbeOptions: jumphost.ProbeOptions{VIP: "10.0.10.100"},
+		Config: jumphost.AiperfConfig{
+			Model:               "meta-llama/Llama-3.1-70B-Instruct",
+			Scenario:            "inferencex-agentx-mvp",
+			PublicDataset:       "semianalysis_cc_traces_weka_with_subagents",
+			EndpointType:        "chat",
+			Streaming:           true,
+			UseServerTokenCount: true,
+			BenchmarkDuration:   900,
+			RandomSeed:          20260707,
+			Concurrency:         16,
+		},
+	}
+	cmd := jumphost.BuildAiperfCmd(opts)
+
+	mustContain := []string{
+		"--scenario 'inferencex-agentx-mvp'",
+		"--public-dataset 'semianalysis_cc_traces_weka_with_subagents'",
+		"--endpoint-type 'chat'",
+		"--streaming",
+		"--use-server-token-count",
+		"--benchmark-duration 900",
+		"--random-seed 20260707",
+		"--concurrency 16",
+		"export AIPERF_DATASET_CONFIGURATION_TIMEOUT=1800",
+		"AIPERF_SERVICE_PROFILE_CONFIGURE_TIMEOUT=1800",
+		"AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID=1",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("buildAiperfCmd missing %q; cmd=%q", want, cmd)
+		}
+	}
+
+	mustNotContain := []string{
+		"--synthetic-input-tokens-mean",
+		"--output-tokens-mean",
+		"--seq-dist",
+		"--request-count",
+	}
+	for _, bad := range mustNotContain {
+		if strings.Contains(cmd, bad) {
+			t.Errorf("buildAiperfCmd must NOT contain %q for scenario; cmd=%q", bad, cmd)
+		}
+	}
+}

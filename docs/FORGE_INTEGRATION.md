@@ -1,25 +1,60 @@
 # BNK Forge Integration
 
-`gkebnkctl` integrates natively with **BNK Forge** (`bnk-forge`), the centralized multi-cloud test harness and scenario coordinator for F5 BIG-IP Next for Kubernetes.
+`gkebnkctl` integrates natively with **BNK Forge** (`bnk-forge`), the centralized multi-cloud control plane, scenario coordinator, and AI benchmark harness for F5 BIG-IP Next for Kubernetes.
 
 ---
 
 ## Overview
 
-BNK Forge manages live deployments, runs continuous multi-cloud benchmark suites, and correlates telemetry across AWS, GKE, ROKS, and OCI environments.
+`gkebnkctl` provides two complementary ways to wire a GKE cluster into BNK Forge:
 
-`gkebnkctl` provides the `bnkforge` CLI group to connect, register, and sync cluster status directly from the workstation:
+1. **Automatic Lifecycle Hooks (Phase 29)**: When `forge.enabled: true` is configured in `cluster.yaml`, `gkebnkctl up` automatically executes **Phase 29 (`forge-register`)** to create/reuse the Forge project, upload the cluster kubeconfig, and trigger an initial cluster scan (trying MCP first with automatic REST fallback). During teardown, `gkebnkctl down` runs `Phase29ForgeRegisterDown` to clean up cluster-scoped benchmark targets and unregister the cluster.
+2. **Explicit CLI Subcommands (`gkebnkctl forge`)**: Register, inspect, benchmark, clean up, or unregister a workspace on demand over Forge's MCP endpoint (`http://localhost:8081/mcp/` by default, overridden via `--forge-mcp-url` or `GKEBNKCTL_FORGE_MCP_URL`) and REST API (`http://localhost:8000` by default).
+
+> **Deprecation Note**: `gkebnkctl bnkforge` is a deprecated legacy alias. Use `gkebnkctl forge` for all workflows.
+
+---
+
+## CLI Usage (`gkebnkctl forge`)
 
 ```bash
-# Register an active cluster with BNK Forge
-gkebnkctl bnkforge register -f cluster.yaml --url https://forge.internal.domain
+# Register an active cluster with BNK Forge over MCP (and run post-register scan + bnk_health)
+gkebnkctl forge register -f cluster.yaml --scan
 
-# Query cluster status from Forge
-gkebnkctl bnkforge status -f cluster.yaml
+# Override the MCP endpoint explicitly or via environment variable
+export GKEBNKCTL_FORGE_MCP_URL="http://localhost:8081/mcp/"
+gkebnkctl forge register -f cluster.yaml --forge-mcp-url http://localhost:8081/mcp/
 
-# Unregister cluster upon teardown
-gkebnkctl bnkforge unregister -f cluster.yaml
+# Query registration state and Forge MCP reachability
+gkebnkctl forge status -f cluster.yaml
+
+# Run an aiperf benchmark from the jumphost and push structured results to Forge
+gkebnkctl forge benchmark -f cluster.yaml --scenario baseline
+
+# Purge shared gkebnkctl-prefixed BenchmarkAgent and BenchmarkConfig records
+gkebnkctl forge cleanup --workspace bnk-hostdev --forge-rest-url http://localhost:8000
+
+# Unregister cluster from Forge (pass --purge to also delete the Forge project)
+gkebnkctl forge unregister -f cluster.yaml
 ```
+
+---
+
+## Automatic Registration in `cluster.yaml` (Phase 29)
+
+Add a `forge:` block to `cluster.yaml` to enable automatic registration during `gkebnkctl up` and automatic unregistration during `gkebnkctl down`:
+
+```yaml
+forge:
+  enabled: true
+  url: http://localhost:8000
+  mcpUrl: http://localhost:8081/mcp/
+  projectName: gkebnkctl-bnk-hostdev
+  environment: lab
+  cloudProvider: gcp
+```
+
+Credentials for the REST fallback and benchmark ingestion resolve from `forge.username` / `forge.password` or environment variables (`GKEBNKCTL_FORGE_USERNAME`, `GKEBNKCTL_FORGE_PASSWORD`, `GKEBNKCTL_FORGE_AGENT_TOKEN`).
 
 ---
 
@@ -28,55 +63,36 @@ gkebnkctl bnkforge unregister -f cluster.yaml
 ```mermaid
 sequenceDiagram
     participant CLI as gkebnkctl
-    participant Forge as BNK Forge Server
-    participant GKE as GKE Cluster
+    participant GKE as GKE Cluster API
+    participant MCP as Forge MCP (:8081/mcp/)
+    participant REST as Forge REST (:8000)
 
-    CLI->>GKE: Query cluster metadata & public endpoints
-    GKE-->>CLI: Return cluster info & TMM self-IPs
-    CLI->>Forge: POST /api/v1/clusters (Registration Payload)
-    Forge-->>CLI: 200 OK (Registration ACK + Token)
+    CLI->>GKE: Fetch cluster endpoint & CA certificate
+    GKE-->>CLI: Build self-contained OAuth2 kubeconfig
+    CLI->>MCP: JSON-RPC register_cluster + scan_cluster + bnk_health
+    alt MCP reachable
+        MCP-->>CLI: Project ID + Cluster ID persisted to .gkebnkctl/<cluster>/forge_link.json
+    else MCP unreachable / catalog fallback
+        CLI->>REST: POST /api/projects & /api/clusters (exponential backoff)
+        REST-->>CLI: Project ID + Cluster ID persisted to .gkebnkctl/<cluster>/forge_link.json
+    end
 ```
 
-### Registration Payload Format
+### Workspace Link File (`.gkebnkctl/<cluster>/forge_link.json`)
 
-When registering with BNK Forge, `gkebnkctl` produces an aligned JSON payload:
+When registration succeeds, `gkebnkctl` writes `.gkebnkctl/<cluster>/forge_link.json` tracking the Forge linkage:
 
 ```json
 {
-  "name": "gke-bnk-syd",
-  "platform": "gke",
-  "region": "australia-southeast1",
-  "zone": "australia-southeast1-a",
-  "kubernetes_version": "1.32.8-gke.1100",
-  "bnk_version": "2.4.0",
-  "dataplane": "host-device",
-  "endpoints": {
-    "external_vip": "10.10.1.100",
-    "internal_vip": "10.20.1.100",
-    "egress_client": "10.0.3.15"
-  },
-  "registered_at": "2026-09-02T15:00:00Z"
+  "forge_url": "http://localhost:8000",
+  "forge_mcp_url": "http://localhost:8081/mcp/",
+  "workspace": "bnk-hostdev",
+  "project_id": 1,
+  "project_name": "gkebnkctl-bnk-hostdev",
+  "cluster_id": 1,
+  "cluster_name": "bnk-hostdev",
+  "registered_at": "2026-09-02T15:00:00Z",
+  "status": "registered"
 }
 ```
-
----
-
-## Automation in CI/CD
-
-To automatically register clusters created in CI pipelines, configure the following environment variables:
-
-```bash
-export FORGE_URL="https://forge.example.com"
-export FORGE_TOKEN="secret-bearer-token"
-
-# Provision and register
-gkebnkctl up -f cluster.yaml
-gkebnkctl bnkforge register -f cluster.yaml
-
-# Run tests
-gkebnkctl test -f cluster.yaml
-
-# Teardown and unregister
-gkebnkctl bnkforge unregister -f cluster.yaml
-gkebnkctl down -f cluster.yaml --yes
-```
+If Forge is temporarily offline during `gkebnkctl up`, Phase 29 soft-fails with `"status": "pending"` so cluster provisioning completes cleanly; run `gkebnkctl forge register -f cluster.yaml` once Forge is reachable.

@@ -13,7 +13,7 @@ apiVersion: k8s.f5.com/v1
 kind: CNEInstance
 metadata:
   name: instance
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   advanced:
     cneController:
@@ -85,7 +85,12 @@ spec:
     uri: {{ if .ImageRegistry }}{{ .ImageRegistry }}{{ else }}us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga{{ end }}
   telemetry:
     loggingSubsystem:
-      enabled: false
+      enabled: {{ if or .Telemetry .AIGateway }}true{{ else }}false{{ end }}
     metricSubsystem:
-      enabled: false
+      enabled: {{ if .Telemetry }}true{{ else }}false{{ end }}
+{{- if .AIGateway }}
+  aiGateway:
+    enabled: true
+    aiMetrics: true
+{{- end }}
   wholeCluster: true

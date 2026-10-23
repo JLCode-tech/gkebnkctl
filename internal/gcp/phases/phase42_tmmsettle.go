@@ -5,10 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
@@ -19,7 +25,8 @@ import (
 )
 
 const (
-	tmmSettleNamespace    = "f5-bnk"
+	tmmSettleNamespace    = "f5-cne-system"
+	tmmDaemonSetName      = "f5-tmm"
 	tmmSettleLabelSel     = "app=f5-tmm"
 	tmmSettlePollInterval = 10 * time.Second
 
@@ -38,6 +45,10 @@ const (
 	// once TMM is actually serving — the authoritative readiness signal, more
 	// meaningful than pod-Ready alone.
 	tmmAvailableCondition = "F5TmmAvailable"
+
+	licenseNamespacePrimary  = "f5-utils"
+	licenseNamespaceFallback = "f5-cne-core"
+	licenseName              = "bnk-license"
 )
 
 // cneInstanceGVR resolves the CNEInstance CR (k8s.f5.com/v1) directly rather
@@ -47,6 +58,14 @@ var cneInstanceGVR = schema.GroupVersionResource{
 	Group:    "k8s.f5.com",
 	Version:  "v1",
 	Resource: "cneinstances",
+}
+
+// licenseGVR resolves the License CR (k8s.f5net.com/v1).
+// licenseGVR defined in phase40_license.go
+var _ = schema.GroupVersionResource{
+	Group:    "k8s.f5net.com",
+	Version:  "v1",
+	Resource: "licenses",
 }
 
 // Phase42TMMSettle breaks the host-device DS NIC-handoff deadlock AND gates on
@@ -106,7 +125,31 @@ func Phase42TMMSettle(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 // tests stay fast. Returns nil once F5TmmAvailable=True, or an error if the
 // timeout elapses first.
 func settleAndGateTMM(ctx context.Context, client kubernetes.Interface, dyn dynamic.Interface, pollInterval, timeout time.Duration) error {
+	lastLicenseState := "unknown"
 	err := gcp.PollUntil(ctx, pollInterval, timeout, func(ctx context.Context) (bool, error) {
+		ensureTMMRollingUpdateStrategy(ctx, client)
+
+		licState, err := getLicenseState(ctx, dyn)
+		if err != nil {
+			licState = fmt.Sprintf("error (%v)", err)
+		}
+		lastLicenseState = licState
+		fmt.Fprintf(os.Stderr, "[phase 42] license status: state=%s\n", licState)
+
+		if isLicenseFailed(licState) {
+			fmt.Fprintln(os.Stderr, "================================================================================")
+			fmt.Fprintf(os.Stderr, "ALERT: LICENSE FAILED (state=%s)\n", licState)
+			fmt.Fprintln(os.Stderr, "License validation failed. Check JWT token validity and license server reachability.")
+			fmt.Fprintln(os.Stderr, "================================================================================")
+		}
+
+		if crashlooping, detail := checkCWCCrashLoop(ctx, client); crashlooping {
+			fmt.Fprintln(os.Stderr, "================================================================================")
+			fmt.Fprintf(os.Stderr, "ALERT: CWC IS CRASHLOOPING: %s\n", detail)
+			fmt.Fprintln(os.Stderr, "CWC DNS or cluster communication failure detected. Check CWC logs.")
+			fmt.Fprintln(os.Stderr, "================================================================================")
+		}
+
 		if tmmAvailable(ctx, dyn) {
 			fmt.Fprintln(os.Stderr, "[phase 42] CNEInstance F5TmmAvailable=True — TMM is up")
 			return true, nil
@@ -118,10 +161,13 @@ func settleAndGateTMM(ctx context.Context, client kubernetes.Interface, dyn dyna
 	})
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("phase42: TMM did not become available within %s (CNEInstance %s/%s %s != True) — "+
-				"check `kubectl get pods -n %s -l %s` and `kubectl describe cneinstance -n %s %s`",
-				timeout, tmmSettleNamespace, cneInstanceName, tmmAvailableCondition,
-				tmmSettleNamespace, tmmSettleLabelSel, tmmSettleNamespace, cneInstanceName)
+			diagCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			stuckDiags := collectStuckPodDiagnostics(diagCtx, client, []string{tmmSettleNamespace, "f5-utils", "f5-cne-core"})
+			return fmt.Errorf("phase42: TMM did not become available within %s (CNEInstance %s/%s %s != True; License: state=%s) — "+
+				"check `kubectl get pods -n %s -l %s` and `kubectl describe cneinstance -n %s %s`\nStuck pod diagnostics:\n%s",
+				timeout, tmmSettleNamespace, cneInstanceName, tmmAvailableCondition, lastLicenseState,
+				tmmSettleNamespace, tmmSettleLabelSel, tmmSettleNamespace, cneInstanceName, stuckDiags)
 		}
 		if errors.Is(err, context.Canceled) {
 			return fmt.Errorf("phase42: cancelled while waiting for TMM to become available: %w", err)
@@ -129,6 +175,39 @@ func settleAndGateTMM(ctx context.Context, client kubernetes.Interface, dyn dyna
 		return err
 	}
 	return nil
+}
+
+// ensureTMMRollingUpdateStrategy ensures DaemonSet/f5-tmm in f5-cne-system uses
+// RollingUpdate with maxSurge=0 and maxUnavailable=1 so single-node TMM restarts
+// terminate the old pod (releasing PCIe host-device NICs) before scheduling the new pod.
+func ensureTMMRollingUpdateStrategy(ctx context.Context, client kubernetes.Interface) {
+	if client == nil {
+		return
+	}
+	ds, err := client.AppsV1().DaemonSets(tmmSettleNamespace).Get(ctx, tmmDaemonSetName, metav1.GetOptions{})
+	if err != nil || ds == nil {
+		return
+	}
+	if ds.Spec.UpdateStrategy.Type == appsv1.RollingUpdateDaemonSetStrategyType &&
+		ds.Spec.UpdateStrategy.RollingUpdate != nil &&
+		ds.Spec.UpdateStrategy.RollingUpdate.MaxSurge != nil &&
+		ds.Spec.UpdateStrategy.RollingUpdate.MaxSurge.IntVal == 0 &&
+		ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable != nil &&
+		ds.Spec.UpdateStrategy.RollingUpdate.MaxUnavailable.IntVal == 1 {
+		return
+	}
+	maxSurge := intstr.FromInt32(0)
+	maxUnavailable := intstr.FromInt32(1)
+	ds.Spec.UpdateStrategy = appsv1.DaemonSetUpdateStrategy{
+		Type: appsv1.RollingUpdateDaemonSetStrategyType,
+		RollingUpdate: &appsv1.RollingUpdateDaemonSet{
+			MaxSurge:       &maxSurge,
+			MaxUnavailable: &maxUnavailable,
+		},
+	}
+	if _, err := client.AppsV1().DaemonSets(tmmSettleNamespace).Update(ctx, ds, metav1.UpdateOptions{}); err != nil {
+		fmt.Fprintf(os.Stderr, "[phase 42] warn: updating DaemonSet %s/%s rollingUpdate strategy: %v\n", tmmSettleNamespace, tmmDaemonSetName, err)
+	}
 }
 
 // tmmAvailable reports whether the CNEInstance's F5TmmAvailable condition is
@@ -173,4 +252,132 @@ func cycleStuckTMMPods(ctx context.Context, client kubernetes.Interface) {
 			fmt.Fprintf(os.Stderr, "[phase 42] warn: deleting pod %s: %v\n", name, err)
 		}
 	}
+}
+
+// isLicenseFailed reports whether a license state indicates failure or error.
+func isLicenseFailed(state string) bool {
+	s := strings.ToLower(state)
+	return strings.Contains(s, "failed") || strings.Contains(s, "invalid") || strings.Contains(s, "error")
+}
+
+// getLicenseState retrieves the state of the License CR (bnk-license), checking
+// primary namespace (f5-utils) first, and fallback namespace (f5-cne-core).
+func getLicenseState(ctx context.Context, dyn dynamic.Interface) (string, error) {
+	if dyn == nil {
+		return "client unavailable", nil
+	}
+	// Check f5-utils first, then f5-cne-core. If one is Active or explicitly Failed/Error, return it immediately.
+	for _, ns := range []string{licenseNamespacePrimary, licenseNamespaceFallback} {
+		state, err := getLicenseInNamespace(ctx, dyn, ns, licenseName)
+		if err == nil && state != "Pending" && state != "" {
+			return state, nil
+		}
+	}
+	state, err := getLicenseInNamespace(ctx, dyn, licenseNamespacePrimary, licenseName)
+	if err == nil {
+		return state, nil
+	}
+	if apierrors.IsNotFound(err) {
+		state2, err2 := getLicenseInNamespace(ctx, dyn, licenseNamespaceFallback, licenseName)
+		if err2 == nil {
+			return state2, nil
+		}
+		if apierrors.IsNotFound(err2) {
+			return "NotFound", nil
+		}
+		return "Unknown", err2
+	}
+	return "Unknown", err
+}
+
+func getLicenseInNamespace(ctx context.Context, dyn dynamic.Interface, ns, name string) (string, error) {
+	obj, err := dyn.Resource(licenseGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil && apierrors.IsNotFound(err) {
+		fallbackGVR := schema.GroupVersionResource{Group: "licenses.k8s.f5net.com", Version: "v1", Resource: "licenses"}
+		if obj2, err2 := dyn.Resource(fallbackGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{}); err2 == nil {
+			obj = obj2
+			err = nil
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	stateVal, found, _ := unstructured.NestedString(obj.Object, "status", "state")
+	if !found || stateVal == "" {
+		return "Pending", nil
+	}
+	return stateVal, nil
+}
+
+// checkCWCCrashLoop inspects pods in target namespaces for CrashLoopBackOff or high restart counts in CWC containers.
+func checkCWCCrashLoop(ctx context.Context, client kubernetes.Interface) (bool, string) {
+	if client == nil {
+		return false, ""
+	}
+	for _, ns := range []string{"f5-cne-core", "f5-utils", "f5-cne-system"} {
+		pods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			continue
+		}
+		for _, p := range pods.Items {
+			isCWC := p.Labels["app"] == "cwc" || strings.Contains(p.Name, "cwc")
+			for _, cs := range p.Status.ContainerStatuses {
+				if isCWC || cs.Name == "f5-spk-cwc" || strings.Contains(cs.Name, "cwc") {
+					if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+						return true, fmt.Sprintf("pod %s/%s container %s is in CrashLoopBackOff (restarts=%d)", ns, p.Name, cs.Name, cs.RestartCount)
+					}
+					if cs.RestartCount >= 3 && !cs.Ready {
+						return true, fmt.Sprintf("pod %s/%s container %s has %d restarts and is not ready", ns, p.Name, cs.Name, cs.RestartCount)
+					}
+				}
+			}
+		}
+	}
+	return false, ""
+}
+
+// collectStuckPodDiagnostics produces a readable summary of unready, terminating, or restarting pods.
+func collectStuckPodDiagnostics(ctx context.Context, client kubernetes.Interface, namespaces []string) string {
+	if client == nil {
+		return "  (k8s client unavailable)"
+	}
+	var diags []string
+	for _, ns := range namespaces {
+		pods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			diags = append(diags, fmt.Sprintf("  namespace %s: error listing pods: %v", ns, err))
+			continue
+		}
+		for _, p := range pods.Items {
+			isStuck := p.DeletionTimestamp != nil || p.Status.Phase != corev1.PodRunning
+			if !isStuck {
+				for _, cs := range p.Status.ContainerStatuses {
+					if !cs.Ready || cs.RestartCount > 0 {
+						isStuck = true
+						break
+					}
+				}
+			}
+			if isStuck {
+				line := fmt.Sprintf("  pod %s/%s: phase=%s", ns, p.Name, p.Status.Phase)
+				if p.DeletionTimestamp != nil {
+					line += " (terminating)"
+				}
+				for _, cs := range p.Status.ContainerStatuses {
+					statusDesc := "running"
+					if cs.State.Waiting != nil {
+						statusDesc = fmt.Sprintf("waiting(%s: %s)", cs.State.Waiting.Reason, cs.State.Waiting.Message)
+					} else if cs.State.Terminated != nil {
+						statusDesc = fmt.Sprintf("terminated(exitCode=%d: %s)", cs.State.Terminated.ExitCode, cs.State.Terminated.Reason)
+					}
+					line += fmt.Sprintf(" [container %s: ready=%t restarts=%d %s]", cs.Name, cs.Ready, cs.RestartCount, statusDesc)
+				}
+				diags = append(diags, line)
+			}
+		}
+	}
+	if len(diags) == 0 {
+		return "  (no stuck pods detected in target namespaces)"
+	}
+	return strings.Join(diags, "\n")
 }
