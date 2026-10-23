@@ -41,6 +41,10 @@ const (
 	DataPlaneGroup = "k8s.f5net.com"
 	// FLOGroup holds the CNEInstance.
 	FLOGroup = "k8s.f5.com"
+	// InferenceF5Group is the BNK 2.4.1 Multi-Cluster AI Gateway CRD group.
+	InferenceF5Group = "inference.k8s.f5.com"
+	// InferenceF5Version is the served version of every InferenceF5Group kind.
+	InferenceF5Version = "v1alpha1"
 
 	// DefaultControllerNamespace is where gkebnkctl installs the CNE stack.
 	DefaultControllerNamespace = "f5-cne-system"
@@ -75,6 +79,18 @@ var (
 	EgressGatewayGVR   = schema.GroupVersionResource{Group: GatewayF5Group, Version: GatewayF5Version, Resource: "egressgateways"}
 	SecPolicyGVR       = schema.GroupVersionResource{Group: GatewayF5Group, Version: GatewayF5Version, Resource: "secpolicies"}
 	NetPolicyGVR       = schema.GroupVersionResource{Group: GatewayF5Group, Version: GatewayF5Version, Resource: "netpolicies"}
+	AppPolicyGVR       = schema.GroupVersionResource{Group: GatewayF5Group, Version: GatewayF5Version, Resource: "apppolicies"}
+	L4GlobalPolicyGVR  = schema.GroupVersionResource{Group: GatewayF5Group, Version: GatewayF5Version, Resource: "l4globalpolicies"}
+
+	// BNK 2.4.1 Multi-Cluster AI Gateway CRDs (inference.k8s.f5.com/v1alpha1).
+	AITenantGVR         = schema.GroupVersionResource{Group: InferenceF5Group, Version: InferenceF5Version, Resource: "aitenants"}
+	AICredentialGVR     = schema.GroupVersionResource{Group: InferenceF5Group, Version: InferenceF5Version, Resource: "aicredentials"}
+	AIProviderGVR       = schema.GroupVersionResource{Group: InferenceF5Group, Version: InferenceF5Version, Resource: "aiproviders"}
+	AIModelGVR          = schema.GroupVersionResource{Group: InferenceF5Group, Version: InferenceF5Version, Resource: "aimodels"}
+	AIGatewayProfileGVR = schema.GroupVersionResource{Group: InferenceF5Group, Version: InferenceF5Version, Resource: "aigatewayprofiles"}
+	AIRouteGVR          = schema.GroupVersionResource{Group: InferenceF5Group, Version: InferenceF5Version, Resource: "airoutes"}
+	AIRoutePolicyGVR    = schema.GroupVersionResource{Group: InferenceF5Group, Version: InferenceF5Version, Resource: "airoutepolicies"}
+	AIGatewayGVR        = schema.GroupVersionResource{Group: InferenceF5Group, Version: InferenceF5Version, Resource: "aigateways"}
 
 	GatewayGVR      = schema.GroupVersionResource{Group: GatewayAPIGroup, Version: "v1", Resource: "gateways"}
 	GatewayClassGVR = schema.GroupVersionResource{Group: GatewayAPIGroup, Version: "v1", Resource: "gatewayclasses"}
@@ -284,6 +300,20 @@ type Index struct {
 	CGNATPolicies     []Object `json:"cgnatPolicies,omitempty"`
 	DiameterEndpoints []Object `json:"diameterEndpoints,omitempty"`
 
+	// BNK 2.4.1 Multi-Cluster AI Gateway & Application Policies
+	AppPolicies       []Object          `json:"appPolicies,omitempty"`
+	L4GlobalPolicies  []Object          `json:"l4GlobalPolicies,omitempty"`
+	AITenants         []Object          `json:"aiTenants,omitempty"`
+	AICredentials     []Object          `json:"aiCredentials,omitempty"`
+	AIProviders       []Object          `json:"aiProviders,omitempty"`
+	AIModels          []Object          `json:"aiModels,omitempty"`
+	AIGatewayProfiles []Object          `json:"aiGatewayProfiles,omitempty"`
+	AIRoutes          []Object          `json:"aiRoutes,omitempty"`
+	AIRoutePolicies   []Object          `json:"aiRoutePolicies,omitempty"`
+	AIGateways        []Object          `json:"aiGateways,omitempty"`
+	DNSResolverReady  bool              `json:"dnsResolverReady,omitempty"`
+	AIGatewayPosture  *AIGatewayPosture `json:"aiGatewayPosture,omitempty"`
+
 	Controller Controller `json:"controller"`
 	TMM        TMM        `json:"tmm"`
 	Legacy     Legacy     `json:"legacy"`
@@ -291,6 +321,22 @@ type Index struct {
 	Missing []string `json:"missingCRDs,omitempty"`
 
 	MCP []MCPEndpoint `json:"mcpEndpoints"`
+}
+
+// AIGatewayPosture captures BNK 2.4.1 AI Gateway runtime prerequisites and pod readiness.
+type AIGatewayPosture struct {
+	Enabled                bool   `json:"enabled"`
+	AIMetricsEnabled       bool   `json:"aiMetricsEnabled,omitempty"`
+	DefaultStorageClass    string `json:"defaultStorageClass,omitempty"`
+	DSSMSentinelReady      bool   `json:"dssmSentinelReady,omitempty"`
+	KubeDNSAbsent          bool   `json:"kubeDnsAbsent,omitempty"`
+	AIGWDNSResolverPresent bool   `json:"aigwDnsResolverPresent,omitempty"`
+	F5AIGatewayFound       bool   `json:"f5AiGatewayFound,omitempty"`
+	F5AIGatewayReady       bool   `json:"f5AiGatewayReady,omitempty"`
+	F5AIGatewayDesired     int32  `json:"f5AiGatewayDesired,omitempty"`
+	F5AIGatewayAvailable   int32  `json:"f5AiGatewayAvailable,omitempty"`
+	ClickHouseReady        bool   `json:"clickHouseReady,omitempty"`
+	ClickHousePVCsBound    int    `json:"clickHousePvcsBound,omitempty"`
 }
 
 // Ready reports whether the cluster satisfies every 2.4 readiness check: the
@@ -311,7 +357,7 @@ func (idx *Index) problems(acceptLegacy bool) []string {
 		out = append(out, "no BNK policy CRD group served (gateway.k8s.f5.com missing)")
 	case Gen23:
 		if !acceptLegacy {
-			out = append(out, "cluster serves the 2.3 API (gateway.k8s.f5net.com); run gkebnkctl bnk upgrade")
+			out = append(out, "cluster serves the 2.3 API (gateway.k8s.f5net.com); run azrbnkctl bnk upgrade")
 		}
 	}
 	if !idx.Controller.Found {
@@ -349,6 +395,16 @@ func (idx *Index) problems(acceptLegacy bool) []string {
 				msg += fmt.Sprintf("; the BNK 2.4.0 controller reconciles F5BigPersistenceProfile only in its own namespace (%s) and a NetPolicy resolves the profile in its own namespace, so MCP session persistence needs the Gateway, NetPolicy and profile in %s", idx.Controller.Namespace, idx.Controller.Namespace)
 			}
 			out = append(out, msg)
+		}
+	}
+	for _, o := range idx.AIGatewayProfiles {
+		if !o.Ready {
+			out = append(out, fmt.Sprintf("AIGatewayProfile %s: %s", o.ID(), o.Detail))
+		}
+	}
+	for _, o := range idx.AIGateways {
+		if !o.Ready {
+			out = append(out, fmt.Sprintf("AIGateway %s: %s", o.ID(), o.Detail))
 		}
 	}
 	return out

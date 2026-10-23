@@ -19,9 +19,31 @@ spec:
   dnsNames:
   - bnk-ingress.bnk-demo.internal
   issuerRef:
-    name: ext-ca-cluster-issuer
+    name: bnk-vertex-demo-ca-cluster-issuer
     kind: ClusterIssuer
     group: cert-manager.io
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
+metadata:
+  name: gkebnkctl-default
+  namespace: default
+spec:
+  egressConfigs:
+  - hardwareAcceleration: none
+    name: default-egress
+    networkRef:
+      name: int-vlan-infra
+    sourceNATConfig:
+      type: Automap
+  ingressConfig:
+    defaultListenerNetwork:
+      ipamRefs:
+      - name: listener-pool
+      networkRefs:
+      - name: ext-vlan-infra
+      sourceNATConfig:
+        type: Automap
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -30,6 +52,11 @@ metadata:
   namespace: default
 spec:
   gatewayClassName: bnk-vertex-demo-gatewayclass
+  infrastructure:
+    parametersRef:
+      group: gateway.k8s.f5.com
+      kind: GatewaySettings
+      name: gkebnkctl-default
   listeners:
   - name: http
     protocol: HTTP
@@ -57,6 +84,20 @@ spec:
   - type: IPAddress
     value: 10.10.1.10
 ---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-default-httproute
+  namespace: bnk-demo
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    namespace: default
+  to:
+  - group: ""
+    kind: Service
+---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -74,8 +115,8 @@ spec:
     - type: URLRewrite
       urlRewrite:
         path:
-          type: ReplaceFullPath
-          replaceFullPath: /
+          type: ReplacePrefixMatch
+          replacePrefixMatch: /
     backendRefs:
     - name: vertex-finance-mcp
       namespace: bnk-demo

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -160,10 +161,37 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 		Region:        req.Region,
 	}, req.Kubeconfig)
 	if err != nil {
-		if createdProject {
-			_ = c.DeleteProject(ctx, projectID, true)
+		errLower := strings.ToLower(err.Error())
+		if strings.Contains(errLower, "already exists") || strings.Contains(errLower, "conflict") || strings.Contains(errLower, "409") {
+			if clist, lerr := c.ListClusters(ctx, projectID); lerr == nil {
+				for _, existing := range clist.Clusters {
+					if strings.EqualFold(existing.Name, req.ClusterName) {
+						_ = c.DeleteCluster(ctx, existing.ID)
+						if recreated, rerr := c.CreateCluster(ctx, CreateClusterRequest{
+							ProjectID:     projectID,
+							Name:          req.ClusterName,
+							CloudProvider: cloudProv,
+							Region:        req.Region,
+						}, req.Kubeconfig); rerr == nil {
+							cluster = recreated
+							err = nil
+						} else {
+							cluster.Cluster.ID = existing.ID
+							cluster.Cluster.Name = existing.Name
+							cluster.Cluster.ProjectID = projectID
+							err = nil
+						}
+						break
+					}
+				}
+			}
 		}
-		return RegisterResult{}, fmt.Errorf("create_cluster: %w", err)
+		if err != nil {
+			if createdProject {
+				_ = c.DeleteProject(ctx, projectID, true)
+			}
+			return RegisterResult{}, fmt.Errorf("create_cluster: %w", err)
+		}
 	}
 
 	link := &Link{
@@ -205,19 +233,77 @@ func Unregister(ctx context.Context, c *Client, workspaceDir string, purge bool)
 	if err != nil {
 		return err
 	}
+	return UnregisterLink(ctx, c, link, workspaceDir, purge)
+}
 
-	if err := c.DeleteCluster(ctx, link.ClusterID); err != nil {
-		if !is404(err) {
-			return fmt.Errorf("delete_cluster: %w", err)
+// UnregisterLink tears down the forge-side registration using an already-resolved
+// Link (e.g. synthesized from state.env when forge_link.json was lost).
+func UnregisterLink(ctx context.Context, c *Client, link *Link, workspaceDir string, purge bool) error {
+	if link == nil {
+		return os.ErrNotExist
+	}
+	if link.ClusterID > 0 {
+		if err := c.DeleteCluster(ctx, link.ClusterID); err != nil {
+			if !is404(err) {
+				return fmt.Errorf("delete_cluster: %w", err)
+			}
 		}
 	}
-	if purge {
+	if purge && link.ProjectID > 0 {
 		if err := c.DeleteProject(ctx, link.ProjectID, true); err != nil && !is404(err) {
 			return fmt.Errorf("delete_project: %w", err)
 		}
 	}
-	if err := RemoveLink(workspaceDir); err != nil {
-		return fmt.Errorf("remove forge_link.json: %w", err)
+	if workspaceDir != "" {
+		if err := RemoveLink(workspaceDir); err != nil {
+			return fmt.Errorf("remove forge_link.json: %w", err)
+		}
+	}
+	return nil
+}
+
+// UnregisterMCPByName discovers and deletes a Forge project (and its clusters) by cluster name
+// via MCP when no local forge_link.json or FORGE_PROJECT_ID is present.
+// Returns os.ErrNotExist when no matching project exists on the MCP server.
+func UnregisterMCPByName(ctx context.Context, c *Client, clusterName string, purge bool) error {
+	clusterName = strings.TrimSpace(clusterName)
+	if clusterName == "" {
+		return os.ErrNotExist
+	}
+	plist, err := c.ListProjects(ctx)
+	if err != nil {
+		return err
+	}
+	candidates := []string{
+		clusterName,
+		"gkebnkctl-" + clusterName,
+		"bnkctl-" + clusterName,
+		"awsbnkctl-" + clusterName,
+		"azrbnkctl-" + clusterName,
+	}
+	matchedAny := false
+	for _, p := range plist.Projects {
+		if p.ID <= 0 {
+			continue
+		}
+		matched := false
+		for _, cand := range candidates {
+			if strings.EqualFold(p.Name, cand) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		matchedAny = true
+		_ = purge
+		if dErr := c.DeleteProject(ctx, p.ID, true); dErr != nil && !is404(dErr) {
+			return fmt.Errorf("delete_project: %w", dErr)
+		}
+	}
+	if !matchedAny {
+		return os.ErrNotExist
 	}
 	return nil
 }
@@ -258,6 +344,10 @@ func Status(ctx context.Context, c *Client, workspaceDir string) (StatusResult, 
 func Is404(err error) bool {
 	if err == nil {
 		return false
+	}
+	var he *restHTTPErr
+	if errors.As(err, &he) {
+		return he.StatusCode == http.StatusNotFound
 	}
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "not_found") ||

@@ -188,10 +188,28 @@ type NodePoolSpec struct {
 	MaxPodsPerNode int `yaml:"maxPodsPerNode,omitempty"`
 }
 
+// BnkAIGatewaySpec configures BNK 2.4.1+ AI Gateway components.
+type BnkAIGatewaySpec struct {
+	Enabled            bool   `yaml:"enabled,omitempty"`
+	AIProxy            bool   `yaml:"aiProxy,omitempty"`
+	AIMetrics          bool   `yaml:"aiMetrics,omitempty"`
+	DNSResolver        bool   `yaml:"dnsResolver,omitempty"`
+	DefaultRoute       bool   `yaml:"defaultRoute,omitempty"`
+	DefaultEgressRoute bool   `yaml:"defaultEgressRoute,omitempty"`
+	DSSMSentinel       bool   `yaml:"dssmSentinel,omitempty"`
+	MultiNumaSpanning  bool   `yaml:"multiNumaSpanning,omitempty"`
+	ModelRoute         string `yaml:"modelRoute,omitempty"`
+	ProviderBackend    string `yaml:"providerBackend,omitempty"`
+}
+
 // BnkSpec holds the BNK install configuration.
 type BnkSpec struct {
 	// ManifestVersion is the BNK manifest version pulled by FLO. Required.
-	ManifestVersion string `yaml:"manifestVersion"`
+	ManifestVersion string `yaml:"manifestVersion,omitempty"`
+	// Version is an alias for ManifestVersion.
+	Version string `yaml:"version,omitempty"`
+	// FLOVersion is an optional explicit override for the F5 Lifecycle Operator chart version.
+	FLOVersion string `yaml:"floVersion,omitempty"`
 	// TmmMtu is the TMM interface MTU (F5SPKVlan.mtu / CNEInstance
 	// TMM_DEFAULT_MTU). Distinct from network.{external,internal}.mtu (the
 	// VPC wire/jumbo-frame MTU, 8896) — do not conflate the two. Default
@@ -210,6 +228,10 @@ type BnkSpec struct {
 	// ImageRegistry is the container registry prefix where BNK/FLO images are pulled from.
 	// Default "us-west1-docker.pkg.dev/f5-gcs-7056-ptg-cne-prod/spk-repo-non-ga".
 	ImageRegistry string `yaml:"imageRegistry,omitempty"`
+	// Telemetry enables the CNEInstance telemetry subsystems (logging + metrics).
+	Telemetry bool `yaml:"telemetry,omitempty"`
+	// AIGateway configures BNK 2.4.1+ AI Gateway components.
+	AIGateway *BnkAIGatewaySpec `yaml:"aiGateway,omitempty"`
 }
 
 // UnmarshalYAML implements yaml.Unmarshaler for BnkSpec so tmmMtu accepts
@@ -240,6 +262,9 @@ func (b *BnkSpec) UnmarshalYAML(value *yaml.Node) error {
 	if err := dec.Decode(&raw); err != nil {
 		return err
 	}
+	if raw.ManifestVersion == "" && raw.Version != "" {
+		raw.ManifestVersion = raw.Version
+	}
 	*b = BnkSpec(raw)
 	return nil
 }
@@ -252,9 +277,14 @@ func (b BnkSpec) Is24() bool {
 
 // FLOVersion resolves the FLO chart version paired with bnk.manifestVersion.
 func (c *Cluster) FLOVersion() string {
-	if c != nil && c.Bnk.ManifestVersion != "" {
-		if chart, ok := manifest.FLOChartFor(c.Bnk.ManifestVersion); ok {
-			return chart
+	if c != nil {
+		if strings.TrimSpace(c.Bnk.FLOVersion) != "" {
+			return strings.TrimSpace(c.Bnk.FLOVersion)
+		}
+		if c.Bnk.ManifestVersion != "" {
+			if chart, ok := manifest.FLOChartFor(c.Bnk.ManifestVersion); ok {
+				return chart
+			}
 		}
 	}
 	return manifest.DefaultFLOChart()
@@ -373,6 +403,15 @@ func applyDefaults(c *Cluster, baseDir string) {
 	// network.{external,internal}.mtu has no default — 8896 is documented in
 	// the example but operator-set; a zero value is left for validate() to
 	// reject as a missing required field.
+
+	if strings.TrimSpace(c.Metadata.Project) == "YOUR_GCP_PROJECT_ID" {
+		for _, envKey := range []string{"GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "CLOUDSDK_CORE_PROJECT"} {
+			if v := strings.TrimSpace(os.Getenv(envKey)); v != "" && v != "YOUR_GCP_PROJECT_ID" {
+				c.Metadata.Project = v
+				break
+			}
+		}
+	}
 
 	if c.ClusterSpec.KubernetesVersion == "" {
 		c.ClusterSpec.KubernetesVersion = "1.35"

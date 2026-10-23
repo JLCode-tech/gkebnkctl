@@ -68,39 +68,12 @@ class VertexAgentRunner:
         data_bytes = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(self.tool_url, data=data_bytes, headers=headers)
 
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                resp_data = json.loads(resp.read().decode("utf-8"))
-                result_content = (
-                    resp_data.get("result", {})
-                    .get("content", [{}])[0]
-                    .get("text", "{}")
-                )
-                return json.loads(result_content)
-        except Exception as e:
-            # If ingress VIP is not direct routed locally, simulate live response from tool contract
-            logger.info(f"Direct Ingress routing ({self.tool_url}) returned: {e}")
-            logger.info("Engaging governed fallback via cluster service contract...")
-            import random
-
-            base_price = {"GOOGL": 190.50, "AAPL": 225.00, "MSFT": 440.00}.get(
-                arguments.get("symbol", "GOOGL").upper(), 100.0
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp_data = json.loads(resp.read().decode("utf-8"))
+            result_content = (
+                resp_data.get("result", {}).get("content", [{}])[0].get("text", "{}")
             )
-            drift = random.uniform(0.01, 0.04)
-            days = int(arguments.get("days", 30))
-            projected = round(base_price * ((1 + drift) ** (days / 30)), 2)
-            return {
-                "symbol": arguments.get("symbol", "GOOGL").upper(),
-                "horizon_days": days,
-                "current_price": base_price,
-                "projected_price": projected,
-                "expected_return_pct": round(
-                    ((projected - base_price) / base_price) * 100, 2
-                ),
-                "volatility": 0.18,
-                "confidence": "HIGH",
-                "governed_by": "F5 BIG-IP Next on GKE (Host-Device Dataplane)",
-            }
+            return json.loads(result_content)
 
     def run(self, symbol: str, days: int = 30) -> None:
         """Execute Reasoning -> Tool Call -> Synthesis loop."""

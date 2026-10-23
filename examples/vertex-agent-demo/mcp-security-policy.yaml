@@ -129,8 +129,8 @@ spec:
         HTTP::release
     }
 ---
-apiVersion: gateway.k8s.f5net.com/v1alpha1
-kind: BNKNetPolicy
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: NetPolicy
 metadata:
   name: mcp-net-policy-http
   namespace: default
@@ -144,9 +144,12 @@ spec:
   - group: k8s.f5net.com
     kind: F5BigCneIrule
     name: mcp-rate-limit-irule
+  - group: k8s.f5net.com
+    kind: F5BigPersistenceProfile
+    name: mcp-session
 ---
-apiVersion: gateway.k8s.f5net.com/v1alpha1
-kind: BNKNetPolicy
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: NetPolicy
 metadata:
   name: mcp-net-policy-https
   namespace: default
@@ -160,6 +163,9 @@ spec:
   - group: k8s.f5net.com
     kind: F5BigCneIrule
     name: mcp-rate-limit-irule
+  - group: k8s.f5net.com
+    kind: F5BigPersistenceProfile
+    name: mcp-session
 ---
 apiVersion: k8s.f5net.com/v1
 kind: F5BigFwPolicy
@@ -183,8 +189,8 @@ spec:
     action: reject
     logging: true
 ---
-apiVersion: gateway.k8s.f5net.com/v1alpha1
-kind: BNKSecPolicy
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: SecPolicy
 metadata:
   name: mcp-sec-policy
   namespace: default

@@ -8,6 +8,8 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
@@ -74,6 +76,14 @@ type InstancesAPI interface {
 	Delete(ctx context.Context, req *computepb.DeleteInstanceRequest, opts ...gax.CallOption) (*compute.Operation, error)
 }
 
+// DisksAPI is the subset of compute.DisksClient used by PhaseDownNetworks to
+// clean up orphaned GKE dynamic PVCs (e.g., BNK VictoriaMetrics / loki / otel
+// persistent disks) that were left behind when a cluster was torn down.
+type DisksAPI interface {
+	Delete(ctx context.Context, req *computepb.DeleteDiskRequest, opts ...gax.CallOption) (*compute.Operation, error)
+	ListAll(ctx context.Context, project, zone string) ([]*computepb.Disk, error)
+}
+
 // RegionsAPI is the subset of compute.RegionsClient used by Phase00's
 // best-effort quota check (CPUS / IN_USE_ADDRESSES headroom, warn-only).
 type RegionsAPI interface {
@@ -110,6 +120,7 @@ type Clients struct {
 	Firewalls    FirewallsAPI
 	Routers      RoutersAPI
 	Instances    InstancesAPI
+	Disks        DisksAPI
 	GKE          GKEAPI
 	Regions      RegionsAPI
 	ServiceUsage ServiceUsageAPI
@@ -136,12 +147,34 @@ type Clients struct {
 	RestConfig *rest.Config
 }
 
+// IsPlaceholderProject returns true if p is empty or the template placeholder YOUR_GCP_PROJECT_ID.
+func IsPlaceholderProject(p string) bool {
+	p = strings.TrimSpace(p)
+	return p == "" || p == "YOUR_GCP_PROJECT_ID"
+}
+
+// ResolveProject resolves project from environment variables (GOOGLE_CLOUD_PROJECT,
+// GCLOUD_PROJECT, CLOUDSDK_CORE_PROJECT) when project is empty or YOUR_GCP_PROJECT_ID.
+func ResolveProject(project string) string {
+	project = strings.TrimSpace(project)
+	if !IsPlaceholderProject(project) {
+		return project
+	}
+	for _, envKey := range []string{"GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "CLOUDSDK_CORE_PROJECT"} {
+		if v := strings.TrimSpace(os.Getenv(envKey)); !IsPlaceholderProject(v) {
+			return v
+		}
+	}
+	return project
+}
+
 // NewClients constructs real GCP SDK clients over Application Default
 // Credentials. No kubeconfig, no gcloud/kubectl shellout — see
 // docs/SPEC-go-tracer.md §5.
 func NewClients(ctx context.Context, project string) (*Clients, error) {
-	if project == "" {
-		return nil, fmt.Errorf("gcp: project is empty; set metadata.project in cluster.yaml")
+	project = ResolveProject(project)
+	if IsPlaceholderProject(project) {
+		return nil, fmt.Errorf("gcp: project is empty; set metadata.project in cluster.yaml or GOOGLE_CLOUD_PROJECT")
 	}
 
 	networks, err := compute.NewNetworksRESTClient(ctx)
@@ -164,6 +197,10 @@ func NewClients(ctx context.Context, project string) (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gcp: instances client: %w", err)
 	}
+	disks, err := compute.NewDisksRESTClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gcp: disks client: %w", err)
+	}
 	regions, err := compute.NewRegionsRESTClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("gcp: regions client: %w", err)
@@ -183,6 +220,7 @@ func NewClients(ctx context.Context, project string) (*Clients, error) {
 		Firewalls:    &realFirewalls{client: firewalls},
 		Routers:      &realRouters{client: routers},
 		Instances:    instances,
+		Disks:        &realDisks{client: disks},
 		Regions:      regions,
 		GKE:          gke,
 		ServiceUsage: &realServiceUsage{svc: su},
@@ -352,6 +390,30 @@ func (r *realRouters) ListAll(ctx context.Context, project, region string) ([]*c
 			return nil, err
 		}
 		res = append(res, router)
+	}
+	return res, nil
+}
+
+type realDisks struct {
+	client *compute.DisksClient
+}
+
+func (r *realDisks) Delete(ctx context.Context, req *computepb.DeleteDiskRequest, opts ...gax.CallOption) (*compute.Operation, error) {
+	return r.client.Delete(ctx, req, opts...)
+}
+
+func (r *realDisks) ListAll(ctx context.Context, project, zone string) ([]*computepb.Disk, error) {
+	it := r.client.List(ctx, &computepb.ListDisksRequest{Project: project, Zone: zone})
+	var res []*computepb.Disk
+	for {
+		d, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, d)
 	}
 	return res, nil
 }

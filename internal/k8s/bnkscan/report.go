@@ -50,12 +50,27 @@ func WriteReport(w io.Writer, idx *Index) {
 	section("EgressGateway", idx.EgressGateways)
 	section("SecPolicy", idx.SecPolicies)
 	section("NetPolicy", idx.NetPolicies)
+	section("AppPolicy", idx.AppPolicies)
 	section("F5BigPersistenceProfile", idx.PersistenceProfiles)
 	section("F5BigDnsCache", idx.DNSCaches)
 	section("F5BigDnsApp", idx.DNSApps)
 	section("F5BigDnsZone", idx.DNSZones)
 	section("F5BigCnatPolicy", idx.CGNATPolicies)
 	section("F5DiameterEndpoint", idx.DiameterEndpoints)
+	section("AITenant", idx.AITenants)
+	section("AICredential", idx.AICredentials)
+	section("AIProvider", idx.AIProviders)
+	section("AIModel", idx.AIModels)
+	section("AIGatewayProfile", idx.AIGatewayProfiles)
+	section("AIGateway", idx.AIGateways)
+	if p := idx.AIGatewayPosture; p != nil {
+		sc := p.DefaultStorageClass
+		if sc == "" {
+			sc = "none"
+		}
+		fmt.Fprintf(w, "AI Gateway 2.4.1 posture: f5-aigateway=%d/%d ready=%v aigw-dns-resolver=%v dssm-sentinel=%v default-sc=%s clickhouse=%v (pvcs=%d)\n",
+			p.F5AIGatewayAvailable, p.F5AIGatewayDesired, p.F5AIGatewayReady, p.AIGWDNSResolverPresent, p.DSSMSentinelReady, sc, p.ClickHouseReady, p.ClickHousePVCsBound)
+	}
 
 	if idx.Legacy.Any() {
 		fmt.Fprintf(w, "legacy 2.3 CRs: F5BnkGateway=%d BNKSecPolicy=%d BNKNetPolicy=%d F5SPKVlan=%d F5SPKEgress=%d\n",
@@ -124,4 +139,17 @@ func WriteJSON(w io.Writer, idx *Index) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(idx)
+}
+
+// FormatReport formats the scan index as operator-facing text or JSON.
+func FormatReport(idx *Index, asJSON bool) (string, error) {
+	var sb strings.Builder
+	if asJSON {
+		if err := WriteJSON(&sb, idx); err != nil {
+			return "", err
+		}
+		return sb.String(), nil
+	}
+	WriteReport(&sb, idx)
+	return sb.String(), nil
 }

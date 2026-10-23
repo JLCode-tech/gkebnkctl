@@ -637,6 +637,8 @@ var KnownReleases = []Release{
 	{Version: "2.3.3-3.2598.3-0.0.509", FLOChart: "v2.21.13-0.0.64"},
 	{Version: "2.4.0", FLOChart: "v2.30.0-0.5.2"},
 	{Version: "2.4.0-3.2882.0", FLOChart: "v2.30.0-0.5.2"},
+	{Version: "2.4.1", FLOChart: "v2.30.1-0.0.8"},
+	{Version: "2.4.1-3.2850.1-0.0.9", FLOChart: "v2.30.1-0.0.8"},
 	{Version: "2.5.0", FLOChart: "v2.40.0-0.1.0"},
 }
 

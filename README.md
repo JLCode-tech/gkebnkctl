@@ -1,6 +1,6 @@
 # gkebnkctl
 
-![BNK](https://img.shields.io/badge/BNK-2.4.0-0a3a5c)
+![BNK](https://img.shields.io/badge/BNK-2.4.1%20%7C%202.4.0-0a3a5c)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-1.32--1.35-326ce5?logo=kubernetes&logoColor=white)
 ![GCP GKE](https://img.shields.io/badge/GCP-GKE-4285F4?logo=googlecloud&logoColor=white)
 [![CI](https://github.com/JLCode-tech/gkebnkctl/actions/workflows/ci.yml/badge.svg)](https://github.com/JLCode-tech/gkebnkctl/actions/workflows/ci.yml)
@@ -12,13 +12,14 @@ Zero Terraform. Zero host `kubectl`. Zero host `helm`.
 
 ---
 
-`gkebnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on Google Kubernetes Engine (GKE). From a single declarative `cluster.yaml`, it provisions the 3-VPC network topology (management, external data-plane, internal data-plane), GKE Datapath V2 multi-networking node pools, `host-device` NetworkAttachmentDefinitions (NADs), PCI passthrough discovery, and the full F5 BNK 2.4 software stack. It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), and **AI agent governance walkthroughs** (`examples/vertex-agent-demo/`).
+`gkebnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on Google Kubernetes Engine (GKE). From a single declarative `cluster.yaml`, it provisions the 3-VPC network topology (management, external data-plane, internal data-plane), GKE Datapath V2 multi-networking node pools, `host-device` NetworkAttachmentDefinitions (NADs), PCI passthrough discovery, and the full F5 BNK 2.4 / 2.4.1 software stack (including the native **BNK 2.4.1 AI Gateway**, **vLLM Semantic Router**, and **DSSM Token Governance**). It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), and **AI agent governance walkthroughs** (`examples/vertex-agent-demo/`).
 
 ---
 
 ## Table of Contents
 
 - [Why gkebnkctl?](#why-gkebnkctl)
+- [What You Can Build with gkebnkctl + BNK Forge](#what-you-can-build-with-gkebnkctl--bnk-forge)
 - [System Architecture & Network Topology](#system-architecture--network-topology)
 - [AI Inference Benchmarking & Comparative Shootouts](#ai-inference-benchmarking--comparative-shootouts)
 - [15 Built-in Validation Scenarios](#15-built-in-validation-scenarios)
@@ -46,7 +47,43 @@ Deploying F5 BIG-IP Next for Kubernetes (BNK) on GCP typically requires coordina
 - **Deterministic State Machine**: 21 sequential phases (`00`–`51`) execute with full idempotency, resume safety, and explicit state verification.
 - **Built-in Diagnostics & Healing**: The `gkebnkctl bnk heal` command detects and automatically remediates 9 common Kubernetes plumbing issues (Multus token expiration, TMM log streams, pod-manager tags, CWC certs, DSSM probes, EndpointSlice RBAC, and `route-k8s-pods` static routes).
 - **In-VPC Validation**: 15 built-in automated test scenarios validate L4/L7 routing, canary splits, gRPC streams, and AI inference directly inside the GCP VPC.
-- **Clean Teardown**: `gkebnkctl down -f cluster.yaml --yes` destroys cluster-owned resources and per-cluster dataplane subnets in reverse dependency order while preserving shared dataplane VPCs.
+- **Clean Teardown**: `gkebnkctl down -f cluster.yaml --yes` destroys cluster-owned resources, orphaned PVC disks, and per-cluster dataplane subnets in reverse dependency order while preserving shared dataplane VPCs.
+
+---
+
+## What You Can Build with `gkebnkctl` + BNK Forge
+
+`gkebnkctl` integrates natively with **BNK Forge** to provide visual control-plane management, Gateway API policy authoring, BNK 2.4.1 Smart LLM Routing, Google Cloud Vertex AI governance, and automated GenAI benchmarking across your GKE clusters.
+
+### 1. Multi-Cloud Fleet & Cluster Lifecycle
+Register GKE clusters directly from `gkebnkctl forge register -f cluster.yaml` to monitor live BNK 2.4 / 2.4.1 control-plane health, TMM data-plane readiness, and multi-cloud fleet topology from a unified console.
+
+| Platform Overview | Multi-Cloud Cluster Fleet |
+|---|---|
+| ![BNK Forge Platform Overview](docs/assets/forge-platform-overview.png) | ![Multi-Cloud Cluster Fleet](docs/assets/forge-multi-cloud-cluster-fleet.png) |
+
+### 2. Visual BNK Gateway & Security Policy Builder
+Author and validate Kubernetes Gateway API resources (`Gateway`, `HTTPRoute`, `L4Route`), F5 BNK `SecPolicy` / `NetPolicy` CRDs, L4 firewall rules, and rate-limiting iRules without hand-writing YAML.
+
+![BNK Policy Builder](docs/assets/forge-bnk-policy-builder.png)
+
+### 3. Smart LLM Router & AI Agent Governance (Google Cloud Vertex AI)
+Deploy the **BNK 2.4.1 AI Gateway** (`AITenant`, `AICredential`, `AIProvider`, `AIModel`, `AIGatewayProfile`) with weighted primary/fallback Google Cloud Vertex AI (Gemini) pools, vLLM Semantic Router integration, DSSM virtual API keys (`f5vk_...`), token budgets, and real-time MCP tool governance (`gkebnkctl forge governance`).
+
+| Vertex AI LLM Router Pools | Live LLM Router Topology |
+|---|---|
+| ![GCP Vertex AI LLM Router Pools](docs/assets/forge-gcp-llm-router-pools.png) | ![LLM Router Topology](docs/assets/forge-llm-router-topology.png) |
+
+| Vertex AI Governance Telemetry | AI Governance Guardrails & Budgets |
+|---|---|
+| ![GCP Vertex AI Governance](docs/assets/forge-gcp-governance.png) | ![AI Governance Guardrails](docs/assets/forge-ai-governance-guardrails.png) |
+
+### 4. AI Inference Benchmarking & MCP Server Automation
+Run automated `aiperf` concurrency sweeps across F5 BNK, Envoy, HAProxy, and direct NodePort, or expose cluster operations and governance actions to AI agents via the built-in Model Context Protocol (MCP) server.
+
+| GenAI Benchmark Dashboard | MCP Server & Agent Tools |
+|---|---|
+| ![Forge Benchmark Dashboard](docs/assets/forge-benchmark-dashboard.png) | ![Forge MCP Server Tools](docs/assets/forge-mcp-server-tools.png) |
 
 ---
 
@@ -343,7 +380,7 @@ apiVersion: gkebnkctl/v1
 kind: Cluster
 metadata:
   name: bnk-prod-gke
-  project: my-gcp-project
+  project: YOUR_GCP_PROJECT_ID
   zone: us-central1-a
 pattern: host-device
 bnk:
@@ -399,10 +436,10 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 
 | Component | Pinned Version | Config Key / Location | Notes |
 |---|:---:|---|---|
-| **F5 BNK Release** | `2.4.0` | `bnk.manifestVersion` | Default (`2.4.0-3.2882.0`). Supports 2.3.x overrides. |
+| **F5 BNK Release** | `2.4.0` / `2.4.1` | `bnk.manifestVersion` | Default `2.4.0` (`2.4.0-3.2882.0`); supports `2.4.1` (`2.4.1-3.2850.1-0.0.9` AI Gateway) and `2.3.x`. |
 | **Kubernetes (GKE)** | `1.35` | `cluster.kubernetesVersion` | Validated across `1.32`–`1.35` (auto-matches `ensN` / `ethN` MACs). |
 | **cert-manager** | `v1.16.1` | Embedded upstream YAML | Applied via `client-go` Server-Side Apply without Helm. |
-| **FLO Chart** | `v2.30.0-0.5.2` | `manifest.KnownReleases` | Paired per release in embedded BNK BOM. |
+| **FLO Chart** | `v2.30.0-0.5.2` / `v2.30.1-0.0.8` | `manifest.KnownReleases` | Paired per release in embedded BNK BOM (`2.4.0` / `2.4.1`). |
 | **Go Runtime** | `1.26` | `go.mod` | Compiled with GCP Go SDK (`cloud.google.com/go/container`, `compute`). |
 
 ---
@@ -418,7 +455,8 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 - **BNK Runtime & Self-Healing**: `bnk` (`heal`, `resync`, `upgrade`, `migrate-2.4`, `mcp-session`, `status`), `manifest probe`.
   - `bnk heal`: 9-point automated repair suite resolving `multus-token-watch`, `tmm-log-stream`, `pod-manager`, `cwc`, `dssm-probe`, `controller-endpointslices`, `tmm-k8s-routes`, `epp-namespaces`, and `test-namespace`.
 - **AI & Benchmarking**: `benchmark` (`setup`, `run`, `list`, `status`, `daemon`).
-- **Fleet & Forge**: `forge` (`register`, `status`, `unregister`, `cleanup`, `template`, `scan`, `telemetry`, `benchmark`), alias `bnkforge`.
+- **Fleet & Forge**: `forge` (`register`, `status`, `unregister`, `cleanup`, `template`, `scan`, `telemetry`, `benchmark`, `governance`), alias `bnkforge`.
+  - `forge governance`: BNK 2.4.1 AI Gateway & DSSM token governance (`overview`, `remediate`, `test-request`, `bootstrap`).
 - **Agentic Workflow**: `agent` (`gemini`, `claude`, `opencode`, `cursor`, `all`), `journal` (`add`, `list`).
 - **Installation & Maintenance**: `install`, `self` (`check`, `update`), `completion`, `help`.
 
