@@ -7,7 +7,7 @@ This agent runs on Google Cloud Vertex AI (or containerized in GKE) using Gemini
 1. **Reasoning**: The agent receives a natural language query ("Forecast stock performance").
 2. **Tool Selection**: Gemini stops and requests the `forecast` tool call.
 3. **Governed Transport**: The tool invocation traverses the F5 BIG-IP Next for Kubernetes (BNK) Ingress VIP on GKE.
-4. **Policy Enforcement**: F5 BNK enforces rate limits (20 req/s), client bearer tokens, and records audit telemetry into Loki / BNK Forge.
+4. **Policy Enforcement**: F5 BNK enforces rate limits (20 req/s), client bearer tokens, and records audit telemetry into Loki / [BNK Forge](https://github.com/JLCode-tech/bnk-forge).
 5. **Narration**: Gemini uses the verified facts to narrate the response to the user.
 
 ## Running Locally / In Test

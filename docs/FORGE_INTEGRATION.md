@@ -1,15 +1,15 @@
-# BNK Forge Integration
+# BNK Forge & F5 BNK AI Service Plane Integration
 
-`gkebnkctl` integrates natively with **BNK Forge** (`bnk-forge`), the centralized multi-cloud control plane, scenario coordinator, and AI benchmark harness for F5 BIG-IP Next for Kubernetes.
+`gkebnkctl` integrates natively with [**BNK Forge**](https://github.com/JLCode-tech/bnk-forge) (`bnk-forge`), the centralized multi-cloud control plane, scenario coordinator, **F5 BNK AI Service Plane** governance fabric, and AI benchmark harness for F5 BIG-IP Next for Kubernetes. For full platform documentation, see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html).
 
 ---
 
 ## Overview
 
-`gkebnkctl` provides two complementary ways to wire a GKE cluster into BNK Forge:
+`gkebnkctl` provides two complementary ways to wire a GKE cluster into [BNK Forge](https://github.com/JLCode-tech/bnk-forge):
 
 1. **Automatic Lifecycle Hooks (Phase 29)**: When `forge.enabled: true` is configured in `cluster.yaml`, `gkebnkctl up` automatically executes **Phase 29 (`forge-register`)** to create/reuse the Forge project, upload the cluster kubeconfig, and trigger an initial cluster scan (trying MCP first with automatic REST fallback). During teardown, `gkebnkctl down` runs `Phase29ForgeRegisterDown` to clean up cluster-scoped benchmark targets and unregister the cluster.
-2. **Explicit CLI Subcommands (`gkebnkctl forge`)**: Register, inspect, benchmark, clean up, or unregister a workspace on demand over Forge's MCP endpoint (`http://localhost:8081/mcp/` by default, overridden via `--forge-mcp-url` or `GKEBNKCTL_FORGE_MCP_URL`) and REST API (`http://localhost:8000` by default).
+2. **Explicit CLI Subcommands (`gkebnkctl forge`)**: Register, inspect, govern **F5 BNK AI Service Plane** policies, benchmark, clean up, or unregister a workspace on demand over Forge's MCP endpoint (`http://localhost:8081/mcp/` by default, overridden via `--forge-mcp-url` or `GKEBNKCTL_FORGE_MCP_URL`) and REST API (`http://localhost:8000` by default).
 
 > **Deprecation Note**: `gkebnkctl bnkforge` is a deprecated legacy alias. Use `gkebnkctl forge` for all workflows.
 
@@ -27,6 +27,12 @@ gkebnkctl forge register -f cluster.yaml --forge-mcp-url http://localhost:8081/m
 
 # Query registration state and Forge MCP reachability
 gkebnkctl forge status -f cluster.yaml
+
+# Inspect and manage F5 BNK AI Service Plane governance via BNK Forge
+gkebnkctl forge governance overview -f cluster.yaml
+gkebnkctl forge governance bootstrap -f cluster.yaml
+gkebnkctl forge governance test-request -f cluster.yaml
+gkebnkctl forge governance remediate -f cluster.yaml
 
 # Run an aiperf benchmark from the jumphost and push structured results to Forge
 gkebnkctl forge benchmark -f cluster.yaml --scenario baseline

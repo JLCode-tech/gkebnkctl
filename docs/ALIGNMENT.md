@@ -43,7 +43,7 @@ Across all four tools, the following architectural invariants are preserved:
 | **`journal`** | ✅ | ✅ | 🔄 | 🔄 | Append-only operational journal and handoff notes manager |
 | **`k`** | ✅ | ✅ | 🔄 | 🔄 | Cluster-scoped `kubectl` wrapper without mutating global context |
 | **`agent`** | ✅ | ✅ | 🔄 | 🔄 | Scaffolds dual-path AI pair-programming instructions (`AGENTS.md`) |
-| **`forge`** | ✅ | ✅ | 🔄 | ✅ | Registers and coordinates cluster with BNK Forge (`register \| status \| unregister \| cleanup \| benchmark`; `bnkforge` deprecated alias) |
+| **`forge`** | ✅ | ✅ | 🔄 | ✅ | Registers and coordinates cluster with [BNK Forge](https://github.com/JLCode-tech/bnk-forge) (`register \| status \| unregister \| cleanup \| governance \| benchmark`; `bnkforge` deprecated alias) |
 | **`install`** | ✅ | ✅ | ✅ | 🔄 | Idempotent CLI installer to user PATH (`~/.local/bin`, `~/bin`, `/usr/local/bin`) |
 | **`self`** | ✅ | ✅ | ✅ | 🔄 | Checks for updates (`self check`) and updates binary in-place (`self update`) |
 | **`version`** | ✅ | ✅ | ✅ | ✅ | Displays version, Git commit hash, build timestamp, and Go toolchain |

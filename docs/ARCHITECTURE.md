@@ -58,7 +58,7 @@ below).
 | 15 | jumphost | Optional GCE jumphost VM (`<cluster>-jumphost`) + IAP SSH firewall rule (`<cluster>-allow-iap-ssh`) on external VPC when `testing.jumphost.enabled: true` |
 | 20 | cluster | GKE cluster (DPv2 multi-networking) + default/tmm/agent node pools |
 | 25 | discover | tmm/agent node iface/MAC/PCI + alias-CIDR/self-IP discovery, cached into `state.env` |
-| 29 | forge-register | Registers cluster with BNK Forge via MCP/REST when `forge.enabled: true` and writes `.gkebnkctl/<cluster>/forge_link.json` |
+| 29 | forge-register | Registers cluster with [BNK Forge](https://github.com/JLCode-tech/bnk-forge) via MCP/REST when `forge.enabled: true` and writes `.gkebnkctl/<cluster>/forge_link.json` |
 | 30 | namespaces | `cert-manager`, `f5-cne-core`, `f5-cne-system`, `f5-bnk-instance`, `f5-utils`, and `egress.testNamespace` (default `egress-test`), plus `coredns-f5` in `kube-system` and `kube-dns` `stubDomains` patch for `f5-cne-core.svc.cluster.local` |
 | 31 | cert-manager | vendored static install YAML (no helm) |
 | 32 | issuers | self-signed cluster issuer + `ext-ca` Certificate/ClusterIssuer |
@@ -116,7 +116,7 @@ patch, Phase40's License CR, Phase41's `route-int-gw`).
 
 `down` does **not** mirror `up` phase-for-phase. It runs four teardown steps:
 
-1. **`Phase29ForgeRegisterDown`** — cleans up cluster-scoped benchmark targets in BNK Forge and unregisters the cluster via MCP/REST when registered.
+1. **`Phase29ForgeRegisterDown`** — cleans up cluster-scoped benchmark targets in [BNK Forge](https://github.com/JLCode-tech/bnk-forge) and unregisters the cluster via MCP/REST when registered.
 2. **`PhaseDownJumphost`** — deletes `<cluster>-jumphost` and `<cluster>-allow-iap-ssh` when `testing.jumphost.enabled: true`.
 3. **`PhaseDownCluster`** — best-effort strips F5 BNK CR finalizers, then deletes the GKE cluster (node pools die with it).
 4. **`PhaseDownNetworks`** — deletes the **main VPC** (`firewall` → `subnet` → `VPC`). Unless `--keep-dataplane` is set, it also calls `teardownDataplaneResources` on `network.external.vpc` and `network.internal.vpc` to delete per-cluster dataplane subnets carrying this cluster's `gkebnkctl` ownership marker, and — if no other cluster's marked subnets remain in that shared VPC — deletes the last-cluster-out marked firewall rules and Cloud Routers/NATs. Unmarked resources are never touched.

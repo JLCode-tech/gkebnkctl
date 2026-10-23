@@ -12,7 +12,7 @@ Zero Terraform. Zero host `kubectl`. Zero host `helm`.
 
 ---
 
-`gkebnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on Google Kubernetes Engine (GKE). From a single declarative `cluster.yaml`, it provisions the 3-VPC network topology (management, external data-plane, internal data-plane), GKE Datapath V2 multi-networking node pools, `host-device` NetworkAttachmentDefinitions (NADs), PCI passthrough discovery, and the full F5 BNK 2.4 / 2.4.1 software stack (including the native **BNK 2.4.1 AI Gateway**, **vLLM Semantic Router**, and **DSSM Token Governance**). It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), and **AI agent governance walkthroughs** (`examples/vertex-agent-demo/`).
+`gkebnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on Google Kubernetes Engine (GKE). From a single declarative `cluster.yaml`, it provisions the 3-VPC network topology (management, external data-plane, internal data-plane), GKE Datapath V2 multi-networking node pools, `host-device` NetworkAttachmentDefinitions (NADs), PCI passthrough discovery, and the full F5 BNK 2.4 / 2.4.1 software stack (including the native **F5 BNK AI Service Plane**, **vLLM Semantic Router**, and **Token Governance**). It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), and **AI agent governance walkthroughs** (`examples/vertex-agent-demo/`). See the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html) for full platform documentation.
 
 ---
 
@@ -38,7 +38,7 @@ Deploying F5 BIG-IP Next for Kubernetes (BNK) on GCP typically requires coordina
 - 3-VPC network segmentation with a dedicated cluster-owned management VPC (`10.60.0.0/24`) and shared or dedicated external (`10.30.0.0/24`) and internal (`10.50.0.0/24`) data-plane VPCs, Cloud Routers, and Cloud NATs.
 - GKE Datapath V2 multi-networking node pools (`tmm-pool`, `agent-pool`) with secondary `tmm-ext` and tertiary `tmm-int` NICs and `/28` alias IP slices.
 - Host-level Linux tuning: `host-device` Multus NADs, runtime PCI passthrough address discovery (`PCIDEVICE_INTEL_COM_EXT` / `PCIDEVICE_INTEL_COM_INT`), `bnk-node-sysctls`, and `/var/crash` volume injection.
-- Cloud-native F5 control-plane lifecycle (FLO, CNE, IPAM controllers, `coredns-f5` stubDomains for DSSM HA) and Kubernetes Gateway API / SPK CRDs.
+- Cloud-native F5 control-plane lifecycle and Kubernetes traffic and security policies (see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html)).
 - Live data-plane traffic validation inside private VPCs via a dual-NIC GCE jumphost VM (`10.30.0.200`) over IAP SSH without exposing workloads to the public internet.
 
 `gkebnkctl` consolidates this entire workflow into a **single, dependency-free binary**:
@@ -51,24 +51,24 @@ Deploying F5 BIG-IP Next for Kubernetes (BNK) on GCP typically requires coordina
 
 ---
 
-## What You Can Build with `gkebnkctl` + BNK Forge
+## What You Can Build with `gkebnkctl` + [BNK Forge](https://github.com/JLCode-tech/bnk-forge)
 
-`gkebnkctl` integrates natively with **BNK Forge** to provide visual control-plane management, Gateway API policy authoring, BNK 2.4.1 Smart LLM Routing, Google Cloud Vertex AI governance, and automated GenAI benchmarking across your GKE clusters.
+`gkebnkctl` integrates natively with [**BNK Forge**](https://github.com/JLCode-tech/bnk-forge) to provide visual control-plane management, network security policy authoring, **F5 BNK AI Service Plane** Smart LLM Routing, Google Cloud Vertex AI governance, and automated GenAI benchmarking across your GKE clusters.
 
 ### 1. Multi-Cloud Fleet & Cluster Lifecycle
-Register GKE clusters directly from `gkebnkctl forge register -f cluster.yaml` to monitor live BNK 2.4 / 2.4.1 control-plane health, TMM data-plane readiness, and multi-cloud fleet topology from a unified console.
+Register GKE clusters directly from `gkebnkctl forge register -f cluster.yaml` to monitor live BNK 2.4 / 2.4.1 control-plane health, data-plane readiness, and multi-cloud fleet topology from a unified console.
 
 | Platform Overview | Multi-Cloud Cluster Fleet |
 |---|---|
 | ![BNK Forge Platform Overview](docs/assets/forge-platform-overview.png) | ![Multi-Cloud Cluster Fleet](docs/assets/forge-multi-cloud-cluster-fleet.png) |
 
-### 2. Visual BNK Gateway & Security Policy Builder
-Author and validate Kubernetes Gateway API resources (`Gateway`, `HTTPRoute`, `L4Route`), F5 BNK `SecPolicy` / `NetPolicy` CRDs, L4 firewall rules, and rate-limiting iRules without hand-writing YAML.
+### 2. Visual Network Security & Traffic Policy Management
+Author, visualize, and enforce L4/L7 traffic routing, carrier-grade network translation, DNS delivery, and zero-trust security policies across your GKE clusters from a single visual interface or declaratively via `gkebnkctl`. For complete details on F5 BIG-IP Next for Kubernetes traffic and security capabilities, see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html).
 
 ![BNK Policy Builder](docs/assets/forge-bnk-policy-builder.png)
 
-### 3. Smart LLM Router & AI Agent Governance (Google Cloud Vertex AI)
-Deploy the **BNK 2.4.1 AI Gateway** (`AITenant`, `AICredential`, `AIProvider`, `AIModel`, `AIGatewayProfile`) with weighted primary/fallback Google Cloud Vertex AI (Gemini) pools, vLLM Semantic Router integration, DSSM virtual API keys (`f5vk_...`), token budgets, and real-time MCP tool governance (`gkebnkctl forge governance`).
+### 3. F5 BNK AI Service Plane: Smart LLM Router & AI Agent Governance (Google Cloud Vertex AI)
+Deliver enterprise-grade AI traffic governance and intelligent model routing across Google Cloud Vertex AI (Gemini), vLLM Semantic Router, and Model Context Protocol (MCP) tools with real-time token accounting, budget and rate enforcement, sensitive data (PII/DLP) guardrails, and prompt-injection protection managed through [**BNK Forge**](https://github.com/JLCode-tech/bnk-forge) and `gkebnkctl forge governance`. Learn more about F5's cloud-native data plane and AI traffic capabilities in the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html).
 
 | Vertex AI LLM Router Pools | Live LLM Router Topology |
 |---|---|
@@ -79,7 +79,7 @@ Deploy the **BNK 2.4.1 AI Gateway** (`AITenant`, `AICredential`, `AIProvider`, `
 | ![GCP Vertex AI Governance](docs/assets/forge-gcp-governance.png) | ![AI Governance Guardrails](docs/assets/forge-ai-governance-guardrails.png) |
 
 ### 4. AI Inference Benchmarking & MCP Server Automation
-Run automated `aiperf` concurrency sweeps across F5 BNK, Envoy, HAProxy, and direct NodePort, or expose cluster operations and governance actions to AI agents via the built-in Model Context Protocol (MCP) server.
+Run automated `aiperf` concurrency sweeps across F5 BNK, Envoy, HAProxy, and direct NodePort, or expose cluster operations and governance actions to AI agents via [BNK Forge](https://github.com/JLCode-tech/bnk-forge)'s built-in Model Context Protocol (MCP) server.
 
 | GenAI Benchmark Dashboard | MCP Server & Agent Tools |
 |---|---|
@@ -136,7 +136,7 @@ flowchart LR
 
 ## AI Inference Benchmarking & Comparative Shootouts
 
-`gkebnkctl` embeds an AI performance benchmarking engine powered by NVIDIA's `aiperf`. It measures real-world GenAI latency and throughput from within the private GCP VPC data plane and synchronizes with **BNK Forge** for real-time visualization and comparative analysis.
+`gkebnkctl` embeds an AI performance benchmarking engine powered by NVIDIA's `aiperf`. It measures real-world GenAI latency and throughput from within the private GCP VPC data plane and synchronizes with [**BNK Forge**](https://github.com/JLCode-tech/bnk-forge) for real-time visualization and comparative analysis.
 
 ### Benchmarking Execution Flow
 
@@ -248,7 +248,7 @@ flowchart LR
         MultiVIP["multi-vip (.115-.117)"]
     end
 
-    subgraph AI["AI Gateway"]
+    subgraph AI["F5 BNK AI Service Plane"]
         Tokens["ai-token-counting (.104)"]
         Cache["ai-semantic-cache (.109)"]
         Infer["ai-inference-e2e (.112)"]
@@ -278,7 +278,7 @@ flowchart LR
 | | `cluster-wide-watch` | `.105` | Dynamic tenant namespace routing via single CNE controller | Green |
 | | `cwc-admin-access` | – | Client cert + Bearer token auth on CWC admin endpoints | Green |
 | | `multi-vip` | `.115`–`.117` | Multi-VIP isolation and concurrent traffic on single NIC | Green |
-| **AI Gateway** | `ai-token-counting` | `.104` | Token quota metering and HTTP 503 overload enforcement | Amber |
+| **F5 BNK AI Service Plane** | `ai-token-counting` | `.104` | Token quota metering and HTTP 503 overload enforcement | Amber |
 | | `ai-semantic-cache` | `.109` | Semantic similarity prompt cache hit verification | Amber |
 | | `ai-inference-e2e` | `.112` | End-to-end vLLM Llama-3-8B GPU inference (`--synthetic` for CPU) | Green |
 | **Security & Egress** | `egress-snat` | – | Transparent pod egress over VXLAN $\to$ TMM AUTOMAP SNAT | Green |
@@ -302,7 +302,7 @@ gkebnkctl scenarios run <scenario-name> -f cluster.yaml
 
 ### Featured: Vertex AI Agent Tool Governance Demo (`examples/vertex-agent-demo/`)
 
-Demonstrates securing and governing Generative AI agent tool execution: a **Google Cloud Vertex AI (Gemini)** agent invoking Model Context Protocol (MCP) tools through F5 BNK Gateway policies (L4 firewall rules, bearer token validation, tool-level access control, rate limiting, and MCP session persistence).
+Demonstrates securing and governing Generative AI agent tool execution: a **Google Cloud Vertex AI (Gemini)** agent invoking Model Context Protocol (MCP) tools through the **F5 BNK AI Service Plane** and Gateway policies (L4 firewall rules, bearer token validation, tool-level access control, rate limiting, and MCP session persistence).
 
 ```mermaid
 flowchart LR
@@ -340,7 +340,7 @@ flowchart LR
 
 ### Reference Architecture & Protocol Topologies
 
-- **`examples/vertex-agent-demo/`** (VIP `.100`): Full Google Cloud Vertex AI (Gemini) + FastMCP tool governance pipeline with L4 firewall (`F5BigFwPolicy`), L7 rate limiting (`F5BigCneIrule`), MCP session persistence (`F5BigPersistenceProfile`), and Loki/Forge telemetry.
+- **`examples/vertex-agent-demo/`** (VIP `.100`): Full Google Cloud Vertex AI (Gemini) + **F5 BNK AI Service Plane** (2.4.1) and FastMCP tool governance pipeline with L4 firewall, L7 rate limiting, MCP session persistence, and Loki / [BNK Forge](https://github.com/JLCode-tech/bnk-forge) telemetry.
 - **`examples/host-device/`** (VIP `.100`): Baseline 3-VPC GKE Datapath V2 multi-networking (`host-device` NADs + PCI passthrough) topology.
 - **`examples/ingress/`** & **`examples/multi-protocol-ingress/`**: HTTP, gRPC, and L4 TCP/UDP Gateway API routing reference topologies.
 - **`examples/egress/`**: Outbound VXLAN (`vxlan100`) pod egress and `F5SPKEgress` / `F5SPKSnatpool` SNAT validation walkthrough.
@@ -367,13 +367,15 @@ gkebnkctl version
 
 ### 2. Configure Your Cluster
 
+Before deploying, follow the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html) to obtain your F5 subscription JWT (`license.jwt`) and configure F5 Artifact Registry (`repo.f5.com`) pull credentials (gitignored locally; never committed).
+
 Copy the reference example:
 
 ```bash
 cp -r examples/host-device my-cluster && cd my-cluster
 ```
 
-Edit `cluster.yaml` to set your GCP Project ID, zone, cluster name, and paths to your F5 FAR registry credentials and JWT licence token:
+Edit `cluster.yaml` to set your GCP Project ID, zone, cluster name, and paths to your F5 Artifact Registry credentials and JWT licence token:
 
 ```yaml
 apiVersion: gkebnkctl/v1
@@ -436,7 +438,7 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 
 | Component | Pinned Version | Config Key / Location | Notes |
 |---|:---:|---|---|
-| **F5 BNK Release** | `2.4.0` / `2.4.1` | `bnk.manifestVersion` | Default `2.4.0` (`2.4.0-3.2882.0`); supports `2.4.1` (`2.4.1-3.2850.1-0.0.9` AI Gateway) and `2.3.x`. |
+| **F5 BNK Release** | `2.4.0` / `2.4.1` | `bnk.manifestVersion` | Default `2.4.0` (`2.4.0-3.2882.0`); supports `2.4.1` (`2.4.1-3.2850.1-0.0.9` F5 BNK AI Service Plane) and `2.3.x`. |
 | **Kubernetes (GKE)** | `1.35` | `cluster.kubernetesVersion` | Validated across `1.32`–`1.35` (auto-matches `ensN` / `ethN` MACs). |
 | **cert-manager** | `v1.16.1` | Embedded upstream YAML | Applied via `client-go` Server-Side Apply without Helm. |
 | **FLO Chart** | `v2.30.0-0.5.2` / `v2.30.1-0.0.8` | `manifest.KnownReleases` | Paired per release in embedded BNK BOM (`2.4.0` / `2.4.1`). |
@@ -455,8 +457,8 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 - **BNK Runtime & Self-Healing**: `bnk` (`heal`, `resync`, `upgrade`, `migrate-2.4`, `mcp-session`, `status`), `manifest probe`.
   - `bnk heal`: 9-point automated repair suite resolving `multus-token-watch`, `tmm-log-stream`, `pod-manager`, `cwc`, `dssm-probe`, `controller-endpointslices`, `tmm-k8s-routes`, `epp-namespaces`, and `test-namespace`.
 - **AI & Benchmarking**: `benchmark` (`setup`, `run`, `list`, `status`, `daemon`).
-- **Fleet & Forge**: `forge` (`register`, `status`, `unregister`, `cleanup`, `template`, `scan`, `telemetry`, `benchmark`, `governance`), alias `bnkforge`.
-  - `forge governance`: BNK 2.4.1 AI Gateway & DSSM token governance (`overview`, `remediate`, `test-request`, `bootstrap`).
+- **Fleet & [BNK Forge](https://github.com/JLCode-tech/bnk-forge)**: `forge` (`register`, `status`, `unregister`, `cleanup`, `template`, `scan`, `telemetry`, `benchmark`, `governance`), alias `bnkforge`.
+  - `forge governance`: F5 BNK AI Service Plane (2.4.1) & token governance (`overview`, `remediate`, `test-request`, `bootstrap`).
 - **Agentic Workflow**: `agent` (`gemini`, `claude`, `opencode`, `cursor`, `all`), `journal` (`add`, `list`).
 - **Installation & Maintenance**: `install`, `self` (`check`, `update`), `completion`, `help`.
 
@@ -471,11 +473,12 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 - [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) — Comprehensive AI inference benchmarking guide, presets, native Forge scenarios, and proxy shootout recipes.
 - [`docs/SCENARIOS.md`](docs/SCENARIOS.md) — In-depth breakdown of all 15 scenarios, assertions, and IP plans.
 - [`docs/COMMANDS.md`](docs/COMMANDS.md) — Full CLI flags and environment variables reference.
-- [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) — Peer-read integration with BNK Forge GUI and telemetry schemas.
+- [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) — Peer-read integration with [BNK Forge](https://github.com/JLCode-tech/bnk-forge) GUI and telemetry schemas.
 - [`docs/UPGRADE-2.4.md`](docs/UPGRADE-2.4.md) — Step-by-step in-place upgrade from BNK 2.3 to 2.4.
 - [`docs/ALIGNMENT.md`](docs/ALIGNMENT.md) — Cross-cloud architectural alignment across the `*bnkctl` family.
 - [`docs/PHASES.md`](docs/PHASES.md) — Detailed reference of all 21 provisioning and teardown phases.
 - [`examples/`](examples/) — Ready-to-deploy reference manifests (`host-device`, `ingress`, `multi-protocol-ingress`, `egress`, `vertex-agent-demo`).
+- [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html) — Official F5 product documentation, architecture guides, and prerequisite setup.
 
 ### The `*bnkctl` Multi-Cloud Family
 `gkebnkctl` is part of a unified family of single-binary CLIs bringing declarative F5 BNK management across clouds and on-premises environments:
@@ -488,7 +491,8 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 | **`roksbnkctl`** | IBM Cloud ROKS / OpenShift | IBM Cloud VPC secondary subnets, Calico / OVN | [jgruberf5/roksbnkctl](https://github.com/jgruberf5/roksbnkctl) |
 | **`ocibnkctl`** | Local OCI / k3s | Container netns virtio demo mode, Anycast BGP | [mwiget/ocibnkctl](https://github.com/mwiget/ocibnkctl) |
 | **`bnkctl`** | Multi-Cloud Unified CLI | Unified F5 BNK lifecycle dispatcher | [JLCode-tech/bnkctl](https://github.com/JLCode-tech/bnkctl) |
-| **`bnkctl-index`** | BNK Forge Catalog | Unified Forge runner module index | [mwiget/bnkctl-index](https://github.com/mwiget/bnkctl-index) |
+| **`bnk-forge`** | [BNK Forge](https://github.com/JLCode-tech/bnk-forge) Control Plane | Visual CNF lifecycle, policy builder & AI governance | [JLCode-tech/bnk-forge](https://github.com/JLCode-tech/bnk-forge) |
+| **`bnkctl-index`** | [BNK Forge](https://github.com/JLCode-tech/bnk-forge) Catalog | Unified Forge runner module index | [mwiget/bnkctl-index](https://github.com/mwiget/bnkctl-index) |
 
 ---
 
