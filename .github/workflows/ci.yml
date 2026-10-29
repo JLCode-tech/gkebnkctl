@@ -224,7 +224,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: cspell (docs/**/*.md + README + CONTRIBUTING)
-        uses: streetsidesoftware/cspell-action@v6
+        uses: streetsidesoftware/cspell-action@v9
         with:
           config: .github/cspell.json
           files: |
