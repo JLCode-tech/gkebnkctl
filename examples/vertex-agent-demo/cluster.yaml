@@ -64,8 +64,9 @@ bnk:
   tmmMtu: "1460"
   jwtPath: ./license.jwt
   farSecret:
-    source: dockerconfig
-    dockerConfigFile: ./dockerconfig.json
+    source: kubecontext
+    sourceContext: some-other-cluster
+    sourceNamespace: f5-cne-core
     namespaces: [f5-cne-core, f5-cne-system, f5-bnk-instance, f5-utils, default]
   aiGateway:
     enabled: true
