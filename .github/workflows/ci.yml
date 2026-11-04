@@ -136,7 +136,7 @@ jobs:
 
       - name: Upload dry-run logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: validate-dryrun-logs
           path: artifacts/
@@ -183,7 +183,7 @@ jobs:
 
       - name: Upload test-dryrun logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-dryrun-logs
           path: artifacts/
@@ -224,7 +224,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: cspell (docs/**/*.md + README + CONTRIBUTING)
-        uses: streetsidesoftware/cspell-action@v6
+        uses: streetsidesoftware/cspell-action@v9
         with:
           config: .github/cspell.json
           files: |
@@ -256,7 +256,7 @@ jobs:
           cache: true
 
       - name: gosec (Go static security analyzer)
-        uses: securego/gosec@v2.27.1
+        uses: securego/gosec@v2.30.0
         with:
           args: ./...
 
