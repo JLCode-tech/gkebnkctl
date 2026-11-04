@@ -62,15 +62,24 @@ func Phase40License(ctx context.Context, cl *intent.Cluster, _ *state.State, cli
 	// Always sync cpcl-key-secret so JWKS verification matches current key-cm.
 	syncCPCLKeySecret(ctx, clients)
 
-	// Check whether License/bnk-license in f5-utils is already Active.
-	if isLicenseActive(ctx, clients, "f5-utils", "bnk-license") {
-		fmt.Fprintln(os.Stderr, "[phase 40] License/bnk-license is already Active in f5-utils, skipping CPCL purge")
+	// Check whether License/bnk-license in f5-cne-core or f5-utils is already Active.
+	if isLicenseActive(ctx, clients, "f5-cne-core", "bnk-license") || isLicenseActive(ctx, clients, "f5-utils", "bnk-license") {
+		fmt.Fprintln(os.Stderr, "[phase 40] License/bnk-license is already Active, skipping CPCL purge")
 	} else {
 		fmt.Fprintln(os.Stderr, "[phase 40] License not Active; purging stale CPCL secrets and resetting CWC pod")
 		// Delete existing License CRs to allow clean recreation
 		deleteLicenseCR(ctx, clients, "f5-utils", "bnk-license")
 		deleteLicenseCR(ctx, clients, "f5-cne-core", "bnk-license")
 		purgeStaleCPCLSecrets(ctx, clients)
+		// In BNK 2.4.1, f5-utils/cpcl-key-cm ships with the staging JWKS while
+		// f5-cne-core/f5-spk-cwc has a built-in License-Controller that writes
+		// the baked-in production/staging JWKS matching the JWT's jku header
+		// only when f5-cne-core/cpcl-key-secret is absent.
+		if clients != nil && clients.K8s != nil {
+			if _, cmErr := clients.K8s.CoreV1().ConfigMaps("f5-cne-core").Get(ctx, "cpcl-key-cm", metav1.GetOptions{}); apierrors.IsNotFound(cmErr) {
+				_ = clients.K8s.CoreV1().Secrets("f5-cne-core").Delete(ctx, "cpcl-key-secret", metav1.DeleteOptions{})
+			}
+		}
 		bounceCWCPod(ctx, clients)
 	}
 
@@ -78,7 +87,7 @@ func Phase40License(ctx context.Context, cl *intent.Cluster, _ *state.State, cli
 		return fmt.Errorf("phase40: applying License CR: %w", err)
 	}
 
-	// Also apply License CR to f5-utils where f5-spk-cwc runs, ensuring CWC immediately detects and activates it.
+	// Also apply License CR to f5-utils when CWC runs there.
 	utilsRendered := strings.Replace(string(rendered), "namespace: f5-cne-core", "namespace: f5-utils", 1)
 	if uErr := applyLicenseWithQuotaRetry(ctx, clients, []byte(utilsRendered)); uErr != nil {
 		fmt.Fprintf(os.Stderr, "[phase 40] warn: applying License CR in f5-utils: %v\n", uErr)
@@ -234,37 +243,39 @@ func bounceCWCPod(ctx context.Context, clients *gcp.Clients) {
 	if clients == nil || clients.K8s == nil {
 		return
 	}
-	pods, err := clients.K8s.CoreV1().Pods("f5-utils").List(ctx, metav1.ListOptions{
-		LabelSelector: "app=cwc",
-	})
-	if err != nil {
-		return
-	}
-	for _, p := range pods.Items {
-		fmt.Fprintf(os.Stderr, "[phase 40] deleting CWC pod %s/%s for clean CPCL restart\n", "f5-utils", p.Name)
-		_ = clients.K8s.CoreV1().Pods("f5-utils").Delete(ctx, p.Name, metav1.DeleteOptions{})
-	}
-
-	// Poll until a CWC pod is running and ready. Because CWC mounts an RWO PVC,
-	// we allow sufficient time for the old pod to terminate and release the volume.
-	_ = gcp.PollUntil(ctx, 3*time.Second, 90*time.Second, func(c context.Context) (bool, error) {
-		pList, lErr := clients.K8s.CoreV1().Pods("f5-utils").List(c, metav1.ListOptions{
+	for _, ns := range []string{"f5-utils", "f5-cne-core"} {
+		pods, err := clients.K8s.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=cwc",
 		})
-		if lErr != nil || len(pList.Items) == 0 {
-			return false, nil
+		if err != nil || len(pods.Items) == 0 {
+			continue
 		}
-		for _, pod := range pList.Items {
-			if pod.DeletionTimestamp != nil {
-				continue
+		for _, p := range pods.Items {
+			fmt.Fprintf(os.Stderr, "[phase 40] deleting CWC pod %s/%s for clean CPCL restart\n", ns, p.Name)
+			_ = clients.K8s.CoreV1().Pods(ns).Delete(ctx, p.Name, metav1.DeleteOptions{})
+		}
+
+		// Poll until a CWC pod is running and ready. Because CWC mounts an RWO PVC,
+		// we allow sufficient time for the old pod to terminate and release the volume.
+		_ = gcp.PollUntil(ctx, 3*time.Second, 90*time.Second, func(c context.Context) (bool, error) {
+			pList, lErr := clients.K8s.CoreV1().Pods(ns).List(c, metav1.ListOptions{
+				LabelSelector: "app=cwc",
+			})
+			if lErr != nil || len(pList.Items) == 0 {
+				return false, nil
 			}
-			for _, cond := range pod.Status.Conditions {
-				if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
-					fmt.Fprintf(os.Stderr, "[phase 40] CWC pod %s is ready\n", pod.Name)
-					return true, nil
+			for _, pod := range pList.Items {
+				if pod.DeletionTimestamp != nil {
+					continue
+				}
+				for _, cond := range pod.Status.Conditions {
+					if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+						fmt.Fprintf(os.Stderr, "[phase 40] CWC pod %s/%s is ready\n", ns, pod.Name)
+						return true, nil
+					}
 				}
 			}
-		}
-		return false, nil
-	})
+			return false, nil
+		})
+	}
 }

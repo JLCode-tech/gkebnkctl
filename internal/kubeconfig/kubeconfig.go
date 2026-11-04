@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
+	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
@@ -53,15 +54,49 @@ type NamedUser struct {
 }
 
 type UserDetails struct {
-	Exec *ExecConfig `yaml:"exec,omitempty"`
+	Token string      `yaml:"token,omitempty"`
+	Exec  *ExecConfig `yaml:"exec,omitempty"`
 }
 
 type ExecConfig struct {
 	APIVersion         string   `yaml:"apiVersion"`
 	Command            string   `yaml:"command"`
-	Args               []string `yaml:"args"`
+	Args               []string `yaml:"args,omitempty"`
 	InteractiveMode    string   `yaml:"interactiveMode,omitempty"`
 	ProvideClusterInfo bool     `yaml:"provideClusterInfo,omitempty"`
+}
+
+// MakePortable replaces a non-portable exec plugin (such as gcloud) with a
+// bearer token from Application Default Credentials so remote consumers (such
+// as BNK-Forge running in a container) can authenticate to the GKE API server.
+func MakePortable(ctx context.Context, kcBytes []byte) []byte {
+	if len(kcBytes) == 0 {
+		return kcBytes
+	}
+	var cfg Config
+	if err := yaml.Unmarshal(kcBytes, &cfg); err != nil || len(cfg.Users) == 0 {
+		return kcBytes
+	}
+	var bearerToken string
+	if ts, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform"); err == nil && ts != nil {
+		if tok, tErr := ts.Token(); tErr == nil && tok != nil {
+			bearerToken = tok.AccessToken
+		}
+	}
+	for i := range cfg.Users {
+		if bearerToken != "" {
+			cfg.Users[i].User.Token = bearerToken
+			cfg.Users[i].User.Exec = nil
+		} else if cfg.Users[i].User.Exec != nil && cfg.Users[i].User.Exec.Command == "gcloud" {
+			cfg.Users[i].User.Exec.Command = "gke-gcloud-auth-plugin"
+			cfg.Users[i].User.Exec.Args = nil
+		}
+	}
+	out, err := yaml.Marshal(&cfg)
+	if err != nil {
+		return kcBytes
+	}
+	return out
 }
 
 // Generate builds a standard GKE kubeconfig YAML string.
@@ -131,7 +166,11 @@ func FetchAndGenerate(ctx context.Context, cl *intent.Cluster) ([]byte, error) {
 	caCert := resp.GetMasterAuth().GetClusterCaCertificate()
 	endpoint := resp.GetEndpoint()
 
-	return Generate(cl.Metadata.Name, cl.Metadata.Project, cl.Metadata.Zone, endpoint, caCert)
+	kcBytes, err := Generate(cl.Metadata.Name, cl.Metadata.Project, cl.Metadata.Zone, endpoint, caCert)
+	if err != nil {
+		return nil, err
+	}
+	return MakePortable(ctx, kcBytes), nil
 }
 
 // WriteFile writes the kubeconfig bytes to the target path.

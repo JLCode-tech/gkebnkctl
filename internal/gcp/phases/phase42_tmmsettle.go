@@ -128,6 +128,7 @@ func settleAndGateTMM(ctx context.Context, client kubernetes.Interface, dyn dyna
 	lastLicenseState := "unknown"
 	err := gcp.PollUntil(ctx, pollInterval, timeout, func(ctx context.Context) (bool, error) {
 		ensureTMMRollingUpdateStrategy(ctx, client)
+		_ = patchVarCrash(ctx, client, tmmSettleNamespace, "f5-cne-controller")
 
 		licState, err := getLicenseState(ctx, dyn)
 		if err != nil {
@@ -221,10 +222,15 @@ func tmmAvailable(ctx context.Context, dyn dynamic.Interface) bool {
 	return k8s.UnstructuredConditionIsTrue(obj.Object, tmmAvailableCondition)
 }
 
-// cycleStuckTMMPods force-deletes (grace=0) every Terminating app=f5-tmm pod
-// it currently sees, re-listing fresh so it never acts on a stale name. Every
-// error is logged and swallowed — the caller's loop and readiness gate decide
-// success, not this single sweep.
+const tmmTerminatingStuckThreshold = 45 * time.Second
+
+// cycleStuckTMMPods force-deletes (grace=0) any Terminating app=f5-tmm pod
+// that has been stuck Terminating for at least tmmTerminatingStuckThreshold,
+// re-listing fresh so it never acts on a stale name. Waiting for the threshold
+// allows normal kubelet CNI DEL to return eth1/eth2 host-device NICs to the
+// node network namespace before the replacement pod starts. Every error is
+// logged and swallowed — the caller's loop and readiness gate decide success,
+// not this single sweep.
 func cycleStuckTMMPods(ctx context.Context, client kubernetes.Interface) {
 	pods, err := client.CoreV1().Pods(tmmSettleNamespace).List(ctx, metav1.ListOptions{LabelSelector: tmmSettleLabelSel})
 	if err != nil {
@@ -232,22 +238,29 @@ func cycleStuckTMMPods(ctx context.Context, client kubernetes.Interface) {
 		return
 	}
 
-	var terminating, pending []string
+	var stuckTerminating, gracefulTerminating, pending []string
 	for _, p := range pods.Items {
 		switch {
 		case p.DeletionTimestamp != nil:
-			terminating = append(terminating, p.Name)
+			if time.Since(p.DeletionTimestamp.Time) >= tmmTerminatingStuckThreshold {
+				stuckTerminating = append(stuckTerminating, p.Name)
+			} else {
+				gracefulTerminating = append(gracefulTerminating, p.Name)
+			}
 		case p.Status.Phase == "Pending":
 			pending = append(pending, p.Name)
 		}
 	}
-	if len(terminating) == 0 {
+	if len(stuckTerminating) == 0 {
+		if len(gracefulTerminating) > 0 {
+			fmt.Fprintf(os.Stderr, "[phase 42] TMM pod(s) %v terminating gracefully (<%s) — waiting for CNI DEL\n", gracefulTerminating, tmmTerminatingStuckThreshold)
+		}
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "[phase 42] TMM not yet available; terminating=%v pending=%v — force-deleting stuck pod(s)\n", terminating, pending)
+	fmt.Fprintf(os.Stderr, "[phase 42] TMM not yet available; stuckTerminating=%v pending=%v — force-deleting stuck pod(s)\n", stuckTerminating, pending)
 	grace := int64(0)
-	for _, name := range terminating {
+	for _, name := range stuckTerminating {
 		if err := client.CoreV1().Pods(tmmSettleNamespace).Delete(ctx, name, metav1.DeleteOptions{GracePeriodSeconds: &grace}); err != nil {
 			fmt.Fprintf(os.Stderr, "[phase 42] warn: deleting pod %s: %v\n", name, err)
 		}

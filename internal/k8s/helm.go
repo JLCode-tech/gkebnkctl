@@ -11,9 +11,12 @@ import (
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/registry"
 	"helm.sh/helm/v3/pkg/release"
+	"helm.sh/helm/v3/pkg/storage"
+	"helm.sh/helm/v3/pkg/storage/driver"
 )
 
 const (
@@ -60,6 +63,27 @@ func (r *realHelmInstaller) List(namespace, filter string) ([]*release.Release, 
 	return l.Run()
 }
 
+func normalizeFLOValues(values map[string]interface{}) map[string]interface{} {
+	if values == nil {
+		return nil
+	}
+	cp, ok := values["containerPlatform"].(string)
+	if !ok {
+		return values
+	}
+	switch cp {
+	case "Generic", "OCP", "Robin", "AON", "AWS", "IBM":
+		return values
+	default:
+		cloned := make(map[string]interface{}, len(values))
+		for k, v := range values {
+			cloned[k] = v
+		}
+		cloned["containerPlatform"] = "Generic"
+		return cloned
+	}
+}
+
 func (r *realHelmInstaller) Install(releaseName, namespace string, ch *chart.Chart, values map[string]interface{}) (*release.Release, error) {
 	inst := action.NewInstall(r.actionConfig)
 	inst.ReleaseName = releaseName
@@ -67,7 +91,7 @@ func (r *realHelmInstaller) Install(releaseName, namespace string, ch *chart.Cha
 	inst.Wait = true
 	inst.Timeout = floHelmInstallTimeout
 	inst.CreateNamespace = false
-	return inst.Run(ch, values)
+	return inst.Run(ch, normalizeFLOValues(values))
 }
 
 func (r *realHelmInstaller) Upgrade(releaseName, namespace string, ch *chart.Chart, values map[string]interface{}) (*release.Release, error) {
@@ -75,7 +99,7 @@ func (r *realHelmInstaller) Upgrade(releaseName, namespace string, ch *chart.Cha
 	upg.Namespace = namespace
 	upg.Wait = true
 	upg.Timeout = floHelmInstallTimeout
-	rel, err := upg.Run(releaseName, ch, values)
+	rel, err := upg.Run(releaseName, ch, normalizeFLOValues(values))
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +231,7 @@ func PullAndRenderFLOChart(chartRef, version, releaseName, namespace, farKeyB64 
 	settings := cli.New()
 	actionConfig := new(action.Configuration)
 	actionConfig.RegistryClient = regClient
+	actionConfig.Releases = storage.Init(driver.NewMemory())
 
 	installer := &realHelmInstaller{
 		actionConfig: actionConfig,
@@ -218,11 +243,30 @@ func PullAndRenderFLOChart(chartRef, version, releaseName, namespace, farKeyB64 
 	}
 
 	inst := action.NewInstall(actionConfig)
+	inst.DryRun = true
 	inst.ClientOnly = true
 	inst.IncludeCRDs = true
 	inst.ReleaseName = releaseName
 	inst.Namespace = namespace
-	rel, err := inst.Run(ch, values)
+	inst.APIVersions = chartutil.VersionSet{
+		"cert-manager.io/v1",
+		"cert-manager.io/v1/Certificate",
+		"cert-manager.io/v1/Issuer",
+		"cert-manager.io/v1/ClusterIssuer",
+	}
+	renderVals := normalizeFLOValues(values)
+	if renderVals == nil {
+		renderVals = make(map[string]interface{})
+	}
+	if _, ok := renderVals["skipCertMgr"]; !ok {
+		cloned := make(map[string]interface{}, len(renderVals)+1)
+		for k, v := range renderVals {
+			cloned[k] = v
+		}
+		cloned["skipCertMgr"] = true
+		renderVals = cloned
+	}
+	rel, err := inst.Run(ch, renderVals)
 	if err != nil {
 		return nil, fmt.Errorf("render chart %s@%s: %w", chartRef, version, err)
 	}
@@ -232,6 +276,13 @@ func PullAndRenderFLOChart(chartRef, version, releaseName, namespace, farKeyB64 
 		buf.WriteString("---\n")
 		buf.Write(crd.File.Data)
 		buf.WriteString("\n")
+	}
+	for _, dep := range ch.Dependencies() {
+		for _, crd := range dep.CRDObjects() {
+			buf.WriteString("---\n")
+			buf.Write(crd.File.Data)
+			buf.WriteString("\n")
+		}
 	}
 	buf.WriteString("---\n")
 	buf.WriteString(rel.Manifest)

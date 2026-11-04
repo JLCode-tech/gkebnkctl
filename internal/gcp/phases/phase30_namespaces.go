@@ -67,7 +67,7 @@ func applyCoreDNSForwarder(ctx context.Context, clients *gcp.Clients) error {
 				if cm.Data == nil {
 					cm.Data = map[string]string{}
 				}
-				stub := fmt.Sprintf(`{"f5-cne-core.svc.cluster.local":["%s"]}`, svc.Spec.ClusterIP)
+				stub := fmt.Sprintf(`{"f5-cne-core.svc.cluster.local":["%s"],"f5-cne-system.svc.cluster.local":["%s"]}`, svc.Spec.ClusterIP, svc.Spec.ClusterIP)
 				if cm.Data["stubDomains"] != stub {
 					cm.Data["stubDomains"] = stub
 					_, _ = clients.K8s.CoreV1().ConfigMaps("kube-system").Update(ctx, cm, metav1.UpdateOptions{})

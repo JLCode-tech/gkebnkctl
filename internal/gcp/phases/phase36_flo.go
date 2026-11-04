@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
@@ -31,17 +33,10 @@ const (
 var supplementalCRDManifests = []string{
 	gatewayAPICRDsPath,
 	gieCRDsPath,
-	bnkGatewayCRDsPath,
 }
 
 var floCRDs = []string{
 	"cneinstances.k8s.f5.com",
-	"infras.gateway.k8s.f5.com",
-	"l2networks.gateway.k8s.f5.com",
-	"l3networks.gateway.k8s.f5.com",
-	"gatewaysettings.gateway.k8s.f5.com",
-	"egressgateways.gateway.k8s.f5.com",
-	"backends.gateway.k8s.f5.com",
 }
 
 var floInstalledCRDs = []string{
@@ -49,6 +44,12 @@ var floInstalledCRDs = []string{
 	"f5-spk-vlans.k8s.f5net.com",
 	"f5-spk-staticroutes.k8s.f5net.com",
 	"f5-spk-egresses.k8s.f5net.com",
+	"infras.gateway.k8s.f5.com",
+	"l2networks.gateway.k8s.f5.com",
+	"l3networks.gateway.k8s.f5.com",
+	"gatewaysettings.gateway.k8s.f5.com",
+	"egressgateways.gateway.k8s.f5.com",
+	"backends.gateway.k8s.f5.com",
 }
 
 func renderClusterGatewayClass(clusterName string) []byte {
@@ -161,6 +162,12 @@ func Phase36FLO(ctx context.Context, cl *intent.Cluster, st *state.State, client
 		if err != nil {
 			return fmt.Errorf("phase36: reading embedded %s: %w", crdManifest, err)
 		}
+		if crdManifest == bnkGatewayCRDsPath {
+			if err := applySupplementalBNKGatewayCRDs(ctx, clients, crdBytes); err != nil {
+				return fmt.Errorf("phase36: applying %s: %w", crdManifest, err)
+			}
+			continue
+		}
 		if err := applyManifestBytes(ctx, clients, crdBytes, true); err != nil {
 			return fmt.Errorf("phase36: applying %s: %w", crdManifest, err)
 		}
@@ -221,7 +228,7 @@ func updateFloDeploymentImage(objs []*unstructured.Unstructured, registry string
 		return
 	}
 	for _, obj := range objs {
-		if obj.GetKind() == "Deployment" && obj.GetName() == "flo-f5-lifecycle-operator" {
+		if obj.GetKind() == "Deployment" && (obj.GetName() == "flo-f5-lifecycle-operator" || obj.GetName() == "f5-lifecycle-operator") {
 			containers, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
 			if err == nil && found {
 				for _, c := range containers {
@@ -238,4 +245,31 @@ func updateFloDeploymentImage(objs []*unstructured.Unstructured, registry string
 			}
 		}
 	}
+}
+
+func applySupplementalBNKGatewayCRDs(ctx context.Context, clients *gcp.Clients, crdBytes []byte) error {
+	if clients == nil || clients.Dynamic == nil {
+		return applyManifestBytes(ctx, clients, crdBytes, true)
+	}
+	objs, err := k8s.ParseYAMLStream(crdBytes)
+	if err != nil {
+		return err
+	}
+	crdGVR := schema.GroupVersionResource{
+		Group:    "apiextensions.k8s.io",
+		Version:  "v1",
+		Resource: "customresourcedefinitions",
+	}
+	toApply := make([]*unstructured.Unstructured, 0, len(objs))
+	for _, obj := range objs {
+		existing, gErr := clients.Dynamic.Resource(crdGVR).Get(ctx, obj.GetName(), metav1.GetOptions{})
+		if gErr == nil && existing != nil {
+			continue
+		}
+		toApply = append(toApply, obj)
+	}
+	if len(toApply) == 0 {
+		return nil
+	}
+	return applyObjects(ctx, clients, toApply, true)
 }

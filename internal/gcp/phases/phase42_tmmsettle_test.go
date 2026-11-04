@@ -83,8 +83,8 @@ func tmmPod(name, node string, terminating bool, phase corev1.PodPhase) *corev1.
 		Status: corev1.PodStatus{Phase: phase},
 	}
 	if terminating {
-		now := metav1.Now()
-		p.DeletionTimestamp = &now
+		past := metav1.NewTime(time.Now().Add(-2 * tmmTerminatingStuckThreshold))
+		p.DeletionTimestamp = &past
 		p.Finalizers = []string{"kubernetes"}
 	}
 	return p

@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
 	"github.com/JLCode-tech/gkebnkctl/internal/intent"
@@ -56,17 +60,22 @@ func Phase38CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 		ImageRegistry:   cl.Bnk.ImageRegistry,
 		Telemetry:       cl.Bnk.Telemetry,
 		AIGateway:       cl.Bnk.AIGateway != nil && cl.Bnk.AIGateway.Enabled,
+		ServiceCIDR:     cl.Network.Main.SvcsCIDR,
+		PodCIDR:         cl.Network.Main.PodsCIDR,
+		MainCIDR:        cl.Network.Main.CIDR,
 	})
 	if err != nil {
 		return fmt.Errorf("phase38: rendering CNEInstance: %w", err)
 	}
 
-	if err := applyManifestBytes(ctx, clients, rbacRendered, false); err != nil {
+	if err := applyManifestBytes(ctx, clients, rbacRendered, true); err != nil {
 		return fmt.Errorf("phase38: applying cne-controller RBAC: %w", err)
 	}
-	if err := applyManifestBytes(ctx, clients, rendered, false); err != nil {
+	if err := applyManifestBytes(ctx, clients, rendered, true); err != nil {
 		return fmt.Errorf("phase38: applying CNEInstance: %w", err)
 	}
+
+	resetFailedCRDInstaller(ctx, clients)
 
 	// Applying the CNEInstance is what makes FLO spawn its crd-installer Job,
 	// which registers the k8s.f5net.com CRDs. Everything downstream applies CRs
@@ -89,8 +98,45 @@ func Phase38CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 					crd, floCRDWait, err)
 			}
 		}
+		if crdBytes, err := manifests.FS.ReadFile(bnkGatewayCRDsPath); err == nil {
+			_ = applySupplementalBNKGatewayCRDs(ctx, clients, crdBytes)
+		}
 	}
 
 	fmt.Fprintln(os.Stderr, "[phase 38] CNEInstance OK")
 	return nil
+}
+
+func resetFailedCRDInstaller(ctx context.Context, clients *gcp.Clients) {
+	if clients == nil || clients.Dynamic == nil {
+		return
+	}
+	crdInstGVR := schema.GroupVersionResource{
+		Group:    "k8s.f5.com",
+		Version:  "v1",
+		Resource: "crdinstallers",
+	}
+	inst, err := clients.Dynamic.Resource(crdInstGVR).Namespace(FLONamespace).Get(ctx, "crd-installer", metav1.GetOptions{})
+	if err != nil || inst == nil {
+		return
+	}
+	conds, _, _ := unstructured.NestedSlice(inst.Object, "status", "conditions")
+	failed := false
+	for _, c := range conds {
+		if cm, ok := c.(map[string]interface{}); ok {
+			if cm["reason"] == "Failed" && cm["status"] == "False" {
+				failed = true
+				break
+			}
+		}
+	}
+	if !failed {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "[phase 38] resetting failed crd-installer in f5-cne-core so FLO re-reconciles CRDs")
+	if clients.K8s != nil {
+		bg := metav1.DeletePropagationBackground
+		_ = clients.K8s.BatchV1().Jobs(FLONamespace).Delete(ctx, "crd-installer", metav1.DeleteOptions{PropagationPolicy: &bg})
+	}
+	_ = clients.Dynamic.Resource(crdInstGVR).Namespace(FLONamespace).Delete(ctx, "crd-installer", metav1.DeleteOptions{})
 }

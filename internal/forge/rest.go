@@ -327,6 +327,14 @@ func restCreateProject(ctx context.Context, base, token string, req RegisterRequ
 		Success   bool        `json:"success"`
 	}
 	err := restPost(ctx, base+"/api/projects", token, body, &resp)
+	if err != nil && req.CredentialTemplateID > 0 && strings.Contains(err.Error(), "IntegrityError") {
+		if resolvedID := restResolveCredentialTemplateID(ctx, base, token, cloudProv); resolvedID > 0 && resolvedID != req.CredentialTemplateID {
+			body["credential_template_id"] = resolvedID
+		} else {
+			delete(body, "credential_template_id")
+		}
+		err = restPost(ctx, base+"/api/projects", token, body, &resp)
+	}
 	if err != nil {
 		if isConflictHTTP(err) {
 			fmt.Fprintf(os.Stderr, "[forge] project %q already exists (conflict) — reusing existing record\n", req.ProjectName)
@@ -373,6 +381,29 @@ func restFindProjectByName(ctx context.Context, base, token, name string) (restP
 		}
 	}
 	return restProject{}, fmt.Errorf("project %q not found in forge: %w", name, os.ErrNotExist)
+}
+
+func restResolveCredentialTemplateID(ctx context.Context, base, token, provider string) int {
+	var templates []struct {
+		ID        int    `json:"id"`
+		Provider  string `json:"provider"`
+		IsDefault bool   `json:"is_default"`
+	}
+	if err := restGet(ctx, base+"/api/credential-templates", token, &templates); err != nil {
+		return 0
+	}
+	fallback := 0
+	for _, t := range templates {
+		if strings.EqualFold(t.Provider, provider) {
+			if t.IsDefault {
+				return t.ID
+			}
+			if fallback == 0 {
+				fallback = t.ID
+			}
+		}
+	}
+	return fallback
 }
 
 type restCluster struct {

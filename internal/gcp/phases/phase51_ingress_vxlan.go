@@ -10,6 +10,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp"
@@ -105,6 +107,40 @@ func Phase51IngressVxlanRoutes(ctx context.Context, cl *intent.Cluster, _ *state
 	}
 	if len(routes) == 0 {
 		fmt.Fprintln(os.Stderr, "[phase 51] no agent-pool node has a live vxlan100 VTEP yet — nothing to apply (expected if no egress-namespace pod is scheduled)")
+		return nil
+	}
+
+	if !strings.HasPrefix(cl.Bnk.ManifestVersion, "2.3") && clients.Dynamic != nil {
+		infraGVR := schema.GroupVersionResource{Group: "gateway.k8s.f5.com", Version: "v1alpha1", Resource: "infras"}
+		infraObj, err := clients.Dynamic.Resource(infraGVR).Namespace("f5-cne-system").Get(ctx, "infra", metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("phase51: getting Infra/infra: %w", err)
+		}
+		existingRoutes, _, _ := unstructured.NestedSlice(infraObj.Object, "spec", "staticRoutes")
+		filtered := make([]interface{}, 0, len(existingRoutes)+len(routes))
+		for _, item := range existingRoutes {
+			if m, ok := item.(map[string]interface{}); ok {
+				name, _ := m["name"].(string)
+				if strings.HasPrefix(name, "route-ingress-vxlan-") {
+					continue
+				}
+			}
+			filtered = append(filtered, item)
+		}
+		for _, r := range routes {
+			filtered = append(filtered, map[string]interface{}{
+				"name":         r.Name,
+				"destinations": []interface{}{fmt.Sprintf("%s/%d", r.Destination, r.PrefixLen)},
+				"nextHop":      r.Gateway,
+			})
+		}
+		if err := unstructured.SetNestedSlice(infraObj.Object, filtered, "spec", "staticRoutes"); err != nil {
+			return fmt.Errorf("phase51: setting Infra/infra staticRoutes: %w", err)
+		}
+		if _, err := clients.Dynamic.Resource(infraGVR).Namespace("f5-cne-system").Update(ctx, infraObj, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("phase51: updating Infra/infra with ingress VXLAN routes: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "[phase 51] ingress-vxlan-routes OK (updated Infra/infra with %d route(s))\n", len(routes))
 		return nil
 	}
 

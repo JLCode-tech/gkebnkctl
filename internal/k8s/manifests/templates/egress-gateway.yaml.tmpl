@@ -1,3 +1,11 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: {{ .GatewayClassName }}
+spec:
+  controllerName: f5.com/f5-cne-system-f5-cne-controller
+  description: F5 BIG-IP Kubernetes Gateway
+---
 apiVersion: gateway.k8s.f5.com/v1alpha1
 kind: GatewaySettings
 metadata:

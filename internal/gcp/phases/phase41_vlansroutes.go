@@ -80,6 +80,8 @@ func Phase41VlansRoutes(ctx context.Context, cl *intent.Cluster, st *state.State
 			MainPodsPrefixLen:    cl.MainPodsPrefixLen,
 			MainSvcsDest:         cl.MainSvcsDest,
 			MainSvcsPrefixLen:    cl.MainSvcsPrefixLen,
+			MainCidr:             cl.Network.Main.CIDR,
+			AgentExtIP:           st.Get("AGENT_EXT_IP"),
 			TmmPodGW:             st.Get("TMM_POD_GW"),
 		})
 		if err != nil {
@@ -91,7 +93,7 @@ func Phase41VlansRoutes(ctx context.Context, cl *intent.Cluster, st *state.State
 	const retryInterval = 5 * time.Second
 	var lastErr error
 	for attempt := 1; attempt <= retryAttempts; attempt++ {
-		lastErr = applyStaticRouteManifestBytes(ctx, clients, rendered, false)
+		lastErr = applyStaticRouteManifestBytes(ctx, clients, rendered, true)
 		if lastErr == nil {
 			break
 		}

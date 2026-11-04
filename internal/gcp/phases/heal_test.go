@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/JLCode-tech/gkebnkctl/internal/gcp/state"
+	"github.com/JLCode-tech/gkebnkctl/internal/intent"
 	"github.com/JLCode-tech/gkebnkctl/internal/k8s/render"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -280,6 +281,27 @@ func TestDetectTMMK8sRoutes(t *testing.T) {
 			t.Errorf("expected healthy with 10.96.0.0/16, got ok=%v, detail=%q, err=%v", ok, detail, err)
 		}
 	})
+
+	t.Run("2.4 incomplete when Cluster has PodsCIDR missing from TMM_K8S_ROUTES", func(t *testing.T) {
+		cne := cneForHeal("2.4.1", []any{
+			map[string]any{"name": render.TMMK8sRoutesEnv, "value": "10.67.0.0/20"},
+		})
+		d := healDeps()
+		d.Cluster = &intent.Cluster{
+			Network: intent.Network{
+				Main: intent.MainNetworkSpec{
+					CIDR:     "10.60.0.0/20",
+					PodsCIDR: "10.66.0.0/16",
+					SvcsCIDR: "10.67.0.0/20",
+				},
+			},
+		}
+		d.Clients.Dynamic = fakeDynamicCNE(cne)
+		ok, detail, err := detectTMMK8sRoutes(ctx, d)
+		if err != nil || ok || !strings.Contains(detail, "incomplete") {
+			t.Errorf("expected unhealthy incomplete routes, got ok=%v, detail=%q, err=%v", ok, detail, err)
+		}
+	})
 }
 
 func TestFixTMMK8sRoutes(t *testing.T) {
@@ -319,6 +341,41 @@ func TestFixTMMK8sRoutes(t *testing.T) {
 		}
 		if v, _ := tmmEnvValue(patched, "TMM_CALICO_ROUTER"); v != "default" {
 			t.Errorf("expected other env to be preserved, got %q", v)
+		}
+	})
+
+	t.Run("cluster intent includes SvcsCIDR, PodsCIDR, and Main.CIDR", func(t *testing.T) {
+		cne := cneForHeal("2.4.1", []any{
+			map[string]any{"name": render.TMMK8sRoutesEnv, "value": "10.67.0.0/20"},
+		})
+		d := healDeps()
+		d.Cluster = &intent.Cluster{
+			Network: intent.Network{
+				Main: intent.MainNetworkSpec{
+					CIDR:     "10.60.0.0/20",
+					PodsCIDR: "10.66.0.0/16",
+					SvcsCIDR: "10.67.0.0/20",
+				},
+			},
+		}
+		dyn := fakeDynamicCNE(cne)
+		d.Clients.Dynamic = dyn
+
+		detail, err := fixTMMK8sRoutes(ctx, d)
+		if err != nil {
+			t.Fatalf("fixTMMK8sRoutes failed: %v", err)
+		}
+		want := "10.67.0.0/20,10.66.0.0/16,10.60.0.0/20"
+		if !strings.Contains(detail, want) {
+			t.Errorf("expected detail to mention %s, got %q", want, detail)
+		}
+		patched, err := dyn.Resource(healCNEInstanceGVR).Namespace(InstanceNamespace).Get(ctx, "instance", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		vals := tmmEnvValues(patched, render.TMMK8sRoutesEnv)
+		if len(vals) != 1 || vals[0] != want {
+			t.Errorf("expected [%s], got %v", want, vals)
 		}
 	})
 }
