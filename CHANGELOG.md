@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ---
 
+## [2.4.2](https://github.com/JLCode-tech/gkebnkctl/compare/v2.4.1...v2.4.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **gcp:** sync BNK 2.4.1 Virtio dataplane routing, DNS, TMM settle, and Vertex demo fixes ([#87](https://github.com/JLCode-tech/gkebnkctl/issues/87)) ([ac7e4b6](https://github.com/JLCode-tech/gkebnkctl/commit/ac7e4b610b4f5bb17132b8eecf93dfe2931e4138))
+
 ## [1.0.0] - 2026-09-02
 
 ### Features & CLI Alignment
