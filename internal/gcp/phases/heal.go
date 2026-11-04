@@ -696,6 +696,27 @@ func tmmEnvValue(cne *unstructured.Unstructured, name string) (string, bool) {
 	return "", false
 }
 
+func expectedTMMK8sRoutes(d *HealDeps) (svcCIDR string, fullRoutes string) {
+	svcCIDR = "10.96.0.0/16"
+	if d != nil && d.Cluster != nil && d.Cluster.Network.Main.SvcsCIDR != "" {
+		svcCIDR = d.Cluster.Network.Main.SvcsCIDR
+	} else if d != nil && d.State != nil {
+		if s := d.State.Get(ServiceCIDRStateKey); s != "" {
+			svcCIDR = s
+		}
+	}
+	routes := []string{svcCIDR}
+	if d != nil && d.Cluster != nil {
+		if d.Cluster.Network.Main.PodsCIDR != "" {
+			routes = append(routes, d.Cluster.Network.Main.PodsCIDR)
+		}
+		if d.Cluster.Network.Main.CIDR != "" {
+			routes = append(routes, d.Cluster.Network.Main.CIDR)
+		}
+	}
+	return svcCIDR, strings.Join(routes, ",")
+}
+
 func detectTMMK8sRoutes(ctx context.Context, d *HealDeps) (bool, string, error) {
 	if d == nil || d.Clients == nil {
 		return false, "", fmt.Errorf("no clients")
@@ -708,14 +729,7 @@ func detectTMMK8sRoutes(ctx context.Context, d *HealDeps) (bool, string, error) 
 		return true, "no CNEInstance (BNK not installed yet)", nil
 	}
 
-	expectedCIDR := "10.96.0.0/16"
-	if d.Cluster != nil && d.Cluster.Network.Main.SvcsCIDR != "" {
-		expectedCIDR = d.Cluster.Network.Main.SvcsCIDR
-	} else if d.State != nil {
-		if svcCIDR := d.State.Get(ServiceCIDRStateKey); svcCIDR != "" {
-			expectedCIDR = svcCIDR
-		}
-	}
+	_, expectedCIDRs := expectedTMMK8sRoutes(d)
 
 	vals := tmmEnvValues(cne, render.TMMK8sRoutesEnv)
 	if len(vals) > 1 {
@@ -724,6 +738,9 @@ func detectTMMK8sRoutes(ctx context.Context, d *HealDeps) (bool, string, error) 
 	if len(vals) == 1 {
 		v := vals[0]
 		if v != "" {
+			if d.Cluster != nil && d.Cluster.Network.Main.PodsCIDR != "" && !strings.Contains(v, d.Cluster.Network.Main.PodsCIDR) {
+				return false, "CNEInstance " + cne.GetName() + " has incomplete " + render.TMMK8sRoutesEnv + "=" + v + " (missing pod CIDR " + d.Cluster.Network.Main.PodsCIDR + ")", nil
+			}
 			return true, render.TMMK8sRoutesEnv + "=" + v + " on CNEInstance " + cne.GetName(), nil
 		}
 	}
@@ -735,7 +752,7 @@ func detectTMMK8sRoutes(ctx context.Context, d *HealDeps) (bool, string, error) 
 		}
 		return true, "manifestVersion " + mv + ": no " + render.TMMK8sRoutesEnv + " and the TMM sidecars reach the service network", nil
 	}
-	return false, "CNEInstance " + cne.GetName() + " has no " + render.TMMK8sRoutesEnv + " (expected " + expectedCIDR + "): once the Infra default route is programmed TMM loses dSSM and DNS and iRule requests reset", nil
+	return false, "CNEInstance " + cne.GetName() + " has no " + render.TMMK8sRoutesEnv + " (expected " + expectedCIDRs + "): once the Infra default route is programmed TMM loses dSSM and DNS and iRule requests reset", nil
 }
 
 func fixTMMK8sRoutes(ctx context.Context, d *HealDeps) (string, error) {
@@ -746,18 +763,10 @@ func fixTMMK8sRoutes(ctx context.Context, d *HealDeps) (string, error) {
 	if cne == nil {
 		return "", fmt.Errorf("no CNEInstance in %s", InstanceNamespace)
 	}
-	cidr := ""
-	if d.Cluster != nil && d.Cluster.Network.Main.SvcsCIDR != "" {
-		cidr = d.Cluster.Network.Main.SvcsCIDR
-	} else if d.State != nil {
-		cidr = d.State.Get(ServiceCIDRStateKey)
-	}
-	if cidr == "" {
-		cidr = "10.96.0.0/16"
-		if d.State != nil {
-			d.State.Set(ServiceCIDRStateKey, cidr)
-			_ = d.State.Save()
-		}
+	svcCIDR, fullRoutes := expectedTMMK8sRoutes(d)
+	if d.State != nil && d.State.Get(ServiceCIDRStateKey) == "" {
+		d.State.Set(ServiceCIDRStateKey, svcCIDR)
+		_ = d.State.Save()
 	}
 
 	env, _, _ := unstructured.NestedSlice(cne.Object, "spec", "advanced", "tmm", "env")
@@ -767,7 +776,7 @@ func fixTMMK8sRoutes(ctx context.Context, d *HealDeps) (string, error) {
 		m, ok := e.(map[string]any)
 		if ok && m["name"] == render.TMMK8sRoutesEnv {
 			if !found {
-				newEnv = append(newEnv, map[string]any{"name": render.TMMK8sRoutesEnv, "value": cidr})
+				newEnv = append(newEnv, map[string]any{"name": render.TMMK8sRoutesEnv, "value": fullRoutes})
 				found = true
 			}
 		} else {
@@ -775,14 +784,14 @@ func fixTMMK8sRoutes(ctx context.Context, d *HealDeps) (string, error) {
 		}
 	}
 	if !found {
-		newEnv = append(newEnv, map[string]any{"name": render.TMMK8sRoutesEnv, "value": cidr})
+		newEnv = append(newEnv, map[string]any{"name": render.TMMK8sRoutesEnv, "value": fullRoutes})
 	}
 
 	patch := fmt.Sprintf(`{"spec":{"advanced":{"tmm":{"env":%s}}}}`, mustJSON(newEnv))
 	if _, err := d.Clients.Dynamic.Resource(healCNEInstanceGVR).Namespace(InstanceNamespace).Patch(ctx, cne.GetName(), types.MergePatchType, []byte(patch), metav1.PatchOptions{FieldManager: "gkebnkctl-heal"}); err != nil {
 		return "", fmt.Errorf("patch CNEInstance %s: %w", cne.GetName(), err)
 	}
-	return render.TMMK8sRoutesEnv + "=" + cidr + " set on CNEInstance " + cne.GetName() + "; FLO rolls TMM", nil
+	return render.TMMK8sRoutesEnv + "=" + fullRoutes + " set on CNEInstance " + cne.GetName() + "; FLO rolls TMM", nil
 }
 
 func mustJSON(v any) string {

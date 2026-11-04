@@ -64,14 +64,9 @@ bnk:
   tmmMtu: "1460"
   jwtPath: ./license.jwt
   farSecret:
-    # "kubecontext": copy an existing far-secret from another cluster you
-    #   have kubectl access to (sourceContext + sourceNamespace).
-    # "dockerconfig": build far-secret from a local docker-config JSON
-    #   (dockerConfigFile: ./dockerconfig.json) — never commit that file.
     source: kubecontext
     sourceContext: some-other-cluster
     sourceNamespace: f5-cne-core
-    dockerConfigFile: ""
     namespaces: [f5-cne-core, f5-cne-system, f5-bnk-instance, f5-utils, default]
   aiGateway:
     enabled: true
@@ -91,7 +86,10 @@ forge:
   enabled: true
   url: http://localhost:8000
   mcpUrl: http://localhost:8081/mcp/
-  credentialTemplateId: 4
+  projectName: gkebnkctl-bnk-vertex-demo
+  projectType: cloud-gcp
+  cloudProvider: gcp
+  credentialTemplateId: 6
   username: admin
   password: admin123
 

@@ -15,6 +15,7 @@ package render
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"text/template"
@@ -59,6 +60,9 @@ type CNEInstanceVars struct {
 	ExtPCI          string
 	IntPCI          string
 	ImageRegistry   string
+	ServiceCIDR     string
+	PodCIDR         string
+	MainCIDR        string
 	Telemetry       bool
 	AIGateway       bool
 }
@@ -105,6 +109,19 @@ func RenderCNEInstance(tmpl []byte, v CNEInstanceVars) ([]byte, error) {
 	if isAIGatewayManifestVersion(v.ManifestVersion) {
 		v.AIGateway = true
 	}
+	if v.ServiceCIDR == "" {
+		v.ServiceCIDR = "10.67.0.0/20"
+	}
+	if v.PodCIDR == "" && !strings.Contains(v.ServiceCIDR, ",") {
+		v.PodCIDR = "10.66.0.0/16"
+	}
+	var routes []string
+	for _, cidr := range []string{v.ServiceCIDR, v.PodCIDR, v.MainCIDR} {
+		if trimmed := strings.TrimSpace(cidr); trimmed != "" {
+			routes = append(routes, trimmed)
+		}
+	}
+	v.ServiceCIDR = strings.Join(routes, ",")
 	return Render(tmpl, v)
 }
 
@@ -139,9 +156,15 @@ func RenderVlansRoutes(tmpl []byte, v VlansRoutesVars) ([]byte, error) {
 type InfraVars struct {
 	TmmMtu               string
 	ExtSelfIP            string
+	ExtSelfStart         string
+	ExtSelfEnd           string
 	IntSelfIP            string
+	IntSelfStart         string
+	IntSelfEnd           string
 	ExtGwIP              string
 	IntGwIP              string
+	AliasListenerStart   string
+	AliasListenerEnd     string
 	ListenerStart        string
 	ListenerEnd          string
 	VxlanPort            int
@@ -151,13 +174,52 @@ type InfraVars struct {
 	MainPodsPrefixLen    int
 	MainSvcsDest         string
 	MainSvcsPrefixLen    int
+	MainCidr             string
+	AgentExtIP           string
 	TmmPodGW             string
+}
+
+func offsetIPv4(ipStr string, delta int) string {
+	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	if ip == nil {
+		return ipStr
+	}
+	v4 := ip.To4()
+	if v4 == nil {
+		return ipStr
+	}
+	last := int(v4[3]) + delta
+	if last < 0 || last > 254 {
+		return ipStr
+	}
+	out := make(net.IP, len(v4))
+	copy(out, v4)
+	out[3] = byte(last)
+	return out.String()
 }
 
 // RenderInfra renders templates/infra.yaml.tmpl (Phase41 on BNK 2.4).
 func RenderInfra(tmpl []byte, v InfraVars) ([]byte, error) {
 	if v.TmmMtu == "" {
 		v.TmmMtu = "1460"
+	}
+	if v.ExtSelfStart == "" {
+		v.ExtSelfStart = v.ExtSelfIP
+	}
+	if v.ExtSelfEnd == "" && v.ExtSelfStart != "" {
+		v.ExtSelfEnd = offsetIPv4(v.ExtSelfStart, 2)
+	}
+	if v.IntSelfStart == "" {
+		v.IntSelfStart = v.IntSelfIP
+	}
+	if v.IntSelfEnd == "" && v.IntSelfStart != "" {
+		v.IntSelfEnd = offsetIPv4(v.IntSelfStart, 2)
+	}
+	if v.AliasListenerStart == "" && v.ExtSelfStart != "" {
+		v.AliasListenerStart = offsetIPv4(v.ExtSelfStart, 3)
+	}
+	if v.AliasListenerEnd == "" && v.ExtSelfStart != "" {
+		v.AliasListenerEnd = offsetIPv4(v.ExtSelfStart, 14)
 	}
 	if v.ListenerStart == "" {
 		v.ListenerStart = "10.30.0.100"
@@ -240,6 +302,8 @@ type AgentRouteSetterVars struct {
 	ExtPodsCidr   string
 	ExtGwIP       string
 	AgentExtIface string
+	MainPodsCidr  string
+	MainSvcsCidr  string
 }
 
 // RenderAgentRouteSetter renders templates/agent-route-setter.yaml.tmpl

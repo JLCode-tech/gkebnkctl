@@ -68,6 +68,7 @@ func Phase29ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		}
 		kubeconfigBytes = b
 	}
+	kubeconfigBytes = kubeconfig.MakePortable(ctx, kubeconfigBytes)
 
 	region := cl.Region
 	if region == "" && cl.Metadata.Zone != "" {

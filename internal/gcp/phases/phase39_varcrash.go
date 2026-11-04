@@ -68,18 +68,47 @@ func Phase39VarCrashPatches(ctx context.Context, cl *intent.Cluster, _ *state.St
 	}
 
 	for _, target := range varCrashTargets {
-		if err := waitForDeploymentExists(ctx, clients.K8s, target.Namespace, target.Deployment, varCrashDeployWait); err != nil {
+		ns, err := waitForDeploymentExistsAnyNS(ctx, clients.K8s, target.Namespace, target.Deployment, varCrashDeployWait)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "[phase 39] warn: %s did not appear in %s within %s (%v) — skipping its /var/crash patch; re-run up once FLO has created it\n",
 				target.Deployment, target.Namespace, varCrashDeployWait, err)
 			continue
 		}
-		if err := patchVarCrash(ctx, clients.K8s, target.Namespace, target.Deployment); err != nil {
-			return fmt.Errorf("phase39: %s/%s: %w", target.Namespace, target.Deployment, err)
+		if err := patchVarCrash(ctx, clients.K8s, ns, target.Deployment); err != nil {
+			return fmt.Errorf("phase39: %s/%s: %w", ns, target.Deployment, err)
 		}
 	}
 
 	fmt.Fprintln(os.Stderr, "[phase 39] var-crash patches OK")
 	return nil
+}
+
+func waitForDeploymentExistsAnyNS(ctx context.Context, client kubernetes.Interface, primaryNS, name string, timeout time.Duration) (string, error) {
+	candidates := []string{primaryNS}
+	if primaryNS == "f5-utils" {
+		candidates = append(candidates, "f5-cne-core", "f5-cne-system")
+	}
+	var foundNS string
+	err := gcp.PollUntil(ctx, 3*time.Second, timeout, func(ctx context.Context) (bool, error) {
+		for _, ns := range candidates {
+			_, err := client.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+			if err == nil {
+				foundNS = ns
+				return true, nil
+			}
+			if !k8serrors.IsNotFound(err) {
+				return false, fmt.Errorf("getting deployment %s/%s: %w", ns, name, err)
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", fmt.Errorf("timed out after %s waiting for deployment %s/%s to be created", timeout, primaryNS, name)
+		}
+		return "", err
+	}
+	return foundNS, nil
 }
 
 // patchVarCrash implements the per-Deployment patch logic. Never returns an

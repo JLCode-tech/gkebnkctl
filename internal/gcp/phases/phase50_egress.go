@@ -115,6 +115,9 @@ func applyEgress(ctx context.Context, clients *gcp.Clients, cl *intent.Cluster, 
 		}
 		gwcName := cl.Metadata.Name + "-gatewayclass"
 		networkRef := render.InfraTunnelNetwork(cl.Network.Internal.CIDR != "")
+		if cl.Pattern == intent.PatternHostDevice {
+			networkRef = render.InfraExtNetwork
+		}
 		rendered, err = render.RenderEgressGateway(tmplBytes, render.EgressGatewayVars{
 			TestNamespace:    cl.Egress.TestNamespace,
 			GatewayClassName: gwcName,
@@ -144,6 +147,8 @@ func applyAgentRouteSetter(ctx context.Context, clients *gcp.Clients, cl *intent
 		ExtPodsCidr:   cl.Network.External.PodsCIDR,
 		ExtGwIP:       cl.ExtGwIP,
 		AgentExtIface: getAgentExtIface(st),
+		MainPodsCidr:  cl.Network.Main.PodsCIDR,
+		MainSvcsCidr:  cl.Network.Main.SvcsCIDR,
 	})
 	if err != nil {
 		return fmt.Errorf("phase50: rendering agent-route-setter: %w", err)
